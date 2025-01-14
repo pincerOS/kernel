@@ -1,0 +1,8 @@
+
+[build]
+target = "aarch64-unknown-none-softfloat"
+
+# [unstable]
+# unstable-options = true
+# build-std = ["std", "panic_abort"]
+# build-std-features = ["panic_immediate_abort"]

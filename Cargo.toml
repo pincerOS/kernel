@@ -1,0 +1,20 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "kernel"
+path = "src/main.rs"
+
+[dependencies]
+bytemuck = { version = "1.19.0", default-features = false }
+
+[profile.release]
+opt-level = 2
+strip = false
+incremental = false
+debug = 2
+
+[profile.dev]
+incremental = false

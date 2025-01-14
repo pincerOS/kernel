@@ -1,0 +1,4 @@
+/target
+kernel.bin
+*.dtb
+.gdb_history
