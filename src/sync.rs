@@ -294,3 +294,104 @@ pub fn spin_sleep_until(target: usize) {
         }
     }
 }
+
+pub struct CondVar {
+    queue: crate::thread::ThreadQueue,
+}
+
+impl CondVar {
+    pub const fn new() -> Self {
+        Self {
+            queue: crate::thread::ThreadQueue::new(),
+        }
+    }
+    pub fn notify_one(&self) {
+        if let Some(t) = self.queue.pop() {
+            crate::thread::SCHEDULER.add_task(t);
+        }
+    }
+    pub fn notify_all(&self) {
+        crate::thread::SCHEDULER.add_all(&self.queue);
+    }
+    pub fn wait<'a, T>(&self, guard: SpinLockGuard<'a, T>) -> SpinLockGuard<'a, T> {
+        let lock = guard.lock;
+        core::mem::forget(guard);
+        crate::thread::context_switch(crate::thread::SwitchAction::QueueAddUnlock(
+            &self.queue,
+            &lock.inner,
+        ));
+        lock.lock()
+    }
+    pub fn wait_while<'a, T, F>(
+        &self,
+        mut guard: SpinLockGuard<'a, T>,
+        mut condition: F,
+    ) -> SpinLockGuard<'a, T>
+    where
+        F: FnMut(&mut T) -> bool,
+    {
+        while condition(&mut *guard) {
+            guard = self.wait(guard);
+        }
+        guard
+    }
+}
+
+pub struct Barrier {
+    count: SpinLock<u32>,
+    condvar: CondVar,
+}
+impl Barrier {
+    pub const fn new(val: u32) -> Self {
+        Self {
+            count: SpinLock::new(val),
+            condvar: CondVar::new(),
+        }
+    }
+    pub fn sync(&self) {
+        let mut guard = self.count.lock();
+        assert!(*guard > 0);
+        *guard -= 1;
+        if *guard == 0 {
+            self.condvar.notify_all();
+        } else {
+            self.condvar.wait_while(guard, |count| *count > 0);
+        }
+    }
+}
+
+pub struct BlockingLockInner {
+    lock: SpinLock<bool>,
+    condvar: CondVar,
+}
+impl BlockingLockInner {
+    pub const fn new() -> Self {
+        Self {
+            lock: SpinLock::new(false),
+            condvar: CondVar::new(),
+        }
+    }
+    pub fn lock(&self) {
+        let guard = self.lock.lock();
+        self.condvar
+            .wait_while(guard, |locked| core::mem::replace(locked, true));
+    }
+    pub fn unlock(&self) {
+        let mut guard = self.lock.lock();
+        assert!(*guard);
+        *guard = false;
+    }
+}
+
+impl LockImpl for BlockingLockInner {
+    const DEFAULT: Self = Self::new();
+    fn lock(&self) {
+        self.lock()
+    }
+    fn unlock(&self) {
+        self.unlock()
+    }
+}
+
+pub type BlockingLock<T> = Lock<T, BlockingLockInner>;
+pub type BlockingLockGuard<'a, T> = LockGuard<'a, T, BlockingLockInner>;

@@ -1,5 +1,6 @@
 use core::arch::global_asm;
 
+use crate::thread::Context;
 use crate::{halt, uart};
 
 // TODO:
@@ -54,32 +55,6 @@ global_asm!(
     b restore_context
 .endm
 
-.global restore_context
-restore_context:
-    ldp x1, x2, [x0, #0x100]
-    msr ELR_EL1, x1
-    msr SPSR_EL1, x2
-
-    ldp x2, x3, [x0, #0x10]
-    ldp x4, x5, [x0, #0x20]
-    ldp x6, x7, [x0, #0x30]
-    ldp x8, x9, [x0, #0x40]
-    ldp x10, x11, [x0, #0x50]
-    ldp x12, x13, [x0, #0x60]
-    ldp x14, x15, [x0, #0x70]
-    ldp x16, x17, [x0, #0x80]
-    ldp x18, x19, [x0, #0x90]
-    ldp x20, x21, [x0, #0xA0]
-    ldp x22, x23, [x0, #0xB0]
-    ldp x24, x25, [x0, #0xC0]
-    ldp x26, x27, [x0, #0xD0]
-    ldp x28, x29, [x0, #0xE0]
-    ldp x30, x1, [x0, #0xF0]
-    mov sp, x1
-
-    ldp x0, x1, [x0, #0x00]
-
-    eret
 
 .section .text.exception_vector
 .global __exception_vector_start
@@ -175,12 +150,12 @@ static EXCEPTION_CLASS: [&str; 64] = {
 
 #[no_mangle]
 unsafe extern "C" fn exception_handler_example(
-    _ctx: u64,
+    _ctx: &mut Context,
     elr: u64,
     spsr: u64,
     esr: u64,
     arg: u64,
-) -> u64 {
+) -> *mut Context {
     let exception_class = esr >> 26;
     let class_name = *EXCEPTION_CLASS
         .get(exception_class as usize)
@@ -198,11 +173,11 @@ unsafe extern "C" fn exception_handler_example(
 
 #[no_mangle]
 unsafe extern "C" fn exception_handler_unhandled(
-    _ctx: u64,
+    _ctx: &mut Context,
     _elr: u64,
     _spsr: u64,
     _esr: u64,
     _arg: u64,
-) -> u64 {
+) -> *mut Context {
     halt();
 }

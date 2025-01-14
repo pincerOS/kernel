@@ -14,6 +14,7 @@ mod exceptions;
 mod heap;
 mod runtime;
 mod sync;
+mod thread;
 
 use device::uart;
 use sync::SpinLock;
@@ -32,7 +33,7 @@ static START_BARRIER: core::sync::atomic::AtomicUsize = core::sync::atomic::Atom
 
 #[no_mangle]
 pub unsafe extern "C" fn kernel_entry_rust(_x0: u32, _x1: u64, _x2: u64, _x3: u64) -> ! {
-    let _id = core_id() & 3;
+    let id = core_id() & 3;
 
     // TODO: find a proper free region to use as the heap
     // TODO: proper heap allocator, proper heap end bounds
@@ -46,6 +47,10 @@ pub unsafe extern "C" fn kernel_entry_rust(_x0: u32, _x1: u64, _x2: u64, _x3: u6
     // TODO: parse device tree and initialize kernel devices
     // (use the device tree to discover the proper driver and base
     // address of UART, watchdog)
+
+    thread::CORES.init();
+
+    println!("| initialized per-core data");
 
     println!("| starting other cores...");
     // Start other cores; the bootloader has them waiting in a WFE loop,
@@ -61,13 +66,20 @@ pub unsafe extern "C" fn kernel_entry_rust(_x0: u32, _x1: u64, _x2: u64, _x3: u6
         asm!("sev");
     }
 
+    println!("| creating initial thread");
+
+    thread::thread(move || {
+        kernel_main();
+        shutdown();
+    });
+
     START_BARRIER.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
     while START_BARRIER.load(core::sync::atomic::Ordering::SeqCst) < 4 {
         unsafe { asm!("yield") }
     }
 
-    kernel_main();
-    shutdown();
+    println!("| running threads on core {id}");
+    unsafe { thread::SCHEDULER.run_on_core() }
 }
 
 extern "C" {
@@ -86,7 +98,8 @@ pub unsafe extern "C" fn kernel_entry_rust_alt(_x0: u32, _x1: u64, _x2: u64, _x3
         unsafe { asm!("yield") }
     }
 
-    halt();
+    println!("| running threads on core {id}");
+    unsafe { thread::SCHEDULER.run_on_core() }
 }
 
 fn kernel_main() {
@@ -95,5 +108,6 @@ fn kernel_main() {
 
 fn shutdown() -> ! {
     println!("| shutting down");
+
     halt();
 }
