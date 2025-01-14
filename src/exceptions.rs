@@ -76,7 +76,7 @@ __exception_vector_start:
 .org 0x200
     save_context exception_handler_example, 4
 .org 0x280
-    save_context exception_handler_unhandled, 5
+    save_context exception_handler_irq, 5
 .org 0x300
     save_context exception_handler_unhandled, 6
 .org 0x380
@@ -150,7 +150,7 @@ static EXCEPTION_CLASS: [&str; 64] = {
 
 #[no_mangle]
 unsafe extern "C" fn exception_handler_example(
-    _ctx: &mut Context,
+    ctx: &mut Context,
     elr: u64,
     spsr: u64,
     esr: u64,
@@ -167,7 +167,51 @@ unsafe extern "C" fn exception_handler_example(
     }
 
     match exception_class {
+        0x15 => {
+            // supervisor call
+            let arg = esr & 0xFFFF;
+            println!("Got syscall with number: {arg:#x}");
+            match arg {
+                1 => {
+                    ctx.regs[0] = ctx.regs[0] * ctx.regs[1];
+                    return ctx;
+                }
+                _ => {
+                    println!("Unknown syscall number {arg:#x}");
+                    halt()
+                }
+            }
+        }
         _ => halt(),
+    }
+}
+
+#[no_mangle]
+unsafe extern "C" fn exception_handler_irq(
+    ctx: &mut Context,
+    _elr: u64,
+    _spsr: u64,
+    _esr: u64,
+    _arg: u64,
+) -> *mut Context {
+    let mut irq = crate::IRQ_CONTROLLER.get().lock();
+    let _source = irq.irq_source();
+    // source is 2048 for local timer interrupt
+
+    irq.timer_reload();
+    drop(irq);
+
+    // println!("Source: {}", source);
+    // println!("time {:?}", crate::sync::get_time());
+
+    let mut action = crate::thread::SwitchAction::Yield;
+    let core = crate::thread::CORES.current();
+    let helper_sp = core.helper_sp.get();
+    if let Some(mut thread) = core.thread.take() {
+        thread.last_context = ctx.into();
+        unsafe { crate::thread::switch_to_helper(Some(thread), Some(&mut action), helper_sp) };
+    } else {
+        return ctx;
     }
 }
 
