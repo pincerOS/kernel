@@ -10,13 +10,13 @@ use core::arch::{asm, global_asm};
 mod device;
 
 mod boot;
-mod dtb;
 mod exceptions;
 mod heap;
 mod runtime;
 mod sync;
 mod thread;
 
+use device::uart::UART;
 use device::{mailbox, timer, uart, watchdog};
 use sync::{InterruptSpinLock, SpinLock, UnsafeInit};
 
@@ -60,7 +60,7 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     println!("| last reset: {:#08x}", WATCHDOG.get().lock().last_reset());
 
     let device_tree =
-        unsafe { dtb::load_device_tree(x0 as *const u64) }.expect("Error parsing device tree");
+        unsafe { device_tree::load_device_tree(x0 as *const u64) }.expect("Error parsing device tree");
 
     // TODO: parse device tree and initialize kernel devices
     // (use the device tree to discover the proper driver and base
@@ -125,7 +125,7 @@ extern "C" {
 }
 global_asm!("example_syscall: svc #1; ret");
 
-fn kernel_main(device_tree: dtb::DeviceTree) {
+fn kernel_main(device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
 
     let (a, b) = (5, 7);
@@ -141,7 +141,7 @@ fn kernel_main(device_tree: dtb::DeviceTree) {
         );
     }
 
-    // dtb::debug_device_tree(device_tree).unwrap();
+    device_tree::debug_device_tree(device_tree, &mut UART.get()).unwrap();
 
     // TODO: find mailbox address via device tree
     let mailbox_base = 0x3f00b880 as *mut ();

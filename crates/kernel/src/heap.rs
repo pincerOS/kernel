@@ -32,6 +32,8 @@ unsafe impl GlobalAlloc for BumpAllocator {
         let align = layout.align();
 
         let base = self.base.load(Ordering::Relaxed).cast::<u8>();
+        assert!(!base.is_null());
+
         let mut cur = self.offset.load(Ordering::Relaxed);
 
         let start = loop {
