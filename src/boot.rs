@@ -28,6 +28,7 @@ global_asm!(
 
     // Called from armstub8.S:
     // https://github.com/raspberrypi/tools/blob/439b6198a9b340de5998dd14a26a0d9d38a6bcac/armstubs/armstub8.S#L92
+    // See also: Linux's init code... https://github.com/raspberrypi/linux/blob/dfff38316c1284c30c68d02cc424bad0562cf253/arch/arm64/kernel/head.S
 .global kernel_entry
 kernel_entry:
     // Check core id, halt if non-zero
@@ -70,6 +71,11 @@ kernel_entry_alt:
     // ...with ELR 0x8005c
     // ...to EL1 PC 0x80a00 PSTATE 0x3c5
 drop_to_el1:
+
+    mov x5, #(1 << 31)
+    // orr x5, x5, #0x38
+    msr hcr_el2, x5
+
     mov x5, #0b0101
     msr ELR_EL2, lr
     msr SPSR_EL2, x5
