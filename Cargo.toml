@@ -1,14 +1,8 @@
-[package]
-name = "kernel"
-version = "0.1.0"
-edition = "2021"
-
-[[bin]]
-name = "kernel"
-path = "src/main.rs"
-
-[dependencies]
-bytemuck = { version = "1.19.0", default-features = false }
+[workspace]
+resolver = "2"
+members = [
+    "crates/kernel",
+]
 
 [profile.release]
 opt-level = 2

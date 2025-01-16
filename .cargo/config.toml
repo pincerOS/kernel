@@ -1,6 +1,6 @@
 
 [build]
-target = "aarch64-unknown-none-softfloat"
+# target = "aarch64-unknown-none-softfloat"
 
 # [unstable]
 # unstable-options = true
