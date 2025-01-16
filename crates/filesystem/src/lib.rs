@@ -33,11 +33,16 @@ pub trait BlockDevice {
     fn read_sectors(
         &mut self,
         start_index: u64,
-        sectors: u32,
-        buffer: &mut [u8; SECTOR_SIZE],
+        sectors: usize,
+        buffer: &mut [u8],
     ) -> Result<(), BlockDeviceError> {
+        let mut tmp_buf: [u8; 512] = [0; 512];
         for i in 0..sectors {
-            self.read_sector(index, buffer)
+            let cur_sector = start_index + (i as u64);
+            self.read_sector(cur_sector, &mut tmp_buf)?;
+            for j in 0..SECTOR_SIZE {
+                buffer[(i*SECTOR_SIZE)+j] = tmp_buf[j];
+            }
         }
         Ok(())
     }
@@ -52,14 +57,18 @@ impl<D> Ext2<D>
 where
     D: BlockDevice,
 {
-    pub fn new(device: D) -> Self {
+    pub fn new(mut device: D) -> Self {
         // TODO: init logic here
-        let buffer: [u]
-        superblock = device::read_sector(1, )
+        let mut buffer: [u8; 1024] = [0; 1024];
+        // todo: error-handling
+        device.read_sectors(1, 2, &mut buffer);
+        let superblock: Superblock = unsafe { std::mem::transmute::<[u8; 1024], Superblock>(buffer) };
 
-        Self { device }
+        Self { device, superblock }
+    }
 
-        
+    pub fn get_block_size(&mut self) -> u32 {
+        1024 << self.superblock.s_log_block_size
     }
 
     // TODO: more methods
