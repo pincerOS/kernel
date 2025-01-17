@@ -58,9 +58,8 @@ where
     D: BlockDevice,
 {
     pub fn new(mut device: D) -> Self {
-        // TODO: init logic here
         let mut buffer: [u8; 1024] = [0; 1024];
-        // todo: error-handling
+        // todo: error-handling device.read_sectors
         device.read_sectors(1, 2, &mut buffer);
         let superblock: Superblock = unsafe { std::mem::transmute::<[u8; 1024], Superblock>(buffer) };
 
@@ -71,7 +70,9 @@ where
         1024 << self.superblock.s_log_block_size
     }
 
-    // TODO: more methods
+    pub fn get_inode_size(&mut self) -> u32 {
+        self.superblock.s_inode_size
+    }
 
     //pub fn find(dir: )
 }

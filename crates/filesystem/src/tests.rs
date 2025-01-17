@@ -11,4 +11,5 @@ fn example_1() {
     let mut ext2 = Ext2::new(disk);
 
     assert_eq!(ext2.get_block_size(), 1024);
+    assert_eq!(ext2.get_inode_size(), 128);
 }
