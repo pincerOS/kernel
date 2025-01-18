@@ -9,7 +9,7 @@
  * Copyright (c) 2018-2022 Andre Richter <andre.o.richter@gmail.com>
  */
 
-PAGE_SIZE = 64K;
+PAGE_SIZE = 16K;
 
 __rpi_phys_dram_start_addr = 0x00000;
 
