@@ -1,15 +1,7 @@
 use alloc::collections::VecDeque;
-use core::arch::asm;
 
+use crate::arch::{sev, wfe};
 use crate::sync::InterruptSpinLock;
-
-// armv8 a-profile reference: G1.19.1 Wait For Event and Send Event
-unsafe fn wfe() {
-    unsafe { asm!("wfe") };
-}
-unsafe fn sev() {
-    unsafe { asm!("sev") };
-}
 
 pub struct Scheduler<E> {
     queue: Queue<E>,

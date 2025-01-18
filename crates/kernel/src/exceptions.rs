@@ -1,7 +1,8 @@
 use core::arch::{asm, global_asm};
 
+use crate::arch::halt;
 use crate::context::Context;
-use crate::{halt, uart};
+use crate::uart;
 
 // TODO:
 // - Save FAR_EL1 for instruction abort/data aborts (faulting addr)
@@ -59,7 +60,7 @@ global_asm!(
 .section .text.exception_vector
 .global __exception_vector_start
 
-.align 11
+.balign 2048
 __exception_vector_start:
 
 // Current exception level, SP_EL0
@@ -208,7 +209,7 @@ unsafe extern "C" fn exception_handler_irq(
     _arg: u64,
 ) -> *mut Context {
     let mut irq = crate::device::IRQ_CONTROLLER.get().lock();
-    let core = crate::core_id() & 0b11;
+    let core = crate::arch::core_id() & 0b11;
     let _source = unsafe { irq.irq_source(core) };
     // source is 2048 for local timer interrupt
 

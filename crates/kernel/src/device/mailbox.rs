@@ -129,7 +129,7 @@ impl VideoCoreMailbox {
 
         unsafe {
             while (status_reg.read() & Self::STATUS_FULL) != 0 {
-                core::arch::asm!("wfe");
+                crate::arch::wfe();
             }
         }
 
@@ -162,7 +162,7 @@ impl VideoCoreMailbox {
         loop {
             unsafe {
                 while (status_reg.read() & Self::STATUS_EMPTY) != 0 {
-                    core::arch::asm!("wfe");
+                    crate::arch::wfe();
                 }
             }
 
@@ -355,6 +355,7 @@ pub struct Surface {
     pitch_elems: usize,
 }
 
+#[cfg(target_arch = "aarch64")]
 fn memcpy128(dst: &mut [u128], src: &[u128]) {
     let len = dst.len();
     assert_eq!(len, src.len());
@@ -381,6 +382,11 @@ fn memcpy128(dst: &mut [u128], src: &[u128]) {
         tmp1 = out(reg) _, tmp2 = out(reg) _,
         )
     }
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+fn memcpy128(dst: &mut [u128], src: &[u128]) {
+    dst.copy_from_slice(src)
 }
 
 impl Surface {

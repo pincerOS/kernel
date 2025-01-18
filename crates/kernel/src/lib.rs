@@ -7,7 +7,7 @@ extern crate alloc;
 #[macro_use]
 pub mod device;
 
-pub mod boot;
+pub mod arch;
 pub mod context;
 pub mod event;
 pub mod exceptions;
@@ -22,7 +22,6 @@ pub mod thread;
 use device::uart;
 use sync::SpinLock;
 
-use core::arch::{asm, global_asm};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 static INIT_BARRIER: AtomicUsize = AtomicUsize::new(0);
@@ -67,7 +66,7 @@ pub fn enable_other_cpus(tree: &device_tree::DeviceTree<'_>, start_fn: unsafe ex
                 let start = unsafe { memory::map_physical(release_addr, 8).cast::<u64>() };
                 let physical_start = memory::physical_addr(start_fn as usize).unwrap();
                 unsafe { core::ptr::write_volatile(start.as_ptr(), physical_start) };
-                unsafe { asm!("sev") };
+                unsafe { arch::sev() };
             }
             _ => println!("| Could not wake cpu {:?}", name),
         }
@@ -76,10 +75,8 @@ pub fn enable_other_cpus(tree: &device_tree::DeviceTree<'_>, start_fn: unsafe ex
 
 #[no_mangle]
 pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64, x4: u32) -> ! {
-    unsafe {
-        memory::init();
-    }
-    let id = core_id() & 3;
+    unsafe { memory::init() };
+    let id = arch::core_id() & 3;
 
     // TODO: proper heap allocator, and physical memory allocation for heap space
     let heap_base = 0xFFFF_FFFF_FE20_0000 as *mut ();
@@ -96,11 +93,11 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     println!("| initialized per-core data");
 
     println!("| starting other cores...");
-    enable_other_cpus(&device_tree, boot::kernel_entry_alt);
+    enable_other_cpus(&device_tree, arch::boot::kernel_entry_alt);
 
     INIT_BARRIER.fetch_add(1, Ordering::SeqCst);
     while INIT_BARRIER.load(Ordering::SeqCst) < 4 {
-        unsafe { asm!("yield") }
+        unsafe { arch::yield_() };
     }
 
     if FLAG_PREEMPTION {
@@ -120,7 +117,7 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
 
     START_BARRIER.fetch_add(1, Ordering::SeqCst);
     while START_BARRIER.load(Ordering::SeqCst) < 4 {
-        unsafe { asm!("yield") }
+        unsafe { arch::yield_() };
     }
 
     println!("| running event loop on core {id}");
@@ -129,18 +126,18 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
 
 #[no_mangle]
 pub unsafe extern "C" fn kernel_entry_rust_alt(_x0: u32, _x1: u64, _x2: u64, _x3: u64) -> ! {
-    let id = core_id() & 3;
-    let sp = unsafe { get_sp() };
+    let id = arch::core_id() & 3;
+    let sp = arch::debug_get_sp();
     println!("| starting core {id}, initial sp {:#x}", sp);
 
     INIT_BARRIER.fetch_add(1, Ordering::SeqCst);
     START_BARRIER.fetch_add(1, Ordering::SeqCst);
     while START_BARRIER.load(Ordering::SeqCst) < 4 {
-        unsafe { asm!("yield") }
+        unsafe { arch::yield_() };
     }
 
     if !FLAG_MULTICORE {
-        halt();
+        arch::halt();
     }
 
     println!("| running event loop on core {id}");
@@ -154,20 +151,5 @@ pub fn shutdown() -> ! {
     unsafe { watchdog.reset(63) };
     drop(watchdog);
 
-    halt();
-}
-
-extern "C" {
-    fn get_sp() -> usize;
-}
-global_asm!("get_sp: mov x0, sp; ret");
-
-pub fn halt() -> ! {
-    unsafe { asm!("1: wfe; b 1b", options(noreturn)) }
-}
-
-pub fn core_id() -> u32 {
-    let id: u64;
-    unsafe { asm!("mrs {id}, mpidr_el1", id = out(reg) id) };
-    id as u32
+    arch::halt();
 }

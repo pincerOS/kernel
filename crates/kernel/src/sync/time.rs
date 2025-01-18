@@ -1,15 +1,5 @@
-use core::arch::asm;
+use crate::arch::{get_freq_ticks, get_time_ticks, yield_};
 
-fn get_time_ticks() -> usize {
-    let time;
-    unsafe { asm!("mrs {time}, cntpct_el0", time = out(reg) time) };
-    time
-}
-fn get_freq_ticks() -> usize {
-    let freq;
-    unsafe { asm!("mrs {freq}, cntfrq_el0", freq = out(reg) freq) };
-    freq
-}
 fn convert_time_to_ticks(μs: usize) -> usize {
     (get_freq_ticks() / 250_000) * μs / 4
 }
@@ -31,8 +21,6 @@ pub fn spin_sleep_until(target: usize) {
     let target = convert_time_to_ticks(target);
     while get_time_ticks() < target {
         // TODO: yield vs wfe/wfi?
-        unsafe {
-            asm!("yield");
-        }
+        unsafe { yield_() };
     }
 }

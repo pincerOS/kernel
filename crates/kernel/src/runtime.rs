@@ -1,7 +1,8 @@
 use core::panic::PanicInfo;
 use core::sync::atomic;
 
-use crate::{halt, uart};
+use crate::arch::halt;
+use crate::uart;
 
 #[panic_handler]
 fn panic_handler(info: &PanicInfo) -> ! {

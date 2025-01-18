@@ -2,9 +2,10 @@ pub mod barrier;
 pub mod blocking_lock;
 pub mod condvar;
 pub mod init;
-pub mod interrupts;
 pub mod lock;
 pub mod time;
+
+pub use crate::arch::interrupts;
 
 pub use barrier::Barrier;
 pub use blocking_lock::{BlockingLock, BlockingLockGuard};

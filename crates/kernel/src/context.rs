@@ -31,7 +31,7 @@ impl AllCores {
     /// Safety: Must only be called once, before any other accesses.
     pub unsafe fn init(&self) {
         for i in 0..4 {
-            let stack = &crate::boot::STACKS[i];
+            let stack = &crate::arch::boot::STACKS[i];
             self.0[i].core_sp.set(stack.as_ptr_range().end as usize);
         }
     }
@@ -41,7 +41,7 @@ impl AllCores {
         F: FnOnce(&CoreInfo) -> T,
     {
         let state = unsafe { disable_interrupts() };
-        let core_id = crate::core_id() & 0b11;
+        let core_id = crate::arch::core_id() & 0b11;
         let res = f(&self.0[core_id as usize]);
         unsafe { restore_interrupts(state) };
         res
