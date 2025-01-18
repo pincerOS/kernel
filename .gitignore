@@ -2,3 +2,5 @@
 kernel.bin
 .gdb_history
 *.img
+.idea
+.vs

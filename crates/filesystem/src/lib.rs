@@ -5,6 +5,8 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+use std::prelude::v1::Vec;
+
 #[cfg(test)]
 mod tests;
 
@@ -51,19 +53,86 @@ pub trait BlockDevice {
 pub struct Ext2<Device> {
     device: Device,
     superblock: Superblock,
+    block_group_descriptor_tables: Vec<BGD>,
+    root_inode: INode
 }
 
 impl<D> Ext2<D>
 where
     D: BlockDevice,
 {
+    fn read_logical_block(device: &mut D, logical_block_start: usize, logical_block_length: usize,
+                          buffer: &mut [u8]) {
+        assert!(logical_block_length > 0);
+
+        let start_sector_numerator: usize = logical_block_start * BLOCK_SIZE;
+        let start_sector: usize = start_sector_numerator / SECTOR_SIZE;
+        let sectors: usize = (logical_block_length * BLOCK_SIZE) / SECTOR_SIZE;
+
+        device.read_sectors(start_sector as u64, sectors, buffer);
+    }
+
+    fn get_inode(device: &mut D, superblock: &Superblock, block_group_descriptor_tables: &Vec<BGD>,
+                 inode: usize) -> INode {
+        let inode_size = superblock.s_inode_size as usize;
+
+        let block_group_number = (inode - 1) / superblock.s_inodes_per_group as usize;
+        let inode_table_block =
+            block_group_descriptor_tables[block_group_number].bg_inode_table as usize;
+
+        let inode_table_index: usize = (inode - 1) % (superblock.s_inodes_per_group as usize);
+        let inode_table_block_with_offset: usize =
+            ((inode_table_index * inode_size) / BLOCK_SIZE) + inode_table_block;
+
+        let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+
+        Self::read_logical_block(device, inode_table_block_with_offset, 1,
+                                 &mut block_buffer);
+
+        let inodes_per_block: usize = BLOCK_SIZE / inode_size;
+        let inode_rel_index: usize = inode_table_index % inodes_per_block;
+        let block_buffer_offset: usize = inode_rel_index * inode_size;
+
+        let mut inode_data: [u8; size_of::<INode>()] = [0x00; size_of::<INode>()];
+
+        inode_data.copy_from_slice(&block_buffer[0..size_of::<INode>()]);
+
+        let inode: INode =
+            unsafe {std::mem::transmute::<[u8;size_of::<INode>()], INode>(inode_data)};
+
+        inode
+    }
+
     pub fn new(mut device: D) -> Self {
         let mut buffer: [u8; 1024] = [0; 1024];
         // todo: error-handling device.read_sectors
         device.read_sectors(1, 2, &mut buffer);
         let superblock: Superblock = unsafe { std::mem::transmute::<[u8; 1024], Superblock>(buffer) };
 
-        Self { device, superblock }
+        let mut block_group_descriptor_tables: Vec<BGD> = Vec::new();
+        let descriptor_table_ptr: *mut BGD = block_group_descriptor_tables.as_mut_ptr();
+
+        let block_group_descriptor_block: usize = if BLOCK_SIZE == 1024 {2} else {1};
+        let block_group_descriptor_length: usize =
+            1 + (((superblock.get_num_of_block_groups() as usize) * size_of::<BGD>()) / BLOCK_SIZE);
+
+        block_group_descriptor_tables.reserve(block_group_descriptor_length);
+
+        unsafe {
+            let byte_slice: &mut[u8] =
+                std::slice::from_raw_parts_mut(descriptor_table_ptr as *mut u8,
+                                                block_group_descriptor_length * BLOCK_SIZE);
+
+            Self::read_logical_block(&mut device, block_group_descriptor_block,
+                                     block_group_descriptor_length, byte_slice);
+
+            block_group_descriptor_tables.set_len(superblock.get_num_of_block_groups() as usize);
+        }
+
+        let root_inode: INode =
+            Self::get_inode(&mut device, &superblock, &block_group_descriptor_tables, 1);
+
+        Self { device, superblock, block_group_descriptor_tables, root_inode }
     }
 
     pub fn get_block_size(&mut self) -> u32 {
@@ -71,7 +140,7 @@ where
     }
 
     pub fn get_inode_size(&mut self) -> u32 {
-        self.superblock.s_inode_size
+        self.superblock.s_inode_size as u32
     }
 
     //pub fn find(dir: )
@@ -143,6 +212,12 @@ pub struct Superblock {
     s_default_mount_options: u32,
     s_first_meta_bg: u32,
     unused_alignment_3: [u8;760],
+}
+
+impl Superblock {
+    fn get_num_of_block_groups(&self) -> u32 {
+        self.s_inodes_count / self.s_inodes_per_group
+    }
 }
 
 pub mod s_state {
