@@ -1,3 +1,4 @@
+use crate::memory::{INIT_TCR_EL1, INIT_TRANSLATION};
 use core::arch::global_asm;
 
 #[allow(unused)]
@@ -44,6 +45,17 @@ kernel_entry:
     cmp x5, x6
     b.ne 1b
 
+
+    // set kernel 2mb mapping
+    adr x5, kernel_entry
+    bfc x5, 0, 21 // clears low bits to mask entry to 2MB page boundary
+    ldr x6, ={TRANSLATION_ENTRY}
+    orr x5, x5, x6 // apply rounded physical address to the translation entry
+    adr x6, KERNEL_TRANSLATION_TABLE
+    str x5, [x6]
+
+    ldr w4, [x0, 4] // load size of DTB (as big-endian u32) into register for memory mapping in rust code
+
     bl drop_to_el1
 
     adrl x5, __exception_vector_start
@@ -75,10 +87,20 @@ drop_to_el1:
     mov x5, #(1 << 31)
     // orr x5, x5, #0x38
     msr hcr_el2, x5
-
+    ldr x5, ={SCTLR_EL1}
+    msr SCTLR_EL1, x5
+    ldr x5, ={TCR_EL1}
+    msr TCR_EL1, x5
+    adr x5, KERNEL_TRANSLATION_TABLE
+    msr TTBR1_EL1, x5
     mov x5, #0b0101
-    msr ELR_EL2, lr
     msr SPSR_EL2, x5
+    ldr x5, =0xFFFFFFFFFE000000 // TODO: slightly cleaner way of encoding this?
+    orr lr, lr, x5
+    msr ELR_EL2, lr
+    ldr x5, =0b0000000011111111 // Entry 0 is normal memory, entry 1 is device memory
+    msr MAIR_EL1, x5
+    isb
     eret
 
 init_core_sp:
@@ -97,5 +119,15 @@ halt:
 1:  wfe
     b 1b
 ",
-    STACK_SIZE_LOG2 = const STACK_SIZE_LOG2
+    STACK_SIZE_LOG2 = const STACK_SIZE_LOG2,
+    TCR_EL1 = const INIT_TCR_EL1,
+    TRANSLATION_ENTRY = const INIT_TRANSLATION,
+    SCTLR_EL1 = const (
+        (1 << 11) | // enable instruction caching
+        (1 << 4) | // enable EL0 stack pointer alignment
+        (1 << 3) | // enable EL1 stack pointer alignment
+        (1 << 2) | // enable data caching
+        (1 << 1) | // enable alignment faults
+        1           // enable EL1&0 virtual memory
+    )
 );

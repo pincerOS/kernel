@@ -15,7 +15,7 @@ __rpi_phys_dram_start_addr = 0x00000;
 
 # The base address at which the Raspberry pi bootloader loads the
 # kernel into physical memory.
-__rpi_phys_binary_start_addr = 0x80000;
+__rpi_phys_binary_start_addr = 0xFFFFFFFFFE080000;
 
 ENTRY(__rpi_phys_binary_start_addr)
 
@@ -34,8 +34,6 @@ PHDRS {
 }
 
 SECTIONS {
-    . = __rpi_phys_dram_start_addr;
-
     . = __rpi_phys_binary_start_addr;
     __code_start = .;
     .text : {

@@ -1,3 +1,4 @@
 /target
 kernel.bin
 .gdb_history
+.vscode

@@ -23,8 +23,5 @@ fn panic_handler(info: &PanicInfo) -> ! {
         );
     }
     // TODO: write error message to a fixed location in memory and reset?
-
-    unsafe {
-        asm!("udf #0", options(noreturn));
-    }
+    halt();
 }

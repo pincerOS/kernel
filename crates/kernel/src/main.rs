@@ -12,6 +12,7 @@ mod device;
 mod boot;
 mod exceptions;
 mod heap;
+mod memory;
 mod runtime;
 mod sync;
 mod thread;
@@ -38,20 +39,23 @@ static IRQ_CONTROLLER: UnsafeInit<InterruptSpinLock<timer::bcm2836_l1_intc_drive
 static START_BARRIER: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
 
 #[no_mangle]
-pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64) -> ! {
+pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64, x4: u32) -> ! {
+    unsafe {
+        memory::init();
+    }
     let id = core_id() & 3;
 
     // TODO: find a proper free region to use as the heap
     // TODO: proper heap allocator, proper heap end bounds
-    unsafe { heap::ALLOCATOR.init(0x1_000_000 as *mut ()) };
+    unsafe { heap::ALLOCATOR.init(0xFFFF_FFFF_FE00_2000 as *mut ()) };
 
     // TODO: device tree /soc/serial with compatible:arm,pl011
-    let uart_base = 0x3f201000 as *mut ();
+    let uart_base = unsafe { memory::map_device(0x3f201000) }.as_ptr();
     unsafe { uart::UART.init(SpinLock::new(uart::UARTInner::new(uart_base))) };
     println!("| initialized UART");
 
     // TODO: device tree /soc/?, compatible:brcm,bcm2835-pm-wdt
-    let watchdog_base = 0x3f100000 as *mut ();
+    let watchdog_base = unsafe { memory::map_device(0x3f100000) }.as_ptr();
     unsafe {
         let watchdog = watchdog::bcm2835_wdt_driver::init(watchdog_base);
         WATCHDOG.init(SpinLock::new(watchdog));
@@ -59,8 +63,10 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     println!("| initialized power managment watchdog");
     println!("| last reset: {:#08x}", WATCHDOG.get().lock().last_reset());
 
+    let device_tree_base = unsafe { memory::map_physical(x0 as usize, u32::from_be(x4) as usize) };
     let device_tree =
-        unsafe { device_tree::load_device_tree(x0 as *const u64) }.expect("Error parsing device tree");
+        unsafe { device_tree::load_device_tree(device_tree_base.as_ptr().cast_const().cast()) }
+            .expect("Error parsing device tree");
 
     // TODO: parse device tree and initialize kernel devices
     // (use the device tree to discover the proper driver and base
@@ -75,10 +81,14 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     // checking 0xd8 + core_id
     // TODO: use device tree to discover 1. enable-method for the cpu
     // and 2. the cpu-release-addr (the address it's spinning at)
-    let other_core_start = 0xd8 as *mut unsafe extern "C" fn();
+    let other_core_start = unsafe { memory::map_physical(0xd8, 4 * 8) }
+        .as_ptr()
+        .cast::<u64>();
+    let physical_alt_start =
+        memory::physical_addr(boot::kernel_entry_alt as usize).expect("boot code should be mapped");
     for i in 1..4 {
         let target = other_core_start.wrapping_add(i);
-        unsafe { core::ptr::write_volatile(target, boot::kernel_entry_alt) };
+        unsafe { core::ptr::write_volatile(target, physical_alt_start) };
     }
     unsafe {
         asm!("sev");
@@ -144,10 +154,11 @@ fn kernel_main(device_tree: device_tree::DeviceTree) {
     device_tree::debug_device_tree(device_tree, &mut UART.get()).unwrap();
 
     // TODO: find mailbox address via device tree
-    let mailbox_base = 0x3f00b880 as *mut ();
+    let mailbox_base = unsafe { memory::map_device(0x3f00b880) }.as_ptr();
     let mut mailbox = unsafe { mailbox::VideoCoreMailbox::init(mailbox_base) };
 
-    let timer = device::timer::bcm2836_l1_intc_driver::new(0x40000000 as *mut ());
+    let timer_base = unsafe { memory::map_device(0x40000000) }.as_ptr();
+    let timer = device::timer::bcm2836_l1_intc_driver::new(timer_base);
     let timer = sync::InterruptSpinLock::new(timer);
     unsafe {
         IRQ_CONTROLLER.init(timer);
@@ -160,6 +171,8 @@ fn kernel_main(device_tree: device_tree::DeviceTree) {
             irq.start_timer(core, preemption_time_ns);
         }
     }
+
+    todo!("Fix preemption test");
 
     // Basic preemption test
     let count = 32;
@@ -177,6 +190,7 @@ fn kernel_main(device_tree: device_tree::DeviceTree) {
     barrier.sync();
     println!("End of preemption test");
 
+    todo!("Fix mailbox accesses");
     let mut surface = unsafe { mailbox.get_framebuffer() };
 
     vsync_tearing_demo(&mut surface);

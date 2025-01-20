@@ -6,7 +6,9 @@ edition = "2021"
 [[bin]]
 name = "kernel"
 path = "src/main.rs"
+panic = "abort"
 
 [dependencies]
+bitflags = "2.8.0"
 bytemuck = { version = "1.19.0", default-features = false }
 device-tree = { path = "../device-tree" }
