@@ -5,7 +5,10 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use std::prelude::v1::Vec;
+use alloc::borrow::Cow;
+use alloc::rc::Rc;
+use std::fs::DirEntry;
+use std::prelude::v1::{String, Vec};
 
 #[cfg(test)]
 mod tests;
@@ -57,96 +60,6 @@ pub struct Ext2<Device> {
     root_inode: INode
 }
 
-impl<D> Ext2<D>
-where
-    D: BlockDevice,
-{
-    fn read_logical_block(device: &mut D, logical_block_start: usize, logical_block_length: usize,
-                          buffer: &mut [u8]) {
-        assert!(logical_block_length > 0);
-
-        let start_sector_numerator: usize = logical_block_start * BLOCK_SIZE;
-        let start_sector: usize = start_sector_numerator / SECTOR_SIZE;
-        let sectors: usize = (logical_block_length * BLOCK_SIZE) / SECTOR_SIZE;
-
-        device.read_sectors(start_sector as u64, sectors, buffer);
-    }
-
-    fn get_inode(device: &mut D, superblock: &Superblock, block_group_descriptor_tables: &Vec<BGD>,
-                 inode: usize) -> INode {
-        let inode_size = superblock.s_inode_size as usize;
-
-        let block_group_number = (inode - 1) / superblock.s_inodes_per_group as usize;
-        let inode_table_block =
-            block_group_descriptor_tables[block_group_number].bg_inode_table as usize;
-
-        let inode_table_index: usize = (inode - 1) % (superblock.s_inodes_per_group as usize);
-        let inode_table_block_with_offset: usize =
-            ((inode_table_index * inode_size) / BLOCK_SIZE) + inode_table_block;
-
-        let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
-
-        Self::read_logical_block(device, inode_table_block_with_offset, 1,
-                                 &mut block_buffer);
-
-        let inodes_per_block: usize = BLOCK_SIZE / inode_size;
-        let inode_rel_index: usize = inode_table_index % inodes_per_block;
-        let block_buffer_offset: usize = inode_rel_index * inode_size;
-
-        let mut inode_data: [u8; size_of::<INode>()] = [0x00; size_of::<INode>()];
-
-        inode_data.copy_from_slice(&block_buffer[0..size_of::<INode>()]);
-
-        let inode: INode =
-            unsafe {std::mem::transmute::<[u8;size_of::<INode>()], INode>(inode_data)};
-
-        inode
-    }
-
-    pub fn new(mut device: D) -> Self {
-        let mut buffer: [u8; 1024] = [0; 1024];
-        // todo: error-handling device.read_sectors
-        device.read_sectors(1, 2, &mut buffer);
-        let superblock: Superblock = unsafe { std::mem::transmute::<[u8; 1024], Superblock>(buffer) };
-
-        let mut block_group_descriptor_tables: Vec<BGD> = Vec::new();
-        let descriptor_table_ptr: *mut BGD = block_group_descriptor_tables.as_mut_ptr();
-
-        let block_group_descriptor_block: usize = if BLOCK_SIZE == 1024 {2} else {1};
-        let block_group_descriptor_length: usize =
-            1 + (((superblock.get_num_of_block_groups() as usize) * size_of::<BGD>()) / BLOCK_SIZE);
-
-        block_group_descriptor_tables.reserve(block_group_descriptor_length);
-
-        unsafe {
-            let byte_slice: &mut[u8] =
-                std::slice::from_raw_parts_mut(descriptor_table_ptr as *mut u8,
-                                                block_group_descriptor_length * BLOCK_SIZE);
-
-            Self::read_logical_block(&mut device, block_group_descriptor_block,
-                                     block_group_descriptor_length, byte_slice);
-
-            block_group_descriptor_tables.set_len(superblock.get_num_of_block_groups() as usize);
-        }
-
-        let root_inode: INode =
-            Self::get_inode(&mut device, &superblock, &block_group_descriptor_tables, 1);
-
-        Self { device, superblock, block_group_descriptor_tables, root_inode }
-    }
-
-    pub fn get_block_size(&mut self) -> u32 {
-        1024 << self.superblock.s_log_block_size
-    }
-
-    pub fn get_inode_size(&mut self) -> u32 {
-        self.superblock.s_inode_size as u32
-    }
-
-    //pub fn find(dir: )
-}
-
-#[repr(C)]
 struct DirectoryEntry {
     // assumption: name length <= 2^16
     // all part of the spec
@@ -154,12 +67,8 @@ struct DirectoryEntry {
     entry_size: u16,
     name_length: u16,
 
-    // theoretically a way to do unsized arrays safely
-    // ask alex for more help when we need this
-    // not strictly part of the spec
-    // char name_characters[];
+    name_characters: String
 }
-
 // https://www.nongnu.org/ext2-doc/ext2.html
 
 #[repr(C)]
@@ -324,10 +233,10 @@ pub mod reserved_inodes {
 
 pub mod i_mode {
     const EXT2_S_IFSOCK: u16 = 0xC000;
-    const EXT2_S_IFLNK: u16 = 0xA000;
+    pub(crate) const EXT2_S_IFLNK: u16 = 0xA000;
     const EXT2_S_IFREG: u16 = 0x8000;
     const EXT2_S_IFBLK: u16 = 0x6000;
-    const EXT2_S_IFDIR: u16 = 0x4000;
+    pub const EXT2_S_IFDIR: u16 = 0x4000;
     const EXT2_S_IFCHR: u16 = 0x2000;
     const EXT2_S_IFIFO: u16 = 0x1000;
     const EXT2_S_ISUID: u16 = 0x0800;
@@ -377,3 +286,279 @@ pub mod file_type {
     const EXT2_FT_SYMLINK: u8 = 7;
 }
 
+pub struct INodeWrapper {
+    inode: INode,
+    inode_num: u32,
+}
+
+impl<D> Ext2<D>
+where
+    D: BlockDevice,
+{
+    fn read_logical_block(device: &mut D, logical_block_start: usize, logical_block_length: usize,
+                          buffer: &mut [u8]) {
+        assert!(logical_block_length > 0);
+
+        let start_sector_numerator: usize = logical_block_start * BLOCK_SIZE;
+        let start_sector: usize = start_sector_numerator / SECTOR_SIZE;
+        let sectors: usize = (logical_block_length * BLOCK_SIZE) / SECTOR_SIZE;
+
+        device.read_sectors(start_sector as u64, sectors, buffer);
+    }
+
+    pub fn read_logical_block_self(&mut self, logical_block_start: usize, logical_block_length: usize,
+                                   buffer: &mut [u8]) {
+        Self::read_logical_block(&mut self.device, logical_block_start, logical_block_length, 
+                                 buffer);
+    }
+ 
+    fn get_inode(device: &mut D, superblock: &Superblock, block_group_descriptor_tables: &Vec<BGD>,
+                 inode: usize) -> INode {
+        let inode_size = superblock.s_inode_size as usize;
+
+        let block_group_number = (inode - 1) / superblock.s_inodes_per_group as usize;
+        let inode_table_block =
+            block_group_descriptor_tables[block_group_number].bg_inode_table as usize;
+
+        let inode_table_index: usize = (inode - 1) % (superblock.s_inodes_per_group as usize);
+        let inode_table_block_with_offset: usize =
+            ((inode_table_index * inode_size) / BLOCK_SIZE) + inode_table_block;
+
+        let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+
+        Self::read_logical_block(device, inode_table_block_with_offset, 1,
+                                 &mut block_buffer);
+
+        let inodes_per_block: usize = BLOCK_SIZE / inode_size;
+        let inode_rel_index: usize = inode_table_index % inodes_per_block;
+        let block_buffer_offset: usize = inode_rel_index * inode_size;
+
+        let mut inode_data: [u8; size_of::<INode>()] = [0x00; size_of::<INode>()];
+
+        inode_data.copy_from_slice(&block_buffer[0..size_of::<INode>()]);
+
+        let inode: INode =
+            unsafe {std::mem::transmute::<[u8;size_of::<INode>()], INode>(inode_data)};
+
+        inode
+    }
+
+    pub fn new(mut device: D) -> Self {
+        let mut buffer: [u8; 1024] = [0; 1024];
+        // todo: error-handling device.read_sectors
+        device.read_sectors(1, 2, &mut buffer);
+        let superblock: Superblock = unsafe { std::mem::transmute::<[u8; 1024], Superblock>(buffer) };
+
+        let mut block_group_descriptor_tables: Vec<BGD> = Vec::new();
+        let descriptor_table_ptr: *mut BGD = block_group_descriptor_tables.as_mut_ptr();
+
+        let block_group_descriptor_block: usize = if BLOCK_SIZE == 1024 {2} else {1};
+        let block_group_descriptor_length: usize =
+            1 + (((superblock.get_num_of_block_groups() as usize) * size_of::<BGD>()) / BLOCK_SIZE);
+
+        block_group_descriptor_tables.reserve(block_group_descriptor_length);
+
+        unsafe {
+            let byte_slice: &mut[u8] =
+                std::slice::from_raw_parts_mut(descriptor_table_ptr as *mut u8,
+                                               block_group_descriptor_length * BLOCK_SIZE);
+
+            Self::read_logical_block(&mut device, block_group_descriptor_block,
+                                     block_group_descriptor_length, byte_slice);
+
+            block_group_descriptor_tables.set_len(superblock.get_num_of_block_groups() as usize);
+        }
+
+        let root_inode: INode =
+            Self::get_inode(&mut device, &superblock, &block_group_descriptor_tables, 1);
+
+        Self { device, superblock, block_group_descriptor_tables, root_inode }
+    }
+
+    pub fn get_block_size(&mut self) -> u32 {
+        1024 << self.superblock.s_log_block_size
+    }
+
+    pub fn get_inode_size(&mut self) -> u32 {
+        self.superblock.s_inode_size as u32
+    }
+
+    pub fn find(&mut self, node: INodeWrapper, name: &str) -> Option<INodeWrapper> {
+        let dir_entries: Vec<DirectoryEntry> = node.get_dir_entries(self);
+
+        if node.is_dir() {
+            for dir_entry in dir_entries {
+                if(dir_entry.name_characters == name) {
+                    // TODO: find out how to do operator overloading in rust and convert this into
+                    // TODO: a mut self method
+                    let inode: INode = Self::get_inode(&mut self.device, &self.superblock,
+                                                       &self.block_group_descriptor_tables,
+                                                       dir_entry.inode_number as usize);
+
+                    Some(INodeWrapper { inode, inode_num: dir_entry.inode_number });
+                }
+            }
+        }
+
+        None
+    }
+}
+
+impl INodeWrapper
+{
+    pub fn is_dir(&self) -> bool {
+        (self.inode.i_mode & i_mode::EXT2_S_IFDIR) != 0
+    }
+
+    pub fn is_symlink(&self) -> bool {
+        (self.inode.i_mode & i_mode::EXT2_S_IFLNK) != 0
+    }
+
+    pub fn size(&self) -> u64 {
+        // technically, i_dir_acl only has the upper 32 bits
+        // for regular files, but it will just be zero for others
+        // so it doesn't really matter
+        (self.inode.i_size as u64) & ((self.inode.i_dir_acl as u64) << 32)
+    }
+
+    fn get_word(byte_array: &[u8]) -> u32 {
+        (byte_array[0] as u32) | ((byte_array[1] as u32) << 8) | ((byte_array[2] as u32) << 16) |
+        ((byte_array[3] as u32) << 24)
+    }
+
+    fn get_half_word(byte_array: &[u8]) -> u32 {
+        (byte_array[0] as u32) | ((byte_array[1] as u32) << 8)
+    }
+
+    pub fn get_inode_block_num<D: BlockDevice>(&self, number: usize, ext2: &mut Ext2<D>) -> u32 {
+        let block_inode_list_size: usize = BLOCK_SIZE / size_of::<u32>();
+        let block_inode_list_size_squared: usize = block_inode_list_size * block_inode_list_size;
+        let block_inode_list_size_cubed: usize = block_inode_list_size_squared * block_inode_list_size;
+
+        let mut logical_block_number: u32 = 0;
+        let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+
+        const TRIPLE_LINK_BLOCK_PTR_INDEX: usize = 14;
+        const DOUBLE_LINK_BLOCK_PTR_INDEX: usize = 13;
+        const SINGLE_LINK_BLOCK_PTR_INDEX: usize = 12;
+        
+        if(number >= (12 + block_inode_list_size + block_inode_list_size_squared)) {
+            // hard mode: go through link to list of link of list of links to list of direct
+            // block ptrs
+
+            ext2.read_logical_block_self(self.inode.i_block[TRIPLE_LINK_BLOCK_PTR_INDEX] as usize,
+                                         1, &mut block_buffer);
+
+            let second_level_base_num: usize =
+                number - (12 + block_inode_list_size + block_inode_list_size_squared);
+            let index: usize =
+                (second_level_base_num / block_inode_list_size_squared) * size_of::<u32>();
+            let block_second_level_index: u32 =
+                Self::get_word(&block_buffer[index..index+4]);
+
+            ext2.read_logical_block_self(block_second_level_index as usize, 1, 
+                                         &mut block_buffer);
+
+            let first_level_base_num: usize = second_level_base_num % block_inode_list_size_squared;
+            let block_buffer_second_index: usize =
+                (first_level_base_num / block_inode_list_size) * size_of::<u32>();
+            let block_first_level_index = 
+                Self::get_word(
+                    &block_buffer[block_buffer_second_index..block_buffer_second_index+4]);
+
+            ext2.read_logical_block_self(block_first_level_index as usize, 1, 
+                                         &mut block_buffer);
+
+            let block_buffer_first_index: usize =
+                (first_level_base_num % block_inode_list_size) * size_of::<u32>();
+
+            logical_block_number = Self::get_word(
+                &block_buffer[block_buffer_first_index..block_buffer_first_index+4]);
+        } else if(number >= 12 + block_inode_list_size) {
+            // medium: go through link to list of links to list of direct block ptrs
+            ext2.read_logical_block_self(self.inode.i_block[DOUBLE_LINK_BLOCK_PTR_INDEX] as usize,
+                                         1, &mut block_buffer);
+
+            let first_level_base_num: usize = number - (12 + block_inode_list_size);
+            let index: usize = (first_level_base_num / block_inode_list_size) * size_of::<u32>();
+            let block_first_level_index: usize =
+                Self::get_word(&block_buffer[index..index+4]) as usize;
+            let block_final_level_index: usize =
+                (first_level_base_num % block_inode_list_size) * size_of::<u32>();
+
+            ext2.read_logical_block_self(block_first_level_index, 1, 
+                                         &mut block_buffer);
+            
+            logical_block_number = 
+                Self::get_word(&block_buffer[block_final_level_index..block_final_level_index+4]);
+        } else if(number >= 12) {
+            // fairly easy: go through link to list of direct block ptrs
+            ext2.read_logical_block_self(self.inode.i_block[SINGLE_LINK_BLOCK_PTR_INDEX] as usize,
+                                         1, &mut block_buffer);
+
+            let index: usize = number - 12;
+            let offset: usize = index * size_of::<u32>();
+
+            logical_block_number = Self::get_word(&block_buffer[offset..offset+4]);
+        } else {
+            // easy: go through direct block ptrs
+            logical_block_number = self.inode.i_block[number];
+        }
+
+        logical_block_number
+    }
+
+    pub fn read_block<D: BlockDevice>(&self, logical_block_start: usize,
+                                      logical_block_length: usize, buffer: &mut [u8],
+                                      ext2: &mut Ext2<D>) {
+        // TODO: caching
+        let mut block_tmp_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+
+        for i in 0..logical_block_length {
+            let cur_file_block: usize = logical_block_start + (i as usize);
+            let logical_block_num: usize = self.get_inode_block_num(cur_file_block, ext2) as usize;
+
+            ext2.read_logical_block_self(logical_block_num, 1, &mut block_tmp_buffer);
+
+            for j in 0..BLOCK_SIZE {
+                buffer[(i*BLOCK_SIZE)+j] = block_tmp_buffer[j];
+            }
+        }
+    }
+
+    pub fn get_dir_entries<D: BlockDevice>(&self, ext2: &mut Ext2<D>) -> Vec<DirectoryEntry> {
+        // TODO: caching
+        let mut entries: Vec<DirectoryEntry> = Vec::new();
+        let mut entries_raw_bytes: Vec<u8> = Vec::new();
+
+        entries_raw_bytes.resize((self.size() / 9) as usize, 0);
+
+        let directory_entry_size_blocks: usize = (self.size() as usize) / BLOCK_SIZE;
+        let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+
+        self.read_block(0, directory_entry_size_blocks,
+                        entries_raw_bytes.as_mut_slice(), ext2);
+
+        let mut i: usize = 0;
+
+        while i < (self.size() as usize) {
+            let directory_entry_inode_num = Self::get_word(&entries_raw_bytes[i..]);
+            let directory_entry_size = Self::get_half_word(&entries_raw_bytes[i+4..i+6]);
+            let directory_entry_name_length = entries_raw_bytes[i+6];
+            let directory_entry_name =
+                String::from_utf8_lossy(&entries_raw_bytes[i+8..i+8+(directory_entry_name_length as usize)]).into_owned();
+
+            entries.push(DirectoryEntry{
+                // all part of the spec
+                inode_number: directory_entry_inode_num,
+                entry_size: directory_entry_size as u16,
+                name_length: directory_entry_name_length as u16,
+
+                name_characters: directory_entry_name
+            });
+
+            i += directory_entry_size as usize;
+        }
+        entries
+    }
+}
