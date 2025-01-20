@@ -38,6 +38,9 @@ static IRQ_CONTROLLER: UnsafeInit<InterruptSpinLock<timer::bcm2836_l1_intc_drive
 
 static START_BARRIER: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
 
+const FLAG_MULTICORE: bool = true;
+const FLAG_PREEMPTION: bool = true;
+
 #[no_mangle]
 pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64, x4: u32) -> ! {
     unsafe {
@@ -45,9 +48,8 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     }
     let id = core_id() & 3;
 
-    // TODO: find a proper free region to use as the heap
-    // TODO: proper heap allocator, proper heap end bounds
-    unsafe { heap::ALLOCATOR.init(0xFFFF_FFFF_FE00_2000 as *mut ()) };
+    // TODO: proper heap allocator, and physical memory allocation for heap space
+    unsafe { heap::ALLOCATOR.init(0xFFFF_FFFF_FE10_0000 as *mut (), 0x100000) };
 
     // TODO: device tree /soc/serial with compatible:arm,pl011
     let uart_base = unsafe { memory::map_device(0x3f201000) }.as_ptr();
@@ -126,6 +128,10 @@ pub unsafe extern "C" fn kernel_entry_rust_alt(_x0: u32, _x1: u64, _x2: u64, _x3
         unsafe { asm!("yield") }
     }
 
+    if !FLAG_MULTICORE {
+        halt();
+    }
+
     println!("| running threads on core {id}");
     unsafe { thread::SCHEDULER.run_on_core() }
 }
@@ -164,15 +170,13 @@ fn kernel_main(device_tree: device_tree::DeviceTree) {
         IRQ_CONTROLLER.init(timer);
     }
 
-    let preemption_time_ns = 500_000;
-    {
+    if FLAG_PREEMPTION {
+        let preemption_time_ns = 500_000;
         let mut irq = IRQ_CONTROLLER.get().lock();
         for core in 0..4 {
             irq.start_timer(core, preemption_time_ns);
         }
     }
-
-    todo!("Fix preemption test");
 
     // Basic preemption test
     let count = 32;

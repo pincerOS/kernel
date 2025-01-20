@@ -10,6 +10,7 @@ pub static ALLOCATOR: BumpAllocator = unsafe { BumpAllocator::new_uninit() };
 pub struct BumpAllocator {
     base: AtomicPtr<()>,
     offset: AtomicUsize,
+    max: AtomicUsize,
 }
 unsafe impl Sync for BumpAllocator {}
 
@@ -18,11 +19,13 @@ impl BumpAllocator {
         BumpAllocator {
             base: AtomicPtr::new(core::ptr::null_mut()),
             offset: AtomicUsize::new(0),
+            max: AtomicUsize::new(0),
         }
     }
     // TODO: safety requirements of initialization?
-    pub unsafe fn init(&self, base: *mut ()) {
+    pub unsafe fn init(&self, base: *mut (), max: usize) {
         self.base.store(base, Ordering::SeqCst);
+        self.max.store(max, Ordering::SeqCst);
     }
 }
 
@@ -48,6 +51,12 @@ unsafe impl GlobalAlloc for BumpAllocator {
                 Err(new) => cur = new,
             }
         };
+
+        let max = self.max.load(Ordering::SeqCst);
+        if start.next_multiple_of(align) + size >= max {
+            self.offset.store(max, Ordering::SeqCst);
+            panic!("Heap full");
+        }
 
         let alloc_offset = start.next_multiple_of(align);
         unsafe { base.byte_add(alloc_offset) }
