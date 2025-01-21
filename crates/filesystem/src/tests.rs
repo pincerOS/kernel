@@ -1,4 +1,5 @@
-use crate::{linux::FileBlockDevice, Superblock};
+use alloc::rc::Rc;
+use crate::{linux::FileBlockDevice, INodeWrapper, Superblock};
 use std::fs::File;
 
 use crate::{BlockDevice, Ext2};
@@ -12,4 +13,10 @@ fn example_1() {
 
     assert_eq!(ext2.get_block_size(), 1024);
     assert_eq!(ext2.get_inode_size(), 128);
+    
+    let root_node: Rc<INodeWrapper> = ext2.get_root_inode_wrapper();
+    
+    let test_node: Option<Rc<INodeWrapper>> = ext2.find(&root_node, "test.txt");
+    
+    assert!(test_node.is_some());
 }

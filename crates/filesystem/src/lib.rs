@@ -57,7 +57,7 @@ pub struct Ext2<Device> {
     device: Device,
     superblock: Superblock,
     block_group_descriptor_tables: Vec<BGD>,
-    root_inode: INode
+    root_inode: Rc<INodeWrapper>
 }
 
 struct DirectoryEntry {
@@ -187,6 +187,7 @@ pub mod s_algo_bitmap {
 const _: () = assert!(size_of::<Superblock>() == 1024);
 
 #[repr(C)]
+#[derive(Clone)]
 pub struct BGD {
     bg_block_bitmap: u32, 
     bg_inode_bitmap: u32, 
@@ -313,29 +314,26 @@ where
     }
  
     fn get_inode(device: &mut D, superblock: &Superblock, block_group_descriptor_tables: &Vec<BGD>,
-                 inode: usize) -> INode {
+                 inode_num: usize) -> INode {
         let inode_size = superblock.s_inode_size as usize;
 
-        let block_group_number = (inode - 1) / superblock.s_inodes_per_group as usize;
+        let block_group_number = (inode_num - 1) / superblock.s_inodes_per_group as usize;
         let inode_table_block =
             block_group_descriptor_tables[block_group_number].bg_inode_table as usize;
 
-        let inode_table_index: usize = (inode - 1) % (superblock.s_inodes_per_group as usize);
+        let inode_table_index: usize = (inode_num - 1) % (superblock.s_inodes_per_group as usize);
         let inode_table_block_with_offset: usize =
             ((inode_table_index * inode_size) / BLOCK_SIZE) + inode_table_block;
+        let inode_table_interblock_offset: usize = (inode_table_index * inode_size) % BLOCK_SIZE;
 
         let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
 
         Self::read_logical_block(device, inode_table_block_with_offset, 1,
                                  &mut block_buffer);
 
-        let inodes_per_block: usize = BLOCK_SIZE / inode_size;
-        let inode_rel_index: usize = inode_table_index % inodes_per_block;
-        let block_buffer_offset: usize = inode_rel_index * inode_size;
-
         let mut inode_data: [u8; size_of::<INode>()] = [0x00; size_of::<INode>()];
 
-        inode_data.copy_from_slice(&block_buffer[0..size_of::<INode>()]);
+        inode_data.copy_from_slice(&block_buffer[inode_table_interblock_offset..inode_table_interblock_offset + size_of::<INode>()]);
 
         let inode: INode =
             unsafe {std::mem::transmute::<[u8;size_of::<INode>()], INode>(inode_data)};
@@ -343,36 +341,44 @@ where
         inode
     }
 
+    pub fn get_root_inode_wrapper(&mut self) -> Rc<INodeWrapper> {
+        self.root_inode.clone()
+    }
+
     pub fn new(mut device: D) -> Self {
         let mut buffer: [u8; 1024] = [0; 1024];
         // todo: error-handling device.read_sectors
-        device.read_sectors(1, 2, &mut buffer);
+        device.read_sectors(2, 2, &mut buffer);
         let superblock: Superblock = unsafe { std::mem::transmute::<[u8; 1024], Superblock>(buffer) };
 
         let mut block_group_descriptor_tables: Vec<BGD> = Vec::new();
-        let descriptor_table_ptr: *mut BGD = block_group_descriptor_tables.as_mut_ptr();
+
 
         let block_group_descriptor_block: usize = if BLOCK_SIZE == 1024 {2} else {1};
         let block_group_descriptor_length: usize =
             1 + (((superblock.get_num_of_block_groups() as usize) * size_of::<BGD>()) / BLOCK_SIZE);
 
-        block_group_descriptor_tables.reserve(block_group_descriptor_length);
+        block_group_descriptor_tables.resize(block_group_descriptor_length, 
+                                             BGD{ bg_block_bitmap: 0, bg_inode_bitmap: 0, 
+                                                        bg_inode_table: 0, bg_free_blocks_count: 0, 
+                                                        bg_free_inodes_count: 0, bg_used_dirs_count: 0, 
+                                                        bg_pad: 0,  bg_reserved: [0;12] });
 
-        unsafe {
-            let byte_slice: &mut[u8] =
-                std::slice::from_raw_parts_mut(descriptor_table_ptr as *mut u8,
-                                               block_group_descriptor_length * BLOCK_SIZE);
+        let descriptor_table_bytes_ptr: *mut u8 =
+            block_group_descriptor_tables.as_mut_ptr() as *mut u8;
+        let descriptor_table_bytes_slice: &mut[u8] = unsafe{
+            std::slice::from_raw_parts_mut(descriptor_table_bytes_ptr,
+                                           block_group_descriptor_length * BLOCK_SIZE)
+        };
 
-            Self::read_logical_block(&mut device, block_group_descriptor_block,
-                                     block_group_descriptor_length, byte_slice);
-
-            block_group_descriptor_tables.set_len(superblock.get_num_of_block_groups() as usize);
-        }
+        Self::read_logical_block(&mut device, block_group_descriptor_block,
+                                 block_group_descriptor_length, descriptor_table_bytes_slice);
 
         let root_inode: INode =
-            Self::get_inode(&mut device, &superblock, &block_group_descriptor_tables, 1);
+            Self::get_inode(&mut device, &superblock, &block_group_descriptor_tables, 2);
 
-        Self { device, superblock, block_group_descriptor_tables, root_inode }
+        Self { device, superblock, block_group_descriptor_tables, 
+               root_inode: Rc::new(INodeWrapper{ inode: root_inode, inode_num: 2 }) }
     }
 
     pub fn get_block_size(&mut self) -> u32 {
@@ -383,7 +389,7 @@ where
         self.superblock.s_inode_size as u32
     }
 
-    pub fn find(&mut self, node: INodeWrapper, name: &str) -> Option<INodeWrapper> {
+    pub fn find(&mut self, node: &INodeWrapper, name: &str) -> Option<Rc<INodeWrapper>> {
         let dir_entries: Vec<DirectoryEntry> = node.get_dir_entries(self);
 
         if node.is_dir() {
@@ -395,7 +401,7 @@ where
                                                        &self.block_group_descriptor_tables,
                                                        dir_entry.inode_number as usize);
 
-                    Some(INodeWrapper { inode, inode_num: dir_entry.inode_number });
+                    Rc::new(INodeWrapper { inode, inode_num: dir_entry.inode_number });
                 }
             }
         }
