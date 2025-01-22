@@ -4,35 +4,45 @@ use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-#[derive(Debug)]
-pub struct InterruptsState(u64);
+pub struct InterruptsState(pub u64);
+
+impl core::fmt::Debug for InterruptsState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("InterruptsState")
+            .field(&format_args!("{:#08x}", self.0))
+            .finish()
+    }
+}
+
+extern "C" {
+    fn get_interrupts_asm() -> u64;
+    fn set_interrupts_asm(state: u64);
+    fn disable_interrupts_asm();
+    fn enable_interrupts_asm();
+}
+
+core::arch::global_asm!(
+    "get_interrupts_asm: mrs x0, DAIF; ret",
+    "set_interrupts_asm: msr DAIF, x0; ret",
+    "disable_interrupts_asm: msr DAIFSet, #0b1111; ret",
+    "enable_interrupts_asm: msr DAIFClr, #0b1111; ret",
+);
 
 pub fn get_interrupts() -> InterruptsState {
-    let daif: u64;
-    unsafe {
-        asm!(
-            "mrs {out}, DAIF",
-            out = out(reg) daif,
-        );
-    }
-    InterruptsState(daif)
+    InterruptsState(unsafe { get_interrupts_asm() })
 }
-
-pub fn disable_interrupts() -> InterruptsState {
-    let daif: u64;
-    unsafe {
-        asm!(
-            "mrs {out}, DAIF",
-            "msr DAIFSet, #0b1111",
-            out = out(reg) daif,
-        );
-    }
-    InterruptsState(daif)
+pub unsafe fn disable_interrupts() -> InterruptsState {
+    let state = get_interrupts();
+    unsafe { disable_interrupts_asm() };
+    state
 }
-pub fn restore_interrupts(state: InterruptsState) {
-    unsafe {
-        asm!("msr DAIF, {state}", state = in(reg) state.0);
-    }
+pub unsafe fn enable_interrupts() -> InterruptsState {
+    let state = get_interrupts();
+    unsafe { enable_interrupts_asm() };
+    state
+}
+pub unsafe fn restore_interrupts(state: InterruptsState) {
+    unsafe { set_interrupts_asm(state.0) };
 }
 
 #[derive(Copy, Clone)]
@@ -180,13 +190,13 @@ impl InterruptSpinLockInner {
             .is_ok()
     }
     pub fn lock(&self) {
-        let mut state = disable_interrupts();
+        let mut state = unsafe { disable_interrupts() };
         while !self.try_acquire() {
-            restore_interrupts(state);
+            unsafe { restore_interrupts(state) };
             while self.flag.load(Ordering::Relaxed) {
                 core::hint::spin_loop();
             }
-            state = disable_interrupts();
+            state = unsafe { disable_interrupts() };
         }
         unsafe {
             self.state.get().write(Some(state));
@@ -195,7 +205,7 @@ impl InterruptSpinLockInner {
     pub fn unlock(&self) {
         let state = unsafe { (*self.state.get()).take() };
         self.flag.store(false, Ordering::Release);
-        restore_interrupts(state.unwrap())
+        unsafe { restore_interrupts(state.unwrap()) }
     }
 }
 
@@ -295,23 +305,25 @@ pub fn spin_sleep_until(target: usize) {
     }
 }
 
+type EventQueue = crate::scheduler::Queue<crate::event::Event>;
+
 pub struct CondVar {
-    queue: crate::thread::ThreadQueue,
+    queue: EventQueue,
 }
 
 impl CondVar {
     pub const fn new() -> Self {
         Self {
-            queue: crate::thread::ThreadQueue::new(),
+            queue: EventQueue::new(),
         }
     }
     pub fn notify_one(&self) {
         if let Some(t) = self.queue.pop() {
-            crate::thread::SCHEDULER.add_task(t);
+            crate::event::SCHEDULER.add_task(t);
         }
     }
     pub fn notify_all(&self) {
-        crate::thread::SCHEDULER.add_all(&self.queue);
+        crate::event::SCHEDULER.add_all(&self.queue);
     }
     pub fn wait<'a, T>(&self, guard: SpinLockGuard<'a, T>) -> SpinLockGuard<'a, T> {
         let lock = guard.lock;

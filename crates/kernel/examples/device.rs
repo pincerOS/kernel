@@ -12,7 +12,7 @@ extern "Rust" fn kernel_main(device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
 
     println!("Reserved regions:");
-    for region in device_tree.reserved_regions {
+    for region in device_tree.reserved_regions() {
         println!(
             "  {:#010} (size {:x})",
             region.address.get(),
@@ -22,5 +22,5 @@ extern "Rust" fn kernel_main(device_tree: device_tree::DeviceTree) {
 
     println!("Device tree:");
 
-    device_tree::debug_device_tree(&device_tree, &mut UART.get()).unwrap();
+    device_tree::debug::debug_device_tree(&device_tree, &mut UART.get()).unwrap();
 }

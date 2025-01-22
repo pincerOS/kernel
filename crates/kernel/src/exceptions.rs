@@ -214,18 +214,7 @@ unsafe extern "C" fn exception_handler_irq(
     irq.timer_reload();
     drop(irq);
 
-    // println!("Source: {}", source);
-    // println!("time {:?}", crate::sync::get_time());
-
-    let mut action = crate::thread::SwitchAction::Yield;
-    let core = crate::thread::CORES.current();
-    let helper_sp = core.helper_sp.get();
-    if let Some(mut thread) = core.thread.take() {
-        thread.last_context = ctx.into();
-        unsafe { crate::thread::switch_to_helper(Some(thread), Some(&mut action), helper_sp) };
-    } else {
-        return ctx;
-    }
+    unsafe { crate::event::timer_handler(ctx) }
 }
 
 #[no_mangle]

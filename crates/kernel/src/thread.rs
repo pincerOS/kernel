@@ -40,14 +40,14 @@
 // - Effectively just an event loop, easy to implement
 // - Can be used in parallel to other threading systems
 
-use core::arch::{asm, global_asm};
+use core::arch::global_asm;
 use core::cell::Cell;
 use core::ptr::NonNull;
 
 use alloc::boxed::Box;
-use alloc::collections::VecDeque;
 
-use crate::sync::{disable_interrupts, restore_interrupts, InterruptSpinLock};
+use crate::event::{Event, SCHEDULER};
+use crate::sync::{disable_interrupts, restore_interrupts};
 
 #[repr(C)]
 pub struct Context {
@@ -63,7 +63,6 @@ pub struct Context {
 pub struct CoreInfo {
     pub thread: Cell<Option<Box<Thread>>>,
     pub helper_sp: Cell<usize>,
-    pub no_preempt: Cell<bool>,
 }
 
 pub struct AllCores([CoreInfo; 4]);
@@ -73,30 +72,37 @@ impl AllCores {
         const INIT: CoreInfo = CoreInfo {
             thread: Cell::new(None),
             helper_sp: Cell::new(0),
-            no_preempt: Cell::new(false),
         };
         Self([INIT; 4])
     }
 
-    pub fn init(&self) {
+    /// Safety: Must only be called once, before any other accesses.
+    pub unsafe fn init(&self) {
         for i in 0..4 {
             let stack = &crate::boot::STACKS[i];
             self.0[i].helper_sp.set(stack.as_ptr_range().end as usize);
         }
     }
 
-    pub fn current(&self) -> &CoreInfo {
+    pub fn with_current<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(&CoreInfo) -> T,
+    {
+        let state = unsafe { disable_interrupts() };
         let core_id = crate::core_id() & 0b11;
-        &self.0[core_id as usize]
+        let res = f(&self.0[core_id as usize]);
+        unsafe { restore_interrupts(state) };
+        res
     }
 }
 
 /// Safety:
 /// - per-core values are only accessible to one core at a time; since
-///   current() can return &'static values, that means threads must never
-///   move between cores.  (This is currently violated!!!)
-/// - To do this safely, current must run with a limited scope, and prevent
-///   preemption / yielding during that period
+///   `with_current` disables interrupts around any operations accessing
+///   the per-core values, and references to those values cannot escape
+///   the closure, they will remain on that core.
+///   TODO: ensure that functions like yield cannot be called from within
+///   `with_current`.
 /// - &CoreInfo must not be Send, so the static references to it cannot
 ///   be passed between threads
 ///
@@ -107,109 +113,6 @@ impl AllCores {
 unsafe impl Sync for AllCores {}
 
 pub static CORES: AllCores = AllCores::new();
-
-pub struct Thread {
-    pub last_context: NonNull<Context>,
-    pub stack: NonNull<[u128]>,
-    // TODO: inline if small
-    // TODO: reuse the stack or thread allocations
-    // (can't make Thread unsized until ptr::metadata is stable)
-    pub func: Option<Box<dyn FnOnce()>>,
-}
-
-impl Thread {
-    pub fn new(stack: NonNull<[u128]>, func: Option<Box<dyn FnOnce()>>) -> Self {
-        // reuse the lowest region of the stack as the initial context
-        assert!(stack.len() >= size_of::<Context>());
-        let end = unsafe { stack.cast::<u128>().add(stack.len()) };
-        let context = unsafe { end.cast::<Context>().sub(1) };
-        assert!(context.is_aligned());
-
-        let data = Context {
-            regs: [0; 31],
-            sp: end.as_ptr() as usize,
-            link_reg: init_thread as usize,
-            spsr: 0b0101, // Stay in EL1, using the EL1 sp
-        };
-        unsafe {
-            core::ptr::write(context.as_ptr(), data);
-        }
-
-        Thread {
-            stack,
-            last_context: context,
-            func,
-        }
-    }
-}
-
-impl Drop for Thread {
-    fn drop(&mut self) {
-        let b = unsafe { Box::from_raw(self.stack.as_ptr()) };
-        drop(b);
-    }
-}
-
-pub struct ThreadScheduler {
-    queue: ThreadQueue,
-}
-
-impl ThreadScheduler {
-    const fn new() -> Self {
-        ThreadScheduler {
-            queue: ThreadQueue::new(),
-        }
-    }
-
-    pub fn add_task(&self, thread: Box<Thread>) {
-        self.queue.add(thread);
-        // unblock WFEs on other cores
-        unsafe {
-            asm!("sev");
-        }
-    }
-    pub fn add_all(&self, queue: &ThreadQueue) {
-        self.queue.0.lock().append(&mut *queue.0.lock());
-    }
-
-    pub fn wait_for_task(&self) -> Box<Thread> {
-        loop {
-            if let Some(c) = self.queue.pop() {
-                break c;
-            }
-            // armv8 a-profile reference: G1.19.1 Wait For Event and Send Event
-            unsafe {
-                asm!("wfe");
-            }
-        }
-    }
-
-    pub unsafe fn run_on_core(&self) -> ! {
-        let core = CORES.current();
-        unsafe { switch_to_helper(None, None, core.helper_sp.get()) };
-    }
-}
-
-unsafe impl Sync for ThreadScheduler {}
-
-pub static SCHEDULER: ThreadScheduler = ThreadScheduler::new();
-
-pub struct ThreadQueue(InterruptSpinLock<VecDeque<Box<Thread>>>);
-
-impl ThreadQueue {
-    pub const fn new() -> Self {
-        Self(InterruptSpinLock::new(VecDeque::new()))
-    }
-    pub fn add(&self, thread: Box<Thread>) {
-        self.0.lock().push_back(thread);
-    }
-    pub fn pop(&self) -> Option<Box<Thread>> {
-        self.0.lock().pop_front()
-    }
-}
-
-unsafe impl Send for ThreadQueue {}
-unsafe impl Sync for ThreadQueue {}
 
 #[allow(improper_ctypes)]
 extern "C" {
@@ -228,12 +131,15 @@ extern "C" {
 
 global_asm!(
     r#"
+.global _context_switch
+.global switch_to_helper
+.global restore_context
+
 // extern "C" fn _context_switch(
 //     src_thread: Option<Box<Thread>>, (*mut Thread)
 //     action: Option<&mut SwitchAction>, (*mut SwitchAction)
 //     helper_sp: usize,
 // )
-.global _context_switch
 _context_switch:
     sub sp, sp, #0x110
 
@@ -269,14 +175,12 @@ _context_switch:
 
     // NOTE: fall-through
 
-.global switch_to_helper
 switch_to_helper:
     mov sp, x2
     bl context_switch_inner
 
     // NOTE: fall-through
 
-.global restore_context
 restore_context:
     ldp x1, x2, [x0, #0x100]
     msr ELR_EL1, x1
@@ -306,10 +210,12 @@ restore_context:
     thread_ctx_offset = const core::mem::offset_of!(Thread, last_context),
 );
 
+type EventQueue = crate::scheduler::Queue<Event>;
+
 pub enum SwitchAction<'a> {
     Yield,
     FreeThread,
-    QueueAddUnlock(&'a ThreadQueue, &'a crate::sync::SpinLockInner),
+    QueueAddUnlock(&'a EventQueue, &'a crate::sync::SpinLockInner),
 }
 
 #[no_mangle]
@@ -317,57 +223,37 @@ unsafe extern "C" fn context_switch_inner(
     thread: Option<Box<Thread>>,
     action: Option<&mut SwitchAction>,
 ) -> *mut Context {
-    let mut action = action
+    let action = action
         .map(|ptr| core::mem::replace(ptr, SwitchAction::Yield))
         .unwrap_or(SwitchAction::Yield);
 
     if let Some(thread) = thread {
         match action {
-            SwitchAction::Yield => SCHEDULER.add_task(thread),
+            SwitchAction::Yield => SCHEDULER.add_task(Event::ScheduleThread(thread)),
             SwitchAction::FreeThread => drop(thread),
             SwitchAction::QueueAddUnlock(queue, lock) => {
                 let mut queue_inner = queue.0.lock();
-                queue_inner.push_back(thread);
+                queue_inner.push_back(Event::ScheduleThread(thread));
                 lock.unlock();
-                drop(queue_inner); // TODO: unlocking this is risky, as it could be owned by the thread...
-                action = SwitchAction::Yield; // these objects borrow from the calling thread,
-                                              // so they must not be used once the thread is on the (unlocked) queue
+
+                // TODO: unlocking this is risky, as it could be owned
+                // by the thread being added to the queue.
+                drop(queue_inner);
+
+                // These objects borrow from the calling thread, so they
+                // must not be used once the thread is on the (unlocked)
+                // queue.
+                drop(action);
             }
         }
     }
 
-    let target_thread = match action {
-        SwitchAction::Yield | SwitchAction::FreeThread | SwitchAction::QueueAddUnlock(..) => {
-            SCHEDULER.wait_for_task()
-        }
-    };
-
-    let next_ctx = target_thread.last_context.as_ptr();
-    let old = CORES.current().thread.replace(Some(target_thread));
-    assert!(old.is_none());
-    next_ctx
-}
-
-const STACK_SIZE: usize = 16384;
-
-pub fn thread<F>(f: F)
-where
-    F: FnOnce() + Send + 'static,
-{
-    let stack = Box::<[u128]>::new_uninit_slice(STACK_SIZE / size_of::<u128>());
-    let stack = NonNull::new(Box::into_raw(stack) as *mut [u128]).unwrap();
-    let thread = Box::new(Thread::new(stack, Some(Box::new(f))));
-
-    SCHEDULER.queue.add(thread);
+    unsafe { crate::event::run_event_loop() };
 }
 
 pub fn context_switch(mut action: SwitchAction) {
-    let int = disable_interrupts();
-    let core = CORES.current();
-    let helper_sp = core.helper_sp.get();
-    let thread = core.thread.take().unwrap();
-    restore_interrupts(int);
-
+    let (helper_sp, thread) = CORES.with_current(|core| (core.helper_sp.get(), core.thread.take()));
+    let thread = thread.expect("attempt to context switch from an event");
     unsafe { _context_switch(Some(thread), Some(&mut action), helper_sp) };
 }
 
@@ -380,23 +266,88 @@ pub fn stop() -> ! {
     unreachable!()
 }
 
+pub struct Thread {
+    pub last_context: NonNull<Context>,
+    pub stack: NonNull<[u128]>,
+    // TODO: is this worth storing inline in the struct?
+    pub func: Option<Box<dyn FnOnce() + Send>>,
+}
+
+unsafe impl Send for Thread {}
+
+impl Thread {
+    pub fn new(stack: NonNull<[u128]>, func: Option<Box<dyn FnOnce() + Send>>) -> Self {
+        // reuse the lowest region of the stack as the initial context
+        assert!(stack.len() >= size_of::<Context>());
+        let end = unsafe { stack.cast::<u128>().add(stack.len()) };
+        let context = unsafe { end.cast::<Context>().sub(1) };
+        assert!(context.is_aligned());
+
+        let data = Context {
+            regs: [0; 31],
+            sp: end.as_ptr() as usize,
+            link_reg: init_thread as usize,
+            spsr: 0b0101, // Stay in EL1, using the EL1 sp
+        };
+        unsafe {
+            core::ptr::write(context.as_ptr(), data);
+        }
+
+        Thread {
+            stack,
+            last_context: context,
+            func,
+        }
+    }
+}
+
+impl Drop for Thread {
+    fn drop(&mut self) {
+        let b = unsafe { Box::from_raw(self.stack.as_ptr()) };
+        drop(b);
+    }
+}
+
+const STACK_SIZE: usize = 16384;
+
+pub fn thread<F>(f: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    let stack = Box::<[u128]>::new_uninit_slice(STACK_SIZE / size_of::<u128>());
+    let stack = NonNull::new(Box::into_raw(stack) as *mut [u128]).unwrap();
+    let thread = Box::new(Thread::new(stack, Some(Box::new(f))));
+
+    SCHEDULER.add_task(Event::ScheduleThread(thread));
+}
+
 #[no_mangle]
 extern "C" fn init_thread() {
-    let func;
-    {
-        let int = disable_interrupts();
-        let core = CORES.current();
-        core.no_preempt.set(true);
-        restore_interrupts(int);
-
+    let func = CORES.with_current(|core| {
         let mut thread = core.thread.take().unwrap();
-        func = thread.func.take().unwrap();
+        let func = thread.func.take().unwrap();
         core.thread.set(Some(thread));
-
-        core.no_preempt.set(false);
-    }
+        func
+    });
 
     func();
 
     stop();
 }
+
+// pub unsafe fn run_thread_loop() -> ! {
+//     let helper_sp = CORES.with_current(|i| i.helper_sp.get());
+//     unsafe { switch_to_helper(None, None, helper_sp) };
+// }
+
+// pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
+//     let mut action = SwitchAction::Yield;
+//     let (helper_sp, thread) = CORES.with_current(|core| (core.helper_sp.get(), core.thread.take()));
+
+//     if let Some(mut thread) = thread {
+//         thread.last_context = ctx.into();
+//         unsafe { switch_to_helper(Some(thread), Some(&mut action), helper_sp) };
+//     } else {
+//         return ctx;
+//     }
+// }
