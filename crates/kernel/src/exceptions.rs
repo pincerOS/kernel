@@ -1,4 +1,4 @@
-use core::arch::global_asm;
+use core::arch::{asm, global_asm};
 
 use crate::thread::Context;
 use crate::{halt, uart};
@@ -163,7 +163,16 @@ unsafe extern "C" fn exception_handler_example(
     let _insn_len = if ((esr >> 25) & 1) != 0 { 4 } else { 2 };
 
     if uart::UART.is_initialized() {
-        println!("Recieved exception: elr={elr:#x} spsr={spsr:#010x} esr={esr:#010x} (class {exception_class:#x} / {class_name}) {arg}");
+        println!("Received exception: elr={elr:#x} spsr={spsr:#010x} esr={esr:#010x} (class {exception_class:#x} / {class_name}) {arg}");
+        let far_el1: usize;
+        unsafe {
+            asm! {
+                "mrs {}, far_el1",
+                out(reg) far_el1,
+                options(nomem, nostack, preserves_flags)
+            }
+        }
+        println!("(Faulting address, if relevant: 0x{far_el1:X})");
     }
 
     match exception_class {

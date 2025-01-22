@@ -171,7 +171,7 @@ impl VideoCoreMailbox {
                 memory::invalidate_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
                 break;
             } else {
-                println!("Warning: recieved mailbox message from wrong channel?");
+                println!("Warning: received mailbox message from wrong channel?");
             }
         }
 
@@ -330,7 +330,9 @@ impl VideoCoreMailbox {
         // println!("{:?}", bytemuck::cast_slice_mut::<_, u32>(&mut buffer));
         println!("Response: {response:#010x}\nbuffer: {buffer_ptr:#010x}, {buffer_size:#010x}, {pitch:#010x}");
 
-        let ptr = (buffer_ptr as usize) as *mut u128;
+        let ptr: *mut u128 = unsafe { memory::map_physical(buffer_ptr as usize, buffer_size) }
+            .as_ptr()
+            .cast();
         assert!(ptr.is_aligned());
         let array_elems = buffer_size / size_of::<u128>();
         let array = unsafe { core::slice::from_raw_parts_mut(ptr, array_elems) };
@@ -410,6 +412,10 @@ impl Surface {
         // Minimize tearing by doing a fast copy from the alternate
         // buffer into the actual framebuffer.
         memcpy128(self.buffer, &self.alternate);
+        memory::clean_physical_buffer_for_device(
+            self.buffer().as_mut_ptr().cast(),
+            mem::size_of_val(self.buffer),
+        );
         // self.buffer.copy_from_slice(&self.alternate);
         // Force writes to go through
         core::hint::black_box(&mut *self.buffer);

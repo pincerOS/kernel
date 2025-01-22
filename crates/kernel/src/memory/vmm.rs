@@ -8,13 +8,13 @@ use super::{
     physical_addr,
 };
 
-#[repr(C, align(256))]
-struct KernelTranslationTable([TranslationDescriptor; 32]);
+#[repr(C, align(128))]
+struct KernelTranslationTable([TranslationDescriptor; 16]);
 
 const PG_SZ: usize = 0x1000;
 
 #[repr(C, align(4096))]
-struct KernelLeafTable([LeafDescriptor; PG_SZ / 8]);
+struct KernelLeafTable([LeafDescriptor; PG_SZ / 8 * 2]);
 
 fn virt_addr_base() -> NonNull<()> {
     NonNull::new(ptr::with_exposed_provenance_mut(0xFFFF_FFFF_FE00_0000)).unwrap()
@@ -23,9 +23,23 @@ fn virt_addr_base() -> NonNull<()> {
 /// only call once!
 pub unsafe fn init() {
     unsafe {
-        KERNEL_TRANSLATION_TABLE.0[1] = TranslationDescriptor {
+        // TEMP: 13 x 2MB = 26MB for heap
+        for idx in 1..14 {
+            KERNEL_TRANSLATION_TABLE.0[idx] = TranslationDescriptor {
+                leaf: LeafDescriptor::new(0x20_0000 * idx)
+                    .set_global()
+                    .difference(LeafDescriptor::IS_PAGE_DESCRIPTOR),
+            };
+        }
+        // TEMP: 4MB of virtual addresses (1K pages) for kernel mmaping
+        KERNEL_TRANSLATION_TABLE.0[14] = TranslationDescriptor {
             table: TableDescriptor::new(
                 physical_addr(addr_of!(KERNEL_LEAF_TABLE).addr()).unwrap() as usize
+            ),
+        };
+        KERNEL_TRANSLATION_TABLE.0[15] = TranslationDescriptor {
+            table: TableDescriptor::new(
+                physical_addr(addr_of!(KERNEL_LEAF_TABLE).addr() + PG_SZ).unwrap() as usize,
             ),
         };
     }
@@ -48,13 +62,14 @@ pub unsafe fn map_device(pa: usize) -> NonNull<()> {
             options(readonly, nostack, preserves_flags)
         }
     }
-    unsafe { virt_addr_base().byte_add(0x20_0000 + idx * PG_SZ + (pa - pa_aligned)) }
+    // TEMP: Hardcoded offsets
+    let off = 0x20_0000 * 14 + idx * PG_SZ + (pa - pa_aligned);
+    unsafe { virt_addr_base().byte_add(off) }
 }
 
 /// not thread safe
 pub unsafe fn map_physical(pa_start: usize, size: usize) -> NonNull<()> {
     let pg_aligned_start = (pa_start / PG_SZ) * PG_SZ;
-    println!("a {pg_aligned_start:X} st {pa_start:X} sz {size:X} ");
     let table = unsafe { &mut KERNEL_LEAF_TABLE };
     let idx = table
         .0
@@ -73,16 +88,19 @@ pub unsafe fn map_physical(pa_start: usize, size: usize) -> NonNull<()> {
             options(readonly, nostack, preserves_flags)
         }
     }
-    unsafe { virt_addr_base().byte_add(0x20_0000 + idx * PG_SZ + (pa_start - pg_aligned_start)) }
+    // TEMP: Hardcoded offsets
+    unsafe {
+        virt_addr_base().byte_add(0x20_0000 * 14 + idx * PG_SZ + (pa_start - pg_aligned_start))
+    }
 }
 
 #[no_mangle]
 static mut KERNEL_LEAF_TABLE: KernelLeafTable =
-    KernelLeafTable([LeafDescriptor::empty(); PG_SZ / 8]);
+    KernelLeafTable([LeafDescriptor::empty(); PG_SZ / 8 * 2]);
 
 #[no_mangle]
 static mut KERNEL_TRANSLATION_TABLE: KernelTranslationTable = KernelTranslationTable(
     [TranslationDescriptor {
         table: TableDescriptor::empty(),
-    }; 32],
+    }; 16],
 );

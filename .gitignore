@@ -2,3 +2,4 @@
 kernel.bin
 .gdb_history
 .vscode
+.DS_Store

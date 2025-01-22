@@ -49,7 +49,7 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     let id = core_id() & 3;
 
     // TODO: proper heap allocator, and physical memory allocation for heap space
-    unsafe { heap::ALLOCATOR.init(0xFFFF_FFFF_FE10_0000 as *mut (), 0x100000) };
+    unsafe { heap::ALLOCATOR.init(0xFFFF_FFFF_FE20_0000 as *mut (), 0x20_0000 * 13) };
 
     // TODO: device tree /soc/serial with compatible:arm,pl011
     let uart_base = unsafe { memory::map_device(0x3f201000) }.as_ptr();
@@ -194,7 +194,6 @@ fn kernel_main(device_tree: device_tree::DeviceTree) {
     barrier.sync();
     println!("End of preemption test");
 
-    todo!("Fix mailbox accesses");
     let mut surface = unsafe { mailbox.get_framebuffer() };
 
     vsync_tearing_demo(&mut surface);

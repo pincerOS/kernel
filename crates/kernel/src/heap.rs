@@ -1,4 +1,4 @@
-use alloc::alloc::{GlobalAlloc, Layout};
+use alloc::alloc::{handle_alloc_error, GlobalAlloc, Layout};
 use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
 // TODO: implement a proper allocator
@@ -54,8 +54,7 @@ unsafe impl GlobalAlloc for BumpAllocator {
 
         let max = self.max.load(Ordering::SeqCst);
         if start.next_multiple_of(align) + size >= max {
-            self.offset.store(max, Ordering::SeqCst);
-            panic!("Heap full");
+            handle_alloc_error(layout);
         }
 
         let alloc_offset = start.next_multiple_of(align);
