@@ -16,7 +16,8 @@ fn example_1() {
     
     let root_node: Rc<INodeWrapper> = ext2.get_root_inode_wrapper();
     
-    let test_node: Option<Rc<INodeWrapper>> = ext2.find(&root_node, "test.txt");
-    
-    assert!(test_node.is_some());
+    let test_node: Rc<INodeWrapper> = ext2.find(&root_node, "test.txt").unwrap();
+    let test_node_text: std::string::String = test_node.read_text_file_as_str(&mut ext2);
+
+    assert_eq!(test_node_text, "asldfalsjdkfvnlasdfvnka,dsfvmna")
 }

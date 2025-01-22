@@ -358,7 +358,10 @@ where
         let block_group_descriptor_length: usize =
             1 + (((superblock.get_num_of_block_groups() as usize) * size_of::<BGD>()) / BLOCK_SIZE);
 
-        block_group_descriptor_tables.resize(block_group_descriptor_length, 
+        let num_of_descriptor_tables: usize =
+            block_group_descriptor_length * (BLOCK_SIZE / size_of::<BGD>());
+
+        block_group_descriptor_tables.resize(num_of_descriptor_tables,
                                              BGD{ bg_block_bitmap: 0, bg_inode_bitmap: 0, 
                                                         bg_inode_table: 0, bg_free_blocks_count: 0, 
                                                         bg_free_inodes_count: 0, bg_used_dirs_count: 0, 
@@ -401,7 +404,7 @@ where
                                                        &self.block_group_descriptor_tables,
                                                        dir_entry.inode_number as usize);
 
-                    Rc::new(INodeWrapper { inode, inode_num: dir_entry.inode_number });
+                    return Some(Rc::new(INodeWrapper { inode, inode_num: dir_entry.inode_number }));
                 }
             }
         }
@@ -424,7 +427,7 @@ impl INodeWrapper
         // technically, i_dir_acl only has the upper 32 bits
         // for regular files, but it will just be zero for others
         // so it doesn't really matter
-        (self.inode.i_size as u64) & ((self.inode.i_dir_acl as u64) << 32)
+        (self.inode.i_size as u64) | ((self.inode.i_dir_acl as u64) << 32)
     }
 
     fn get_word(byte_array: &[u8]) -> u32 {
@@ -532,22 +535,46 @@ impl INodeWrapper
         }
     }
 
+    pub fn read_file<D: BlockDevice>(&self, ext2: &mut Ext2<D>) -> Vec<u8> {
+        let mut return_value: Vec<u8> = Vec::new();
+        let mut blocks_to_read: usize = (self.size() as usize) / BLOCK_SIZE;
+
+        if (self.size() as usize) % BLOCK_SIZE > 0 {
+            blocks_to_read += 1;
+        }
+
+        return_value.resize(blocks_to_read * BLOCK_SIZE,0);
+
+        self.read_block(0, blocks_to_read, return_value.as_mut_slice(), ext2);
+
+        return_value
+    }
+
+    pub fn read_text_file_as_str<D: BlockDevice>(&self, ext2: &mut Ext2<D>) -> String {
+        let mut bytes: Vec<u8> = self.read_file(ext2);
+
+        String::from_utf8_lossy(bytes.as_mut_slice()).into_owned().trim_end_matches('\0').into()
+    }
+
     pub fn get_dir_entries<D: BlockDevice>(&self, ext2: &mut Ext2<D>) -> Vec<DirectoryEntry> {
         // TODO: caching
         let mut entries: Vec<DirectoryEntry> = Vec::new();
         let mut entries_raw_bytes: Vec<u8> = Vec::new();
+        let dir_size: usize = self.size() as usize;
 
-        entries_raw_bytes.resize((self.size() / 9) as usize, 0);
+        entries_raw_bytes.resize(dir_size / 9, 0);
 
-        let directory_entry_size_blocks: usize = (self.size() as usize) / BLOCK_SIZE;
-        let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+        let directory_entry_size_blocks: usize = dir_size / BLOCK_SIZE;
+
+        entries_raw_bytes.resize(directory_entry_size_blocks * BLOCK_SIZE,
+                                 0);
 
         self.read_block(0, directory_entry_size_blocks,
                         entries_raw_bytes.as_mut_slice(), ext2);
 
         let mut i: usize = 0;
 
-        while i < (self.size() as usize) {
+        while i < dir_size {
             let directory_entry_inode_num = Self::get_word(&entries_raw_bytes[i..]);
             let directory_entry_size = Self::get_half_word(&entries_raw_bytes[i+4..i+6]);
             let directory_entry_name_length = entries_raw_bytes[i+6];
