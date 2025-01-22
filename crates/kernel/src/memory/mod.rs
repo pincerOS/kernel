@@ -1,6 +1,8 @@
 mod machine;
 mod vmm;
 
+use core::arch::asm;
+
 use machine::{at_s1e1r, LeafDescriptor};
 pub use vmm::{map_device, map_physical};
 
@@ -20,5 +22,50 @@ pub fn physical_addr(va: usize) -> Option<u64> {
 pub unsafe fn init() {
     unsafe {
         vmm::init();
+    }
+}
+
+pub fn clean_physical_buffer_for_device(va: *mut (), bytes: usize) {
+    let va = va.addr();
+    for ptr in va..(va + bytes) {
+        // clean each byte
+        // TODO: only invoke the cleaning once per cache line by using the cache registers to find line width
+        unsafe {
+            asm! {
+                "dc cvac, {ptr}",
+                ptr = in(reg) ptr,
+                options(readonly, nostack, preserves_flags)
+            }
+        }
+    }
+    // enforce memory barrier between this and subsequent memory operations
+    // must be inserted at some point before the device access, and this is a reasonable point
+    unsafe {
+        asm! {
+            "dmb sy",
+            options(readonly, nostack, preserves_flags)
+        }
+    }
+}
+pub fn invalidate_physical_buffer_for_device(va: *mut (), bytes: usize) {
+    // enforce memory barrier between this and prior memory operations
+    // probably needs to be inserted (?) at some point after the device work completes, and this is a reasonable point
+    unsafe {
+        asm! {
+            "dmb sy",
+            options(readonly, nostack, preserves_flags)
+        }
+    }
+    let va = va.addr();
+    for ptr in va..(va + bytes) {
+        // invalidate each byte
+        // TODO: only invoke the invalidating once per cache line by using the cache registers to find line width
+        unsafe {
+            asm! {
+                "dc ivac, {ptr}",
+                ptr = in(reg) ptr,
+                options(readonly, nostack, preserves_flags)
+            }
+        }
     }
 }

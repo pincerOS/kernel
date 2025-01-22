@@ -10,7 +10,12 @@
 //! <https://github.com/raspberrypi/firmware/wiki/Mailbox-property-interface>
 //! (since this isn't properly documented anywhere...)
 
-use crate::sync::Volatile;
+use core::mem;
+
+use crate::{
+    memory::{self, physical_addr},
+    sync::Volatile,
+};
 
 pub struct VideoCoreMailbox {
     base: *mut u32,
@@ -130,8 +135,10 @@ impl VideoCoreMailbox {
             }
         }
 
-        let addr = (buffer.as_mut_ptr()) as usize;
-        assert!(addr <= u32::MAX as usize && addr % 16 == 0);
+        let buffer_bytes = mem::size_of_val(buffer);
+        let buffer_ptr = buffer.as_mut_ptr();
+        let addr = physical_addr(buffer_ptr.addr()).unwrap();
+        assert!(addr <= u32::MAX as u64 && addr % 16 == 0);
         assert!(channel as u32 <= Self::CHANNEL_MASK);
 
         let value = (addr as u32 & !Self::CHANNEL_MASK) | (channel as u32 & Self::CHANNEL_MASK);
@@ -149,6 +156,7 @@ impl VideoCoreMailbox {
         // TODO: translate buffer addresses for non-property calls
         // (GPU memory and CPU memory may have different virtual addresses)
 
+        memory::clean_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
         unsafe { write_reg.write(value) };
 
         loop {
@@ -160,6 +168,7 @@ impl VideoCoreMailbox {
 
             let message = unsafe { read_reg.read() };
             if (message & Self::CHANNEL_MASK) == channel as u32 {
+                memory::invalidate_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
                 break;
             } else {
                 println!("Warning: recieved mailbox message from wrong channel?");
