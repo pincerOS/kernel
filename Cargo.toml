@@ -10,6 +10,8 @@ opt-level = 2
 strip = false
 incremental = false
 debug = 2
+panic = "abort"
 
 [profile.dev]
 incremental = false
+panic = "abort"

@@ -156,6 +156,18 @@ unsafe extern "C" fn exception_handler_example(
     esr: u64,
     arg: u64,
 ) -> *mut Context {
+    // far_el1 should be preserved up to this point
+    // TODO: need to ensure that LLVM doesn't reorder this load
+    // after an operation that could overwrite it (yield-like ops)
+    let far_el1: usize;
+    unsafe {
+        asm! {
+            "mrs {}, far_el1",
+            out(reg) far_el1,
+            options(nomem, nostack, preserves_flags)
+        }
+    }
+
     let exception_class = esr >> 26;
     let class_name = *EXCEPTION_CLASS
         .get(exception_class as usize)
@@ -164,14 +176,6 @@ unsafe extern "C" fn exception_handler_example(
 
     if uart::UART.is_initialized() {
         println!("Received exception: elr={elr:#x} spsr={spsr:#010x} esr={esr:#010x} (class {exception_class:#x} / {class_name}) {arg}");
-        let far_el1: usize;
-        unsafe {
-            asm! {
-                "mrs {}, far_el1",
-                out(reg) far_el1,
-                options(nomem, nostack, preserves_flags)
-            }
-        }
         println!("(Faulting address, if relevant: 0x{far_el1:X})");
     }
 

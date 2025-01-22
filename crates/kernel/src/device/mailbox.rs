@@ -10,8 +10,6 @@
 //! <https://github.com/raspberrypi/firmware/wiki/Mailbox-property-interface>
 //! (since this isn't properly documented anywhere...)
 
-use core::mem;
-
 use crate::{
     memory::{self, physical_addr},
     sync::Volatile,
@@ -135,7 +133,7 @@ impl VideoCoreMailbox {
             }
         }
 
-        let buffer_bytes = mem::size_of_val(buffer);
+        let buffer_bytes = size_of_val(buffer);
         let buffer_ptr = buffer.as_mut_ptr();
         let addr = physical_addr(buffer_ptr.addr()).unwrap();
         assert!(addr <= u32::MAX as u64 && addr % 16 == 0);
@@ -156,7 +154,9 @@ impl VideoCoreMailbox {
         // TODO: translate buffer addresses for non-property calls
         // (GPU memory and CPU memory may have different virtual addresses)
 
-        memory::clean_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
+        unsafe {
+            memory::clean_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
+        }
         unsafe { write_reg.write(value) };
 
         loop {
@@ -168,7 +168,9 @@ impl VideoCoreMailbox {
 
             let message = unsafe { read_reg.read() };
             if (message & Self::CHANNEL_MASK) == channel as u32 {
-                memory::invalidate_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
+                unsafe {
+                    memory::invalidate_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
+                }
                 break;
             } else {
                 println!("Warning: received mailbox message from wrong channel?");
@@ -187,7 +189,7 @@ impl VideoCoreMailbox {
         // TODO: "Response may include unsolicited tags."
 
         let words: &mut [u32] = bytemuck::cast_slice_mut::<_, u32>(&mut *buffer);
-        let buffer_size = core::mem::size_of_val(words) as u32;
+        let buffer_size = size_of_val(words) as u32;
 
         let data_words = (words.len() - 6) as u32;
 
@@ -330,10 +332,10 @@ impl VideoCoreMailbox {
         // println!("{:?}", bytemuck::cast_slice_mut::<_, u32>(&mut buffer));
         println!("Response: {response:#010x}\nbuffer: {buffer_ptr:#010x}, {buffer_size:#010x}, {pitch:#010x}");
 
-        let ptr: *mut u128 = unsafe { memory::map_physical(buffer_ptr as usize, buffer_size) }
-            .as_ptr()
-            .cast();
+        let ptr = unsafe { memory::map_physical(buffer_ptr as usize, buffer_size) };
+        let ptr = ptr.as_ptr().cast::<u128>();
         assert!(ptr.is_aligned());
+
         let array_elems = buffer_size / size_of::<u128>();
         let array = unsafe { core::slice::from_raw_parts_mut(ptr, array_elems) };
 
@@ -412,10 +414,14 @@ impl Surface {
         // Minimize tearing by doing a fast copy from the alternate
         // buffer into the actual framebuffer.
         memcpy128(self.buffer, &self.alternate);
-        memory::clean_physical_buffer_for_device(
-            self.buffer().as_mut_ptr().cast(),
-            mem::size_of_val(self.buffer),
-        );
+
+        // unsafe {
+        //     memory::clean_physical_buffer_for_device(
+        //         self.buffer().as_mut_ptr().cast(),
+        //         size_of_val(self.buffer),
+        //     );
+        // }
+
         // self.buffer.copy_from_slice(&self.alternate);
         // Force writes to go through
         core::hint::black_box(&mut *self.buffer);

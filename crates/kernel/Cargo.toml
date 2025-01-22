@@ -6,7 +6,6 @@ edition = "2021"
 [[bin]]
 name = "kernel"
 path = "src/main.rs"
-panic = "abort"
 
 [dependencies]
 bitflags = "2.8.0"

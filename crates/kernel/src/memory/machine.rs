@@ -226,7 +226,7 @@ impl TcrEl1 {
             .union(Self::from_bits_retain((tg0 as u64) << 14))
     }
 
-    const fn set_t1sz(&self, t1sz: u8) -> Self {
+    const fn set_t1sz(self, t1sz: u8) -> Self {
         assert!(t1sz < (1 << 6));
         self.difference(Self::T1SZ)
             .union(Self::from_bits_retain((t1sz as u64) << 16))
@@ -291,7 +291,7 @@ impl TableDescriptor {
         assert!(pa < (1 << 52), "field size mismatch");
         assert!(pa % (1 << 12) == 0, "alignment mismatch");
         self.difference(Self::NEXT_ADDR)
-            .union(Self::from_bits_retain((pa as u64)))
+            .union(Self::from_bits_retain(pa as u64))
     }
 
     pub const fn is_valid(self) -> bool {
@@ -322,7 +322,7 @@ impl LeafDescriptor {
         assert!(pa < (1 << 52), "field size mismatch");
         assert!(pa % (1 << 12) == 0, "alignment mismatch");
         self.difference(Self::OA)
-            .union(Self::from_bits_retain((pa as u64)))
+            .union(Self::from_bits_retain(pa as u64))
     }
 
     pub const fn clear_pxn(self) -> Self {

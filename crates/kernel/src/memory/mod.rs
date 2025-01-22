@@ -25,7 +25,8 @@ pub unsafe fn init() {
     }
 }
 
-pub fn clean_physical_buffer_for_device(va: *mut (), bytes: usize) {
+// Note: this may not need to be unsafe
+pub unsafe fn clean_physical_buffer_for_device(va: *mut (), bytes: usize) {
     let va = va.addr();
     for ptr in va..(va + bytes) {
         // clean each byte
@@ -47,7 +48,7 @@ pub fn clean_physical_buffer_for_device(va: *mut (), bytes: usize) {
         }
     }
 }
-pub fn invalidate_physical_buffer_for_device(va: *mut (), bytes: usize) {
+pub unsafe fn invalidate_physical_buffer_for_device(va: *mut (), bytes: usize) {
     // enforce memory barrier between this and prior memory operations
     // probably needs to be inserted (?) at some point after the device work completes, and this is a reasonable point
     unsafe {

@@ -13,8 +13,10 @@ struct KernelTranslationTable([TranslationDescriptor; 16]);
 
 const PG_SZ: usize = 0x1000;
 
+const KERNEL_LEAF_TABLE_SIZE: usize = PG_SZ / 8 * 2;
+
 #[repr(C, align(4096))]
-struct KernelLeafTable([LeafDescriptor; PG_SZ / 8 * 2]);
+struct KernelLeafTable([LeafDescriptor; KERNEL_LEAF_TABLE_SIZE]);
 
 fn virt_addr_base() -> NonNull<()> {
     NonNull::new(ptr::with_exposed_provenance_mut(0xFFFF_FFFF_FE00_0000)).unwrap()
@@ -45,17 +47,30 @@ pub unsafe fn init() {
     }
 }
 
+unsafe fn first_unused_virt_page(table: *mut KernelLeafTable) -> Option<usize> {
+    let table_base = table.cast::<LeafDescriptor>();
+    for idx in 0..KERNEL_LEAF_TABLE_SIZE {
+        let entry = table_base.wrapping_add(idx);
+        let desc = unsafe { entry.read() };
+        if !desc.is_valid() {
+            return Some(idx);
+        }
+    }
+    None
+}
+
 /// not thread safe
 pub unsafe fn map_device(pa: usize) -> NonNull<()> {
     let pa_aligned = (pa / PG_SZ) * PG_SZ;
-    let table = unsafe { &mut KERNEL_LEAF_TABLE };
-    let (idx, entry) = table
-        .0
-        .iter_mut()
-        .enumerate()
-        .find(|(_, desc)| !desc.is_valid())
-        .unwrap();
-    *entry = LeafDescriptor::new(pa_aligned).set_mair(1).set_global();
+    let table = &raw mut KERNEL_LEAF_TABLE;
+    let table_base = table.cast::<LeafDescriptor>();
+
+    let idx = unsafe { first_unused_virt_page(table) };
+    let idx = idx.expect("Out of space in kernel page table!");
+
+    let new_desc = LeafDescriptor::new(pa_aligned).set_mair(1).set_global();
+    unsafe { table_base.add(idx).write(new_desc) };
+
     unsafe {
         asm! {
             "dsb ISH",
@@ -70,18 +85,22 @@ pub unsafe fn map_device(pa: usize) -> NonNull<()> {
 /// not thread safe
 pub unsafe fn map_physical(pa_start: usize, size: usize) -> NonNull<()> {
     let pg_aligned_start = (pa_start / PG_SZ) * PG_SZ;
-    let table = unsafe { &mut KERNEL_LEAF_TABLE };
-    let idx = table
-        .0
-        .iter_mut()
-        .position(|desc| !desc.is_valid())
-        .unwrap();
+    let table = &raw mut KERNEL_LEAF_TABLE;
+    let table_base = table.cast::<LeafDescriptor>();
+
+    let idx = unsafe { first_unused_virt_page(table) };
+    let idx = idx.expect("Out of space in kernel page table!");
+
     for (pg, pg_idx) in (pg_aligned_start..(pa_start + size))
         .step_by(PG_SZ)
         .zip(idx..)
     {
-        table.0[pg_idx] = LeafDescriptor::new(pg).set_global();
+        let entry = unsafe { table_base.add(pg_idx) };
+        assert!(!unsafe { entry.read() }.is_valid());
+        let desc = LeafDescriptor::new(pg).set_global();
+        unsafe { entry.write(desc) };
     }
+
     unsafe {
         asm! {
             "dsb ISH",
