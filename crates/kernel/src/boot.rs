@@ -98,7 +98,7 @@ drop_to_el1:
     ldr x5, =0xFFFFFFFFFE000000 // TODO: slightly cleaner way of encoding this?
     orr lr, lr, x5
     msr ELR_EL2, lr
-    ldr x5, =0b0000000011111111 // Entry 0 is normal memory, entry 1 is device memory
+    ldr x5, =0b010001000000000011111111 // Entry 0 is normal memory, entry 1 is device memory, 2 = normal noncacheable memory
     msr MAIR_EL1, x5
     isb
     eret

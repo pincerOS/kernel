@@ -332,7 +332,7 @@ impl VideoCoreMailbox {
         // println!("{:?}", bytemuck::cast_slice_mut::<_, u32>(&mut buffer));
         println!("Response: {response:#010x}\nbuffer: {buffer_ptr:#010x}, {buffer_size:#010x}, {pitch:#010x}");
 
-        let ptr = unsafe { memory::map_physical(buffer_ptr as usize, buffer_size) };
+        let ptr = unsafe { memory::map_physical_noncacheable(buffer_ptr as usize, buffer_size) };
         let ptr = ptr.as_ptr().cast::<u128>();
         assert!(ptr.is_aligned());
 
