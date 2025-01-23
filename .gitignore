@@ -1,5 +1,6 @@
 /target
 kernel.bin
+kernel.elf
 .gdb_history
 .vscode
 .DS_Store
