@@ -1,12 +1,13 @@
 use std::fs;
 
-use elf::header;
+use elf::{
+    elf_header,
+    section_header::{get_section_headers, get_string_table_header},
+};
 
 // Readelf-like tool to output the parsed elf structs
 
-fn output_elf_file_header(data: &[u8]) -> Result<(), header::ElfHeaderError> {
-    let header = header::ElfHeader::new(data)?;
-
+fn output_elf_file_header(header: &elf_header::ElfHeader) {
     println!("ELF Header:");
     print!("  Magic:   ");
     for byte in header.ident_bytes() {
@@ -55,7 +56,7 @@ fn output_elf_file_header(data: &[u8]) -> Result<(), header::ElfHeaderError> {
         header.e_shoff()
     );
     println!(
-        "  Flags:                             0x{:x}",
+        "  Flags:                             {}",
         header.e_flags()
     );
     println!(
@@ -76,18 +77,94 @@ fn output_elf_file_header(data: &[u8]) -> Result<(), header::ElfHeaderError> {
         "  Section header string table index: {}",
         header.e_shstrndx()
     );
+}
 
-    Ok(())
+fn output_section_headers(data: &[u8], elf_header: &elf_header::ElfHeader) {
+    let section_headers = match get_section_headers(data, elf_header) {
+        Ok(headers) => headers,
+        Err(e) => {
+            eprintln!("Error: {:?}", e);
+            return;
+        }
+    };
+    let string_table = match get_string_table_header(data, elf_header) {
+        Ok(header) => header,
+        Err(e) => {
+            eprintln!("Error: {:?}", e);
+            return;
+        }
+    };
+    let is_32_bit = elf_header.ident().class == elf::identity::Class::ELF32;
+    println!("Section Headers:");
+    if is_32_bit {
+        println!(
+            "  [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al"
+        );
+    } else {
+        println!("  [Nr] Name              Type             Address           Offset");
+        println!("       Size              EntSize          Flags  Link  Info  Align");
+    }
+    for (i, header) in section_headers.iter().enumerate() {
+        let name = match header.name(data, &string_table) {
+            Ok(name) => name,
+            Err(_) => "",
+        };
+        if is_32_bit {
+            print!("  [{i:2}] ");
+            if name.len() > 17 {
+                print!("{:17} ", format!("{}[...]", &name[..12]));
+            } else {
+                print!("{:17} ", name);
+            }
+            print!("{:15} ", format!("{}", header.sh_type));
+            print!("{:08x} ", header.sh_addr);
+            print!("{:06x} ", header.sh_offset);
+            print!("{:06x} ", header.sh_size);
+            print!("{:02x} ", header.sh_entsize);
+            print!("{:3} ", format!("{:>3}", format!("{}", header.sh_flags)));
+            print!("{:2} ", header.sh_link);
+            print!("{:3} ", header.sh_info);
+            print!("{:2} ", header.sh_addralign);
+            println!();
+        } else {
+            print!("  [{i:2}] ");
+            if name.len() > 17 {
+                print!("{:17} ", format!("{}[...]", &name[..12]));
+            } else {
+                print!("{:17} ", name);
+            }
+            print!("{:15}  ", format!("{}", header.sh_type));
+            print!("{:016x}  ", header.sh_addr);
+            print!("{:08x} ", header.sh_offset);
+            println!();
+            print!("       ");
+            print!("{:016x}  ", header.sh_size);
+            print!("{:016x} ", header.sh_entsize);
+            print!("{:8} ", format!("{:>3}", format!("{}", header.sh_flags)));
+            print!("{:2}   ", header.sh_link);
+            print!("{:3}    ", header.sh_info);
+            print!("{:2} ", header.sh_addralign);
+            println!();
+        }
+    }
+    println!("Key to Flags:");
+    println!("  W (write), A (alloc), X (execute), M (merge), S (strings), I (info),");
+    println!("  L (link order), O (extra OS processing required), G (group), T (TLS),");
+    println!("  C (compressed), x (unknown), o (OS specific), E (exclude),");
+    println!("  D (mbind), p (processor specific)");
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let data: Vec<u8> = fs::read("crates/elf/examples/x64/simple")?;
-    match output_elf_file_header(&data) {
-        Ok(_) => (),
+    let data: Vec<u8> = fs::read("crates/elf/examples/arm32/simple")?;
+    let elf_header = match elf_header::ElfHeader::new(&data) {
+        Ok(header) => header,
         Err(e) => {
             eprintln!("Error: {:?}", e);
             return Ok(());
         }
-    }
+    };
+    output_elf_file_header(&elf_header);
+    println!();
+    output_section_headers(&data, &elf_header);
     Ok(())
 }

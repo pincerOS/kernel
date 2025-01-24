@@ -3,6 +3,7 @@
 use core::fmt::{self, Display};
 
 use super::identity;
+use super::types::*;
 
 // OS specific ELF types
 const ET_LOOS: u16 = 0xfe00;
@@ -10,11 +11,6 @@ const ET_HIOS: u16 = 0xfeff;
 // Processor-specific ELF types
 const ET_LOPROC: u16 = 0xff00;
 const ET_HIPROC: u16 = 0xffff;
-
-type Elf32Addr = u32;
-type Elf32Half = u16;
-type Elf32Word = u32;
-type Elf32Off = u32;
 
 #[derive(Debug)]
 pub enum ElfHeader {
@@ -27,7 +23,7 @@ pub enum ElfHeader {
         e_entry: Elf32Addr,
         e_phoff: Elf32Off,
         e_shoff: Elf32Off,
-        e_flags: u32,
+        e_flags: Flags,
         e_ehsize: u16,
         e_phentsize: u16,
         e_phnum: u16,
@@ -44,7 +40,7 @@ pub enum ElfHeader {
         e_entry: Elf64Addr,
         e_phoff: Elf64Off,
         e_shoff: Elf64Off,
-        e_flags: u32,
+        e_flags: Flags,
         e_ehsize: u16,
         e_phentsize: u16,
         e_phnum: u16,
@@ -72,11 +68,6 @@ struct Elf32Ehdr {
     e_shstrndx: Elf32Half,
 }
 
-type Elf64Addr = u64;
-type Elf64Half = u16;
-type Elf64Word = u32;
-type Elf64Off = u64;
-
 #[repr(C)]
 struct Elf64Ehdr {
     e_ident: [u8; identity::EI_NIDENT],
@@ -95,7 +86,7 @@ struct Elf64Ehdr {
     e_shstrndx: Elf64Half,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Type {
     None,
     Relocatable,
@@ -120,7 +111,7 @@ impl Display for Type {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Machine {
     None,
     Bellmac32,
@@ -204,6 +195,7 @@ pub enum Machine {
     TPC,
     SNP1K,
     ST200,
+    AArch64,
     Reserved(u16),
 }
 
@@ -292,6 +284,7 @@ impl Display for Machine {
             Self::TPC => write!(f, "Tenor Network TPC processor"),
             Self::SNP1K => write!(f, "Trebia SNP 1000 processor"),
             Self::ST200 => write!(f, "STMicroelectronics (www.st.com) ST200 microcontroller"),
+            Self::AArch64 => write!(f, "AArch64"),
             Self::Reserved(other) => write!(f, "Reserved ({})", other),
         }
     }
@@ -386,12 +379,13 @@ impl From<u16> for Machine {
             98 => Machine::TPC,
             99 => Machine::SNP1K,
             100 => Machine::ST200,
+            183 => Machine::AArch64,
             other => Machine::Reserved(other),
         }
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Version {
     Current,
 }
@@ -404,6 +398,152 @@ impl Display for Version {
     }
 }
 
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct ARMFlags(u32);
+
+impl ARMFlags {
+    const EF_ARM_RELEXEC: u32 = 0x01;
+    const EF_ARM_HASENTRY: u32 = 0x02;
+    const EF_ARM_INTERWORK: u32 = 0x04;
+    const EF_ARM_APCS_26: u32 = 0x08;
+    const EF_ARM_APCS_FLOAT: u32 = 0x10;
+    const EF_ARM_PIC: u32 = 0x20;
+    const EF_ARM_ALIGN8: u32 = 0x40;
+    const EF_ARM_NEW_ABI: u32 = 0x80;
+    const EF_ARM_OLD_ABI: u32 = 0x100;
+    const EF_ARM_SOFT_FLOAT: u32 = 0x200;
+    const EF_ARM_ABI_FLOAT_SOFT: u32 = 0x200;
+    const EF_ARM_VFP_FLOAT: u32 = 0x400;
+    const EF_ARM_ABI_FLOAT_HARD: u32 = 0x400;
+    const EF_ARM_MAVERICK_FLOAT: u32 = 0x800;
+    const EF_ARM_EABIMASK: u32 = 0xFF000000;
+
+    pub fn relexec(&self) -> bool {
+        self.0 & Self::EF_ARM_RELEXEC != 0
+    }
+    pub fn hasentry(&self) -> bool {
+        self.0 & Self::EF_ARM_HASENTRY != 0
+    }
+    pub fn interwork(&self) -> bool {
+        self.0 & Self::EF_ARM_INTERWORK != 0
+    }
+    pub fn apcs_26(&self) -> bool {
+        self.0 & Self::EF_ARM_APCS_26 != 0
+    }
+    pub fn apcs_float(&self) -> bool {
+        self.0 & Self::EF_ARM_APCS_FLOAT != 0
+    }
+    pub fn pic(&self) -> bool {
+        self.0 & Self::EF_ARM_PIC != 0
+    }
+    pub fn align8(&self) -> bool {
+        self.0 & Self::EF_ARM_ALIGN8 != 0
+    }
+    pub fn new_abi(&self) -> bool {
+        self.0 & Self::EF_ARM_NEW_ABI != 0
+    }
+    pub fn old_abi(&self) -> bool {
+        self.0 & Self::EF_ARM_OLD_ABI != 0
+    }
+    pub fn soft_float(&self) -> bool {
+        self.0 & Self::EF_ARM_SOFT_FLOAT != 0
+    }
+    pub fn abi_float_soft(&self) -> bool {
+        self.0 & Self::EF_ARM_ABI_FLOAT_SOFT != 0
+    }
+    pub fn vfp_float(&self) -> bool {
+        self.0 & Self::EF_ARM_VFP_FLOAT != 0
+    }
+    pub fn abi_float_hard(&self) -> bool {
+        self.0 & Self::EF_ARM_ABI_FLOAT_HARD != 0
+    }
+    pub fn maverick_float(&self) -> bool {
+        self.0 & Self::EF_ARM_MAVERICK_FLOAT != 0
+    }
+    pub fn eabi_version(&self) -> u32 {
+        (self.0 & Self::EF_ARM_EABIMASK) >> 24
+    }
+}
+
+impl Display for ARMFlags {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "0x{:08x}", self.0)?;
+        if self.0 == 0 {
+            return Ok(());
+        }
+        match self.eabi_version() {
+            1 => write!(f, ", Version1 EABI")?,
+            2 => write!(f, ", Version2 EABI")?,
+            3 => write!(f, ", Version3 EABI")?,
+            4 => write!(f, ", Version4 EABI")?,
+            5 => write!(f, ", Version5 EABI")?,
+            _ => write!(f, ", Unknown EABI version")?,
+        }
+        if self.relexec() {
+            write!(f, ", RELEXEC")?;
+        }
+        if self.hasentry() {
+            write!(f, ", HASENTRY")?;
+        }
+        if self.interwork() {
+            write!(f, ", INTERWORK")?;
+        }
+        if self.apcs_26() {
+            write!(f, ", APCS_26")?;
+        }
+        if self.apcs_float() {
+            write!(f, ", APCS_FLOAT")?;
+        }
+        if self.pic() {
+            write!(f, ", PIC")?;
+        }
+        if self.align8() {
+            write!(f, ", ALIGN8")?;
+        }
+        if self.new_abi() {
+            write!(f, ", NEW_ABI")?;
+        }
+        if self.old_abi() {
+            write!(f, ", OLD_ABI")?;
+        }
+        if self.abi_float_soft() {
+            write!(f, ", soft-float ABI")?;
+        }
+        if self.abi_float_hard() {
+            write!(f, ", hard-float ABI")?;
+        }
+        if self.maverick_float() {
+            write!(f, ", MAVERICK_FLOAT")?;
+        }
+
+        Ok(())
+    }
+}
+
+impl From<Elf32Word> for ARMFlags {
+    fn from(flags: Elf32Word) -> Self {
+        ARMFlags(flags)
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum Flags {
+    ARM(ARMFlags),
+    AArch64,
+    I386,
+    X86_64,
+}
+
+impl Display for Flags {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::ARM(flags) => write!(f, "{}", flags),
+            _ => write!(f, ""),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ElfHeaderError {
     InvalidLength,
@@ -411,6 +551,7 @@ pub enum ElfHeaderError {
     InvalidType,
     InvalidVersion,
     UnknownVersion,
+    UnimplementedArchitecture,
 }
 
 impl From<identity::ElfIdentityError> for ElfHeaderError {
@@ -447,49 +588,50 @@ impl ElfHeader {
             0x02 => Type::Executable,
             0x03 => Type::SharedObject,
             0x04 => Type::Core,
-            other => {
-                if other >= ET_LOOS && other <= ET_HIOS {
-                    Type::OsSpecific(other)
-                } else if other >= ET_LOPROC && other <= ET_HIPROC {
-                    Type::ProcessorSpecific(other)
-                } else {
-                    return Err(ElfHeaderError::InvalidType);
-                }
-            }
+            other if other >= ET_LOOS && other <= ET_HIOS => Type::OsSpecific(other),
+            other if other >= ET_LOPROC && other <= ET_HIPROC => Type::ProcessorSpecific(other),
+            _ => return Err(ElfHeaderError::InvalidType),
         };
-        let machine = Machine::from(header.e_machine);
-        let version = match header.e_version {
+        let e_machine = match Machine::from(header.e_machine) {
+            Machine::ARM => Machine::ARM,
+            _ => return Err(ElfHeaderError::UnimplementedArchitecture),
+        };
+        let e_version = match header.e_version {
             0x00 => return Err(ElfHeaderError::InvalidVersion),
             0x01 => Version::Current,
             _ => return Err(ElfHeaderError::UnknownVersion),
         };
-        let entry = header.e_entry;
-        let phoff = header.e_phoff;
-        let shoff = header.e_shoff;
-        let flags = header.e_flags;
-        let ehsize = header.e_ehsize;
-        let phentsize = header.e_phentsize;
-        let phnum = header.e_phnum;
-        let shentsize = header.e_shentsize;
-        let shnum = header.e_shnum;
-        let shstrndx = header.e_shstrndx;
+        let e_entry = header.e_entry;
+        let e_phoff = header.e_phoff;
+        let e_shoff = header.e_shoff;
+        let e_flags = match e_machine {
+            Machine::ARM => Flags::ARM(ARMFlags::from(header.e_flags)),
+            Machine::I386 => Flags::I386,
+            _ => return Err(ElfHeaderError::UnimplementedArchitecture),
+        };
+        let e_ehsize = header.e_ehsize;
+        let e_phentsize = header.e_phentsize;
+        let e_phnum = header.e_phnum;
+        let e_shentsize = header.e_shentsize;
+        let e_shnum = header.e_shnum;
+        let e_shstrndx = header.e_shstrndx;
 
         Ok(ElfHeader::Elf32Header {
             e_ident,
             e_ident_bytes: header.e_ident,
             e_type,
-            e_machine: machine,
-            e_version: version,
-            e_entry: entry,
-            e_phoff: phoff,
-            e_shoff: shoff,
-            e_flags: flags,
-            e_ehsize: ehsize,
-            e_phentsize: phentsize,
-            e_phnum: phnum,
-            e_shentsize: shentsize,
-            e_shnum: shnum,
-            e_shstrndx: shstrndx,
+            e_machine,
+            e_version,
+            e_entry,
+            e_phoff,
+            e_shoff,
+            e_flags,
+            e_ehsize,
+            e_phentsize,
+            e_phnum,
+            e_shentsize,
+            e_shnum,
+            e_shstrndx,
         })
     }
     fn new_elf64(
@@ -507,49 +649,47 @@ impl ElfHeader {
             0x02 => Type::Executable,
             0x03 => Type::SharedObject,
             0x04 => Type::Core,
-            other => {
-                if other >= ET_LOOS && other <= ET_HIOS {
-                    Type::OsSpecific(other)
-                } else if other >= ET_LOPROC && other <= ET_HIPROC {
-                    Type::ProcessorSpecific(other)
-                } else {
-                    return Err(ElfHeaderError::InvalidType);
-                }
-            }
+            other if other >= ET_LOOS && other <= ET_HIOS => Type::OsSpecific(other),
+            other if other >= ET_LOPROC && other <= ET_HIPROC => Type::ProcessorSpecific(other),
+            _ => return Err(ElfHeaderError::InvalidType),
         };
-        let machine = Machine::from(header.e_machine);
-        let version = match header.e_version {
+        let e_machine = Machine::from(header.e_machine);
+        let e_version = match header.e_version {
             0x00 => return Err(ElfHeaderError::InvalidVersion),
             0x01 => Version::Current,
             _ => return Err(ElfHeaderError::UnknownVersion),
         };
-        let entry = header.e_entry;
-        let phoff = header.e_phoff;
-        let shoff = header.e_shoff;
-        let flags = header.e_flags;
-        let ehsize = header.e_ehsize;
-        let phentsize = header.e_phentsize;
-        let phnum = header.e_phnum;
-        let shentsize = header.e_shentsize;
-        let shnum = header.e_shnum;
-        let shstrndx = header.e_shstrndx;
+        let e_entry = header.e_entry;
+        let e_phoff = header.e_phoff;
+        let e_shoff = header.e_shoff;
+        let e_flags = match e_machine {
+            Machine::AArch64 => Flags::AArch64,
+            Machine::X86_64 => Flags::X86_64,
+            _ => return Err(ElfHeaderError::UnimplementedArchitecture),
+        };
+        let e_ehsize = header.e_ehsize;
+        let e_phentsize = header.e_phentsize;
+        let e_phnum = header.e_phnum;
+        let e_shentsize = header.e_shentsize;
+        let e_shnum = header.e_shnum;
+        let e_shstrndx = header.e_shstrndx;
 
         Ok(ElfHeader::Elf64Header {
             e_ident,
             e_ident_bytes: header.e_ident,
             e_type,
-            e_machine: machine,
-            e_version: version,
-            e_entry: entry,
-            e_phoff: phoff,
-            e_shoff: shoff,
-            e_flags: flags,
-            e_ehsize: ehsize,
-            e_phentsize: phentsize,
-            e_phnum: phnum,
-            e_shentsize: shentsize,
-            e_shnum: shnum,
-            e_shstrndx: shstrndx,
+            e_machine,
+            e_version,
+            e_entry,
+            e_phoff,
+            e_shoff,
+            e_flags,
+            e_ehsize,
+            e_phentsize,
+            e_phnum,
+            e_shentsize,
+            e_shnum,
+            e_shstrndx,
         })
     }
 
@@ -559,10 +699,10 @@ impl ElfHeader {
             ElfHeader::Elf64Header { e_ident_bytes, .. } => e_ident_bytes,
         }
     }
-    pub fn ident(&self) -> &identity::ElfIdentity {
+    pub fn ident(&self) -> identity::ElfIdentity {
         match self {
-            ElfHeader::Elf32Header { e_ident, .. } => e_ident,
-            ElfHeader::Elf64Header { e_ident, .. } => e_ident,
+            ElfHeader::Elf32Header { e_ident, .. } => *e_ident,
+            ElfHeader::Elf64Header { e_ident, .. } => *e_ident,
         }
     }
     pub fn e_type(&self) -> Type {
@@ -601,7 +741,7 @@ impl ElfHeader {
             ElfHeader::Elf64Header { e_shoff, .. } => *e_shoff,
         }
     }
-    pub fn e_flags(&self) -> u32 {
+    pub fn e_flags(&self) -> Flags {
         match self {
             ElfHeader::Elf32Header { e_flags, .. } => *e_flags,
             ElfHeader::Elf64Header { e_flags, .. } => *e_flags,

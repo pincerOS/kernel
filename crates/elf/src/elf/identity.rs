@@ -22,7 +22,7 @@ const EI_PAD: usize = 9;
 // Size of e_ident[]
 pub const EI_NIDENT: usize = 16;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct ElfIdentity {
     pub class: Class,
     pub data: DataEncoding,
@@ -31,13 +31,13 @@ pub struct ElfIdentity {
     pub abi_version: u8,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Class {
     ELF32,
     ELF64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum DataEncoding {
     LSB,
     MSB,
@@ -52,7 +52,7 @@ impl Display for DataEncoding {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Version {
     Current,
 }
@@ -65,7 +65,7 @@ impl Display for Version {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum OsAbi {
     None,
     HPUX,
