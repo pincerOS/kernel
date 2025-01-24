@@ -8,12 +8,11 @@ use super::{
     physical_addr,
 };
 
+const PG_SZ: usize = 0x1000;
+const KERNEL_LEAF_TABLE_SIZE: usize = PG_SZ / 8 * 2;
+
 #[repr(C, align(128))]
 struct KernelTranslationTable([TranslationDescriptor; 16]);
-
-const PG_SZ: usize = 0x1000;
-
-const KERNEL_LEAF_TABLE_SIZE: usize = PG_SZ / 8 * 2;
 
 #[repr(C, align(4096))]
 struct KernelLeafTable([LeafDescriptor; KERNEL_LEAF_TABLE_SIZE]);

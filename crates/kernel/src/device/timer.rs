@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::sync::Volatile;
 
 const ROUTING_CORE_MASK: u32 = 0b0111;
@@ -29,6 +31,7 @@ const REG_TIMER_RELOAD: usize = 0x38;
 const REG_TIMER_CORES: usize = 0x40;
 const REG_PENDING_BASE: usize = 0x60;
 
+#[allow(nonstandard_style)]
 pub struct bcm2836_l1_intc_driver {
     base: *mut u32,
 }
@@ -68,15 +71,16 @@ impl bcm2836_l1_intc_driver {
         }
     }
 
-    pub fn irq_source(&self) -> u32 {
-        // TODO: Require that interrupts are disabled here?
-        let current_core = crate::core_id() & 0b11;
+    /// Reads the pending interrupt register for a core (0-3)
+    ///
+    /// Safety: ???
+    pub unsafe fn irq_source(&self, core: u32) -> u32 {
+        assert!(core < 4);
         let pending_interrupt = Volatile(
             self.base
                 .wrapping_byte_add(REG_PENDING_BASE)
-                .wrapping_add(current_core as usize),
+                .wrapping_add(core as usize),
         );
-
         unsafe { pending_interrupt.read() }
     }
 
@@ -94,9 +98,9 @@ impl bcm2836_l1_intc_driver {
         let new_csr = (CSR_RELOAD_MASK & timer_period) | CSR_TIMER_ENABLE | CSR_INT_ENABLE;
         unsafe { local_timer_csr.write(new_csr) };
 
-        let core0_mode = CNTPNS_IRQ;
+        let core_mode = CNTPNS_IRQ;
         unsafe {
-            local_timer_cores.add(core).write_volatile(core0_mode);
+            local_timer_cores.add(core).write_volatile(core_mode);
         }
 
         let clear_reload = CR_REG_CLEAR | CR_REG_RELOAD;

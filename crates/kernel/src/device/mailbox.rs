@@ -220,7 +220,9 @@ impl VideoCoreMailbox {
         let response_size = words[3];
         let response_code = words[4];
 
-        // println!("{:?} {:?} {:?}", response, response_size, response_code);
+        if response_code != 0x80000000 {
+            return Err(());
+        }
 
         let response_data: &[u8] = &bytemuck::cast_slice(&words[5..])[..response_size as usize];
 

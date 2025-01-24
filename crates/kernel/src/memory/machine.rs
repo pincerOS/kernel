@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use core::arch::asm;
 
 use bitflags::bitflags;
@@ -193,6 +195,24 @@ pub struct TranslationTable(pub [TranslationDescriptor]);
 /// A last level translation table
 #[repr(C)]
 pub struct LeafTable(pub [LeafDescriptor]);
+
+impl TranslationTable {
+    pub fn from_array<const N: usize>(arr: &[TranslationDescriptor; N]) -> &Self {
+        unsafe { &*(&arr[..] as *const [_] as *const TranslationTable) }
+    }
+    pub fn from_array_mut<const N: usize>(arr: &mut [TranslationDescriptor; N]) -> &mut Self {
+        unsafe { &mut *(&mut arr[..] as *mut [_] as *mut TranslationTable) }
+    }
+}
+
+impl LeafTable {
+    pub fn from_array<const N: usize>(arr: &[LeafDescriptor; N]) -> &Self {
+        unsafe { &*(&arr[..] as *const [_] as *const LeafTable) }
+    }
+    pub fn from_array_mut<const N: usize>(arr: &mut [LeafDescriptor; N]) -> &mut Self {
+        unsafe { &mut *(&mut arr[..] as *mut [_] as *mut LeafTable) }
+    }
+}
 
 impl TcrEl1 {
     const fn set_t0sz(self, t0sz: u8) -> Self {
