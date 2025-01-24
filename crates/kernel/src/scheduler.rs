@@ -53,6 +53,11 @@ impl<E> Queue<E> {
     pub fn pop(&self) -> Option<E> {
         self.0.lock().pop_front()
     }
+    pub fn add_then(&self, event: E, then: impl FnOnce()) {
+        let mut guard = self.0.lock();
+        guard.push_back(event);
+        then()
+    }
 }
 
 unsafe impl<E> Sync for Scheduler<E> where E: Send {}

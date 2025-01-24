@@ -80,7 +80,8 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     let id = core_id() & 3;
 
     // TODO: proper heap allocator, and physical memory allocation for heap space
-    unsafe { heap::ALLOCATOR.init(0xFFFF_FFFF_FE20_0000 as *mut (), 0x20_0000 * 13) };
+    let heap_base = 0xFFFF_FFFF_FE20_0000 as *mut ();
+    unsafe { heap::ALLOCATOR.init(heap_base, 0x20_0000 * 13) };
 
     let device_tree_base = unsafe { memory::map_physical(x0 as usize, u32::from_be(x4) as usize) };
     let device_tree_base = device_tree_base.as_ptr().cast_const().cast();
@@ -144,13 +145,12 @@ pub unsafe extern "C" fn kernel_entry_rust_alt(_x0: u32, _x1: u64, _x2: u64, _x3
     unsafe { event::run_event_loop() }
 }
 
-fn shutdown() -> ! {
+pub fn shutdown() -> ! {
     println!("| shutting down");
 
     let mut watchdog = device::WATCHDOG.get().lock();
-    unsafe {
-        watchdog.reset(63);
-    }
+    unsafe { watchdog.reset(63) };
+    drop(watchdog);
 
     halt();
 }
@@ -160,11 +160,11 @@ extern "C" {
 }
 global_asm!("get_sp: mov x0, sp; ret");
 
-fn halt() -> ! {
+pub fn halt() -> ! {
     unsafe { asm!("1: wfe; b 1b", options(noreturn)) }
 }
 
-fn core_id() -> u32 {
+pub fn core_id() -> u32 {
     let id: u64;
     unsafe { asm!("mrs {id}, mpidr_el1", id = out(reg) id) };
     id as u32

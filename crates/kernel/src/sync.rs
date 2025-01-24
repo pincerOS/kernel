@@ -4,6 +4,10 @@ use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use alloc::sync::Arc;
+
+use crate::event::Event;
+
 pub struct InterruptsState(pub u64);
 
 impl core::fmt::Debug for InterruptsState {
@@ -68,10 +72,17 @@ pub struct Lock<T: ?Sized, L> {
     inner: L,
     value: UnsafeCell<T>,
 }
+
 pub struct LockGuard<'a, T: ?Sized, L: LockImpl> {
     lock: &'a Lock<T, L>,
     marker: PhantomData<*mut ()>,
 }
+
+pub struct OwnedLockGuard<T: ?Sized, L: LockImpl, P: RefProvider<Lock<T, L>>> {
+    lock: P,
+    marker: PhantomData<(*mut (), Lock<T, L>)>,
+}
+
 impl<T, L: LockImpl> Lock<T, L> {
     pub const fn new(value: T) -> Self {
         Lock {
@@ -80,6 +91,7 @@ impl<T, L: LockImpl> Lock<T, L> {
         }
     }
 }
+
 impl<T: ?Sized, L: LockImpl> Lock<T, L> {
     pub fn lock(&self) -> LockGuard<'_, T, L> {
         self.inner.lock();
@@ -88,47 +100,75 @@ impl<T: ?Sized, L: LockImpl> Lock<T, L> {
             marker: PhantomData,
         }
     }
+    pub fn lock_owned<P>(this: P) -> OwnedLockGuard<T, L, P>
+    where
+        P: RefProvider<Self>,
+    {
+        this.provide().inner.lock();
+        OwnedLockGuard {
+            lock: this,
+            marker: PhantomData,
+        }
+    }
 }
 
-unsafe impl<T: ?Sized, L> Send for Lock<T, L>
-where
-    T: Send,
-    L: Send,
-{
-}
-unsafe impl<T: ?Sized, L> Sync for Lock<T, L>
-where
-    T: Send,
-    L: Sync,
-{
-}
+unsafe impl<T: Send + ?Sized, L: Send> Send for Lock<T, L> {}
+unsafe impl<T: Send + ?Sized, L: Sync> Sync for Lock<T, L> {}
 
-impl<T: ?Sized, L> core::ops::Deref for LockGuard<'_, T, L>
-where
-    L: LockImpl,
-{
+impl<T: ?Sized, L: LockImpl> core::ops::Deref for LockGuard<'_, T, L> {
     type Target = T;
     fn deref(&self) -> &T {
         let ptr = self.lock.value.get();
         unsafe { &*ptr }
     }
 }
-impl<T: ?Sized, L> core::ops::DerefMut for LockGuard<'_, T, L>
-where
-    L: LockImpl,
-{
+impl<T: ?Sized, L: LockImpl> core::ops::DerefMut for LockGuard<'_, T, L> {
     fn deref_mut(&mut self) -> &mut T {
         let ptr = self.lock.value.get();
         unsafe { &mut *ptr }
     }
 }
-
-impl<T: ?Sized, L> core::ops::Drop for LockGuard<'_, T, L>
-where
-    L: LockImpl,
-{
+impl<T: ?Sized, L: LockImpl> core::ops::Drop for LockGuard<'_, T, L> {
     fn drop(&mut self) {
         self.lock.inner.unlock();
+    }
+}
+
+impl<T: ?Sized, L: LockImpl, P: RefProvider<Lock<T, L>>> core::ops::Deref
+    for OwnedLockGuard<T, L, P>
+{
+    type Target = T;
+    fn deref(&self) -> &T {
+        let ptr = self.lock.provide().value.get();
+        unsafe { &*ptr }
+    }
+}
+impl<T: ?Sized, L: LockImpl, P: RefProvider<Lock<T, L>>> core::ops::DerefMut
+    for OwnedLockGuard<T, L, P>
+{
+    fn deref_mut(&mut self) -> &mut T {
+        let ptr = self.lock.provide().value.get();
+        unsafe { &mut *ptr }
+    }
+}
+impl<T: ?Sized, L: LockImpl, P: RefProvider<Lock<T, L>>> core::ops::Drop
+    for OwnedLockGuard<T, L, P>
+{
+    fn drop(&mut self) {
+        self.lock.provide().inner.unlock();
+    }
+}
+
+impl<T: ?Sized, L: LockImpl, P: RefProvider<Lock<T, L>>> OwnedLockGuard<T, L, P> {
+    pub fn unlock(self) -> P {
+        self.lock.provide().inner.unlock();
+        self.into_inner()
+    }
+    pub fn into_inner(self) -> P {
+        let this = core::mem::ManuallyDrop::new(self);
+        // Manually move the lock out of the lock guard without calling
+        // its destructor.
+        unsafe { core::ptr::read(&this.lock) }
     }
 }
 
@@ -171,6 +211,7 @@ impl LockImpl for SpinLockInner {
 
 pub type SpinLock<T> = Lock<T, SpinLockInner>;
 pub type SpinLockGuard<'a, T> = LockGuard<'a, T, SpinLockInner>;
+pub type OwnedSpinLockGuard<'a, T, P> = OwnedLockGuard<T, SpinLockInner, P>;
 
 pub struct InterruptSpinLockInner {
     flag: AtomicBool,
@@ -305,7 +346,36 @@ pub fn spin_sleep_until(target: usize) {
     }
 }
 
-type EventQueue = crate::scheduler::Queue<crate::event::Event>;
+/// Safety: The reference returned by provide must be valid
+/// for the entire lifetime of the object, even if the object
+/// has been moved.
+// TODO: how does this relate to Pin?
+pub unsafe trait RefProvider<T: ?Sized> {
+    fn provide(&self) -> &T;
+}
+
+unsafe impl<T> RefProvider<T> for &T {
+    fn provide(&self) -> &T {
+        *self
+    }
+}
+unsafe impl<T> RefProvider<T> for alloc::boxed::Box<T> {
+    fn provide(&self) -> &T {
+        &*self
+    }
+}
+unsafe impl<T> RefProvider<T> for Arc<T> {
+    fn provide(&self) -> &T {
+        &**self
+    }
+}
+unsafe impl<T> RefProvider<T> for alloc::rc::Rc<T> {
+    fn provide(&self) -> &T {
+        &**self
+    }
+}
+
+type EventQueue = crate::scheduler::Queue<Event>;
 
 pub struct CondVar {
     queue: EventQueue,
@@ -347,6 +417,88 @@ impl CondVar {
         }
         guard
     }
+
+    pub fn wait_then<T, F, P, L>(&self, guard: OwnedSpinLockGuard<T, P>, f: F)
+    where
+        F: FnOnce(OwnedSpinLockGuard<T, P>) + Send + 'static,
+        T: Send + 'static,
+        P: RefProvider<Lock<T, SpinLockInner>> + Send + 'static,
+    {
+        let lock = guard.into_inner();
+        let lock_ref = lock.provide();
+        let lock_ptr = core::ptr::from_ref(lock_ref);
+
+        let wrap = move || {
+            let g = SpinLock::lock_owned(lock);
+            f(g);
+        };
+        let event = Event::Function(alloc::boxed::Box::new(wrap));
+        self.queue.add_then(event, move || {
+            // Safety: the queue must not drop or release the event before
+            // this function is called, so the ref provider must still be
+            // valid.
+            unsafe { &*lock_ptr }.inner.unlock()
+        });
+    }
+
+    pub fn wait_then_owned<T, F, P, P2>(this: P, guard: OwnedSpinLockGuard<T, P2>, f: F)
+    where
+        P: RefProvider<Self> + Send + 'static,
+        P2: RefProvider<Lock<T, SpinLockInner>> + Send + 'static,
+        F: FnOnce(P, OwnedSpinLockGuard<T, P2>) + Send + 'static,
+        T: Send + 'static,
+    {
+        // TODO: The arc should be downgraded to a weak pointer while in
+        // the queue, such that the queue doesn't become a leaked ref cycle,
+        // but there's no guarantee that the condvar is kept alive after
+        // notify is called, so the Event must keep the condvar alive.
+        let cond = this;
+        let cond_ref = cond.provide();
+        let cond_ptr = core::ptr::from_ref(cond_ref);
+
+        let lock = guard.into_inner();
+        let lock_ref = lock.provide();
+        let lock_ptr = core::ptr::from_ref(lock_ref);
+
+        let wrap = move || {
+            let g = SpinLock::lock_owned(lock);
+            f(cond, g);
+        };
+        let event = Event::Function(alloc::boxed::Box::new(wrap));
+
+        // TODO: this may be UB, depending on the example implementation
+        // of the queue's add -- there's no reasonable situation where it
+        // would happen, as this event must be the last thing keeping the
+        // queue alive, but if the queue implementation drops the thread,
+        // then it would free itself and &self would become an invalid ref.
+        unsafe { &(*cond_ptr) }.queue.add_then(event, move || {
+            // Safety: the queue must not drop or release the event before
+            // this function is called, so the ref provider must still be
+            // valid.
+            unsafe { &*lock_ptr }.inner.unlock();
+        });
+    }
+
+    pub fn wait_while_then<'a, T, P, P2, Cond, Then>(
+        this: P,
+        mut guard: OwnedSpinLockGuard<T, P2>,
+        mut condition: Cond,
+        f: Then,
+    ) where
+        P: RefProvider<Self> + Send + 'static,
+        Cond: FnMut(&mut T) -> bool + Send + 'static,
+        Then: FnOnce(OwnedSpinLockGuard<T, P2>) + Send + 'static,
+        P2: RefProvider<Lock<T, SpinLockInner>> + Send + 'static,
+        T: Send + 'static,
+    {
+        if condition(&mut *guard) {
+            Self::wait_then_owned(this, guard, move |this, guard| {
+                Self::wait_while_then(this, guard, condition, f);
+            });
+        } else {
+            f(guard);
+        }
+    }
 }
 
 pub struct Barrier {
@@ -368,6 +520,44 @@ impl Barrier {
             self.condvar.notify_all();
         } else {
             self.condvar.wait_while(guard, |count| *count > 0);
+        }
+    }
+
+    pub fn sync_then(
+        this: impl RefProvider<Self> + Clone + Send + 'static,
+        f: impl FnOnce() + Send + 'static,
+    ) {
+        #[derive(Clone)]
+        struct ProvideProject<T>(T);
+        unsafe impl<T: RefProvider<Barrier>> RefProvider<CondVar> for ProvideProject<T> {
+            fn provide(&self) -> &CondVar {
+                &self.0.provide().condvar
+            }
+        }
+        unsafe impl<T: RefProvider<Barrier>> RefProvider<SpinLock<u32>> for ProvideProject<T> {
+            fn provide(&self) -> &SpinLock<u32> {
+                &self.0.provide().count
+            }
+        }
+        let ref2 = this.clone();
+
+        let mut guard = Lock::lock_owned(ProvideProject(this));
+        assert!(*guard > 0);
+        *guard -= 1;
+        if *guard == 0 {
+            let inner = guard.unlock().0;
+            inner.provide().condvar.notify_all();
+            f();
+        } else {
+            CondVar::wait_while_then(
+                ProvideProject(ref2),
+                guard,
+                |count| *count > 0,
+                |guard| {
+                    drop(guard);
+                    f();
+                },
+            );
         }
     }
 }

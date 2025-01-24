@@ -1,45 +1,3 @@
-// TODO: design of context switching and interrupt frames
-//
-// Option 1:
-// - interrupt frame saves all regs on stack
-// - context switch by restoring a different frame when
-//   returning from the interrupt handler
-//
-// Option 2:
-// - interrupt frame saves all caller-saved regs
-// - context switching saves and restores callee-saved regs
-// - interrupt return restores caller-saved regs
-// - downside: registers are in two places on the stack
-//
-// Option 3:
-// - interrupt frame saves all regs in TCB, not stack
-// - context switch by restoring a different frame when
-//   returning from the interrupt handler
-
-// # Core design questions:
-//
-// ## Approach to threading
-//
-// Preemptive:
-// - Less concern for DOS within kernel, easier to write kernel code
-// - Increases prevalence of race-conditions / synchronization bugs
-//   within the kernel
-// - In the simple approach, requires a dedicated stack per kernel thread
-//   (though it's straightforward to avoid needing kernel stacks for
-//   inactive user threads)
-//
-// Cooperative (stackful)
-// - Similar implementation complexity and design considerations as preemptive
-// - Risk of DOS within kernel due to loops/slow code without wait points
-// - Reduces race condition prevalence
-//
-// Cooperative (stackless, async)
-// - Hard to write; have to deal with Rust's Pinn / Future apis
-//
-// Cooperative (continuation-passing-style)
-// - Effectively just an event loop, easy to implement
-// - Can be used in parallel to other threading systems
-
 use core::arch::global_asm;
 use core::cell::Cell;
 use core::ptr::NonNull;
@@ -334,20 +292,3 @@ extern "C" fn init_thread() {
 
     stop();
 }
-
-// pub unsafe fn run_thread_loop() -> ! {
-//     let helper_sp = CORES.with_current(|i| i.helper_sp.get());
-//     unsafe { switch_to_helper(None, None, helper_sp) };
-// }
-
-// pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
-//     let mut action = SwitchAction::Yield;
-//     let (helper_sp, thread) = CORES.with_current(|core| (core.helper_sp.get(), core.thread.take()));
-
-//     if let Some(mut thread) = thread {
-//         thread.last_context = ctx.into();
-//         unsafe { switch_to_helper(Some(thread), Some(&mut action), helper_sp) };
-//     } else {
-//         return ctx;
-//     }
-// }
