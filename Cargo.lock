@@ -23,6 +23,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "elf"
+version = "0.1.0"
+
+[[package]]
 name = "endian"
 version = "0.1.0"
 dependencies = [
