@@ -1,14 +1,9 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+#![no_std]
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+extern crate alloc;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+#[cfg(feature = "std")]
+extern crate std;
+
+pub mod elf;
+pub use elf::*;
