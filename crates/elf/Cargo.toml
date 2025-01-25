@@ -7,4 +7,5 @@ edition = "2021"
 
 [features]
 std = []
-default = ["std"]
+alloc = []
+default = []

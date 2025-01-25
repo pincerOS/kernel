@@ -574,7 +574,7 @@ impl ElfHeader {
     }
 
     fn new_elf32(header: &[u8], e_ident: identity::ElfIdentity) -> Result<Self, ElfHeaderError> {
-        if header.len() < std::mem::size_of::<Elf32Ehdr>() {
+        if header.len() < size_of::<Elf32Ehdr>() {
             return Err(ElfHeaderError::InvalidLength);
         }
         let header: &Elf32Ehdr = unsafe { &*(header.as_ptr() as *const Elf32Ehdr) };
@@ -633,7 +633,7 @@ impl ElfHeader {
         })
     }
     fn new_elf64(header: &[u8], e_ident: identity::ElfIdentity) -> Result<Self, ElfHeaderError> {
-        if header.len() < std::mem::size_of::<Elf64Ehdr>() {
+        if header.len() < size_of::<Elf64Ehdr>() {
             return Err(ElfHeaderError::InvalidLength);
         }
         let header: &Elf64Ehdr = unsafe { &*(header.as_ptr() as *const Elf64Ehdr) };

@@ -1,7 +1,6 @@
 // https://refspecs.linuxfoundation.org/elf/gabi4+/ch5.pheader.html
 
 use core::fmt::{Display, Formatter};
-use std::vec::Vec;
 
 use super::{elf_header, identity, types::*};
 
@@ -254,10 +253,11 @@ pub enum ProgramHeaderError {
     UnknownType,
 }
 
-pub fn get_program_headers(
-    data: &[u8],
-    elf_header: &elf_header::ElfHeader,
-) -> Result<Vec<ProgramHeader>, ProgramHeaderError> {
+pub fn get_program_headers<'a>(
+    data: &'a [u8],
+    elf_header: &'a elf_header::ElfHeader,
+) -> Result<impl Iterator<Item = Result<ProgramHeader, ProgramHeaderError>> + 'a, ProgramHeaderError>
+{
     let table_start = elf_header.e_phoff() as usize;
     let entry_size = elf_header.e_phentsize() as usize;
     let entry_count = elf_header.e_phnum() as usize;
@@ -267,18 +267,12 @@ pub fn get_program_headers(
         return Err(ProgramHeaderError::InvalidLength);
     }
     let program_header_table = &data[table_start..table_end];
-    let mut program_headers = Vec::with_capacity(entry_count);
-    for i in 0..entry_count {
+    let iter = (0..entry_count).map(move |i| {
         let entry_start = i * entry_size;
         let entry_end = entry_start + entry_size;
-        let program_header =
-            ProgramHeader::new(&program_header_table[entry_start..entry_end], elf_header);
-        match program_header {
-            Ok(header) => program_headers.push(header),
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(program_headers)
+        ProgramHeader::new(&program_header_table[entry_start..entry_end], elf_header)
+    });
+    Ok(iter)
 }
 
 impl ProgramHeader {
@@ -290,7 +284,7 @@ impl ProgramHeader {
     }
 
     fn new_phdr32(header: &[u8], machine: elf_header::Machine) -> Result<Self, ProgramHeaderError> {
-        if header.len() != std::mem::size_of::<Elf32Phdr>() {
+        if header.len() != size_of::<Elf32Phdr>() {
             return Err(ProgramHeaderError::InvalidLength);
         }
         let header: &Elf32Phdr = unsafe { &*(header.as_ptr() as *const Elf32Phdr) };
@@ -332,7 +326,7 @@ impl ProgramHeader {
         })
     }
     fn new_phdr64(header: &[u8], machine: elf_header::Machine) -> Result<Self, ProgramHeaderError> {
-        if header.len() != std::mem::size_of::<Elf64Phdr>() {
+        if header.len() != size_of::<Elf64Phdr>() {
             return Err(ProgramHeaderError::InvalidLength);
         }
         let header: &Elf64Phdr = unsafe { &*(header.as_ptr() as *const Elf64Phdr) };

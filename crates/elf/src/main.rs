@@ -101,7 +101,14 @@ fn output_section_headers(data: &[u8], elf_header: &elf_header::ElfHeader) {
         println!("  [Nr] Name              Type             Address           Offset");
         println!("       Size              EntSize          Flags  Link  Info  Align");
     }
-    for (i, header) in section_headers.iter().enumerate() {
+    for (i, header) in section_headers.enumerate() {
+        let header = match header {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!("Error: {:?}", e);
+                return;
+            }
+        };
         let name = match header.name(data, &string_table) {
             Ok(name) => name,
             Err(_) => "",
@@ -168,6 +175,13 @@ fn output_program_headers(data: &[u8], elf_header: &elf_header::ElfHeader) {
         println!("                 FileSiz            MemSiz              Flags  Align");
     }
     for header in program_headers {
+        let header = match header {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!("Error: {:?}", e);
+                return;
+            }
+        };
         if is_32_bit {
             print!("  ");
             print!("{:14} ", format!("{}", header.p_type));

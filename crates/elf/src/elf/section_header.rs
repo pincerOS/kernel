@@ -1,7 +1,6 @@
 // https://refspecs.linuxfoundation.org/elf/gabi4+/ch4.sheader.html
 
 use core::{fmt::Display, str::Utf8Error};
-use std::vec::Vec;
 
 use super::{elf_header, identity, types::*};
 
@@ -280,10 +279,11 @@ pub enum SectionHeaderError {
     UnknownType,
 }
 
-pub fn get_section_headers(
-    data: &[u8],
-    elf_header: &elf_header::ElfHeader,
-) -> Result<Vec<SectionHeader>, SectionHeaderError> {
+pub fn get_section_headers<'a>(
+    data: &'a [u8],
+    elf_header: &'a elf_header::ElfHeader,
+) -> Result<impl Iterator<Item = Result<SectionHeader, SectionHeaderError>> + 'a, SectionHeaderError>
+{
     let table_start = elf_header.e_shoff() as usize;
     let entry_size = elf_header.e_shentsize() as usize;
     let entry_count = if elf_header.e_shnum() == SHN_UNDEF {
@@ -300,18 +300,12 @@ pub fn get_section_headers(
     }
     let section_header_table = &data[table_start..table_end];
 
-    let mut section_headers = Vec::with_capacity(entry_count);
-    for i in 0..entry_count {
+    let iter = (0..entry_count).map(move |i| {
         let entry_start = i * entry_size;
         let entry_end = entry_start + entry_size;
-        let section_header =
-            SectionHeader::new(&section_header_table[entry_start..entry_end], &elf_header);
-        match section_header {
-            Ok(header) => section_headers.push(header),
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(section_headers)
+        SectionHeader::new(&section_header_table[entry_start..entry_end], &elf_header)
+    });
+    Ok(iter)
 }
 
 pub fn get_string_table_header(
@@ -358,7 +352,7 @@ impl SectionHeader {
     }
 
     fn new_shdr32(header: &[u8], machine: elf_header::Machine) -> Result<Self, SectionHeaderError> {
-        if header.len() != std::mem::size_of::<Elf32Shdr>() {
+        if header.len() != size_of::<Elf32Shdr>() {
             return Err(SectionHeaderError::InvalidLength);
         }
         let header: &Elf32Shdr = unsafe { &*(header.as_ptr() as *const Elf32Shdr) };
@@ -415,7 +409,7 @@ impl SectionHeader {
         })
     }
     fn new_shdr64(header: &[u8], machine: elf_header::Machine) -> Result<Self, SectionHeaderError> {
-        if header.len() != std::mem::size_of::<Elf64Shdr>() {
+        if header.len() != size_of::<Elf64Shdr>() {
             return Err(SectionHeaderError::InvalidLength);
         }
         let header: &Elf64Shdr = unsafe { &*(header.as_ptr() as *const Elf64Shdr) };
