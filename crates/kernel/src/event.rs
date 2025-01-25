@@ -27,20 +27,7 @@ pub unsafe extern "C" fn run_event_loop() -> ! {
                 func();
             }
             Event::ScheduleThread(thread) => {
-                let next_ctx = thread.last_context.as_ptr();
-
-                // Disable interrupts (preemption) until context is
-                // restored.  (interrupts will be re-enabled by eret)
-                // The timer interrupt assumes that if CORE.thread is set,
-                // then there is a preemptable thread running.
-                unsafe { crate::sync::disable_interrupts() };
-
-                let old = CORES.with_current(|core| core.thread.replace(Some(thread)));
-                assert!(old.is_none());
-
-                // switch into the thread
-                unsafe { crate::context::restore_context(next_ctx) };
-                // unreachable
+                unsafe { thread.enter_thread() };
             }
             Event::AsyncTask(task_id) => {
                 let waker = crate::task::create_waker(task_id);
@@ -74,7 +61,7 @@ pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
     let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
 
     if let Some(mut thread) = thread {
-        thread.last_context = ctx.into();
+        unsafe { thread.save_context(ctx.into()) };
         unsafe { deschedule_thread(core_sp, thread) };
     } else {
         ctx

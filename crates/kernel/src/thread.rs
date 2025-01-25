@@ -16,17 +16,79 @@ pub fn stop() -> ! {
 pub struct Thread {
     pub last_context: NonNull<Context>,
     pub stack: NonNull<[u128]>,
-    // TODO: is this worth storing inline in the struct?
-    pub func: Option<Box<dyn FnOnce() + Send>>,
+    // Stored on the thread's stack
+    func: Option<NonNull<dyn Callback + Send>>,
+
+    pub context: Option<Context>,
+    pub user_regs: Option<UserRegs>,
+}
+
+pub struct UserRegs {
+    pub sp_el0: usize,
+    pub ttbr0_el1: usize,
+    pub usermode: bool,
 }
 
 unsafe impl Send for Thread {}
 
 impl Thread {
-    pub fn new(stack: NonNull<[u128]>, func: Option<Box<dyn FnOnce() + Send>>) -> Self {
+    unsafe fn from_fn<F>(stack: NonNull<[u128]>, func: F) -> Box<Self>
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let init_end = stack.len() * size_of::<u128>();
+        let end = unsafe { stack.cast::<u128>().byte_add(init_end) };
+
+        let align = align_of::<F>();
+        let align_off = end.cast::<u8>().align_offset(align);
+        let offset = (align - align_off).rem_euclid(align) + size_of::<F>();
+        let ptr = unsafe { end.cast::<F>().byte_sub(offset) };
+
+        assert!(ptr.is_aligned());
+        assert!(ptr.addr() >= stack.addr() && (ptr.addr().get() + size_of::<F>()) <= end.addr().get(),
+            "misaligned Thread::from_fn; ptr: {ptr:p}; stack: {stack:p}; end: {end:p}; size: {}, align: {}",
+            size_of::<F>(), align_of::<F>());
+        unsafe { ptr.write(func) };
+
+        let fn_ptr = NonNull::new(ptr.as_ptr() as *mut (dyn Callback + Send)).unwrap();
+
+        let stack_offset = offset.next_multiple_of(size_of::<u128>());
+        unsafe { Self::new(stack, stack_offset, Some(fn_ptr)) }
+    }
+
+    pub unsafe fn new_user(sp: usize, entry: usize, ttbr0: usize) -> Box<Self> {
+        let data = Context {
+            regs: [0; 31],
+            sp: 0,
+            link_reg: entry,
+            spsr: 0b0000, // Run in EL0
+        };
+
+        let mut thread = Box::new(Thread {
+            stack: (&mut [] as &mut [u128]).into(),
+            last_context: NonNull::dangling(),
+            func: None,
+            context: Some(data),
+            user_regs: Some(UserRegs {
+                sp_el0: sp,
+                ttbr0_el1: ttbr0,
+                usermode: true,
+            }),
+        });
+        thread.last_context = thread.context.as_mut().unwrap().into();
+        thread
+    }
+
+    unsafe fn new(
+        stack: NonNull<[u128]>,
+        stack_offset: usize,
+        func: Option<NonNull<dyn Callback + Send>>,
+    ) -> Box<Self> {
+        let init_end = stack.len() * size_of::<u128>() - stack_offset;
+        let end = unsafe { stack.cast::<u128>().byte_add(init_end) };
+
         // reuse the lowest region of the stack as the initial context
-        assert!(stack.len() >= size_of::<Context>());
-        let end = unsafe { stack.cast::<u128>().add(stack.len()) };
+        assert!(init_end >= size_of::<Context>());
         let context = unsafe { end.cast::<Context>().sub(1) };
         assert!(context.is_aligned());
 
@@ -40,11 +102,61 @@ impl Thread {
             core::ptr::write(context.as_ptr(), data);
         }
 
-        Thread {
+        Box::new(Thread {
             stack,
             last_context: context,
             func,
+            context: None,
+            user_regs: None,
+        })
+    }
+
+    pub unsafe fn save_context(&mut self, context: NonNull<Context>) {
+        if let Some(user) = &mut self.user_regs {
+            unsafe { core::arch::asm!("mrs {}, TTBR0_EL1", out(reg) user.ttbr0_el1) };
+            unsafe { core::arch::asm!("mrs {}, SP_EL0", out(reg) user.sp_el0) };
+
+            // context is on the temporary kernel stack, so we have to copy it
+            // into a more permanent location
+            self.context = Some(unsafe { context.read() });
+            self.last_context = self.context.as_mut().unwrap().into();
+        } else {
+            // context is on the allocated stack in the heap, not the per-core
+            // stack; it will not be overwritten before being used again.
+            self.last_context = context;
         }
+    }
+
+    pub unsafe fn enter_thread(self: Box<Self>) -> ! {
+        let next_ctx = self.last_context.as_ptr();
+
+        // Disable interrupts (preemption) until context is
+        // restored.  (interrupts will be re-enabled by eret)
+        // The timer interrupt assumes that if CORE.thread is set,
+        // then there is a preemptable thread running.
+        unsafe { crate::sync::disable_interrupts() };
+
+        if let Some(user) = &self.user_regs {
+            let ctx = unsafe { &mut *next_ctx };
+
+            unsafe { core::arch::asm!("msr TTBR0_EL1, {}", in(reg) user.ttbr0_el1) };
+
+            // TODO: assert that we aren't running on SP_EL0 already...
+            // (kernel threads should probably run in EL1/SP_EL0 mode)
+            unsafe { core::arch::asm!("msr SP_EL0, {}", in(reg) user.sp_el0) };
+
+            if user.usermode {
+                let core_sp = CORES.with_current(|core| core.core_sp.get());
+                ctx.sp = core_sp;
+            }
+        }
+
+        let old = CORES.with_current(|core| core.thread.replace(Some(self)));
+        assert!(old.is_none());
+
+        // switch into the thread
+        unsafe { crate::context::restore_context(next_ctx) };
+        // unreachable
     }
 }
 
@@ -52,6 +164,16 @@ impl Drop for Thread {
     fn drop(&mut self) {
         let b = unsafe { Box::from_raw(self.stack.as_ptr()) };
         drop(b);
+    }
+}
+
+// https://users.rust-lang.org/t/invoke-mut-dyn-fnonce/59356
+trait Callback: FnOnce() {
+    unsafe fn call(&mut self);
+}
+impl<F: FnOnce()> Callback for F {
+    unsafe fn call(&mut self) {
+        unsafe { core::ptr::read(self)() }
     }
 }
 
@@ -63,7 +185,7 @@ where
 {
     let stack = Box::<[u128]>::new_uninit_slice(STACK_SIZE / size_of::<u128>());
     let stack = NonNull::new(Box::into_raw(stack) as *mut [u128]).unwrap();
-    let thread = Box::new(Thread::new(stack, Some(Box::new(f))));
+    let thread = unsafe { Thread::from_fn(stack, f) };
 
     SCHEDULER.add_task(Event::ScheduleThread(thread));
 }
@@ -77,7 +199,7 @@ extern "C" fn init_thread() {
         func
     });
 
-    func();
+    unsafe { (*func.as_ptr()).call() };
 
     stop();
 }

@@ -85,9 +85,9 @@ __exception_vector_start:
 
 // Lower exception level, Aarch64
 .org 0x400
-    save_context exception_handler_unhandled, 8
+    save_context exception_handler_example, 8
 .org 0x480
-    save_context exception_handler_unhandled, 9
+    save_context exception_handler_irq, 9
 .org 0x500
     save_context exception_handler_unhandled, 10
 .org 0x580
