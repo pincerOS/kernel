@@ -6,10 +6,9 @@ EXAMPLE=${1-"main"}
 TARGET=aarch64-unknown-none-softfloat
 PROFILE=${PROFILE-"release"}
 
-cargo clean
+# cargo clean
 cargo rustc --profile=${PROFILE} --example=${EXAMPLE} \
     --target=${TARGET} -- \
-    -C link-arg=--script=./crates/kernel/script.ld \
     -C relocation-model=static
 
 if test "$PROFILE" = "dev" ; then
