@@ -6,6 +6,9 @@ use core::arch::asm;
 use machine::{at_s1e1r, LeafDescriptor};
 pub use vmm::{map_device, map_physical, map_physical_noncacheable};
 
+pub use machine::at_s1e0r;
+pub use vmm::create_user_region;
+
 pub const INIT_TCR_EL1: u64 = machine::TcrEl1::default().bits();
 pub const INIT_TRANSLATION: u64 = LeafDescriptor::new(0)
     .set_global()

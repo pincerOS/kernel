@@ -83,7 +83,7 @@ __exception_vector_start:
 .org 0x380
     save_context exception_handler_unhandled, 7
 
-// Lower exception level, Aarch32
+// Lower exception level, Aarch64
 .org 0x400
     save_context exception_handler_unhandled, 8
 .org 0x480
@@ -93,7 +93,7 @@ __exception_vector_start:
 .org 0x580
     save_context exception_handler_unhandled, 11
 
-// Lower exception level, Aarch64
+// Lower exception level, Aarch32
 .org 0x600
     save_context exception_handler_unhandled, 12
 .org 0x680
@@ -160,11 +160,11 @@ unsafe extern "C" fn exception_handler_example(
     // far_el1 should be preserved up to this point
     // TODO: need to ensure that LLVM doesn't reorder this load
     // after an operation that could overwrite it (yield-like ops)
-    let far_el1: usize;
+    let far: usize;
     unsafe {
         asm! {
             "mrs {}, far_el1",
-            out(reg) far_el1,
+            out(reg) far,
             options(nomem, nostack, preserves_flags)
         }
     }
@@ -176,8 +176,7 @@ unsafe extern "C" fn exception_handler_example(
     let _insn_len = if ((esr >> 25) & 1) != 0 { 4 } else { 2 };
 
     if uart::UART.is_initialized() {
-        println!("Received exception: elr={elr:#x} spsr={spsr:#010x} esr={esr:#010x} (class {exception_class:#x} / {class_name}) {arg}");
-        println!("(Faulting address, if relevant: 0x{far_el1:X})");
+        println!("Received exception: elr={elr:#x} spsr={spsr:#010x} esr={esr:#010x} far={far:#010x} (class {exception_class:#x} / {class_name}) {arg}");
     }
 
     match exception_class {

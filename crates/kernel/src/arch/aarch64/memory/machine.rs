@@ -214,6 +214,12 @@ impl LeafTable {
     }
 }
 
+enum PageSize {
+    Size4KiB,
+    Size16KiB,
+    Size64KiB,
+}
+
 impl TcrEl1 {
     const fn set_t0sz(self, t0sz: u8) -> Self {
         assert!(t0sz < (1 << 6), "field size mismatch");
@@ -239,7 +245,12 @@ impl TcrEl1 {
             .union(Self::from_bits_retain((sh0 as u64) << 12))
     }
 
-    const fn set_tg0(self, tg0: u8) -> Self {
+    const fn set_tg0(self, tg0: PageSize) -> Self {
+        let tg0 = match tg0 {
+            PageSize::Size4KiB => 0b00,
+            PageSize::Size16KiB => 0b10,
+            PageSize::Size64KiB => 0b01,
+        };
         assert!(tg0 < (1 << 2), "field size mismatch");
         assert!(tg0 != 0b11, "reserved encoding");
         self.difference(Self::TG0)
@@ -270,7 +281,12 @@ impl TcrEl1 {
             .union(Self::from_bits_retain((sh1 as u64) << 28))
     }
 
-    const fn set_tg1(self, tg1: u8) -> Self {
+    const fn set_tg1(self, tg1: PageSize) -> Self {
+        let tg1 = match tg1 {
+            PageSize::Size4KiB => 0b10,
+            PageSize::Size16KiB => 0b01,
+            PageSize::Size64KiB => 0b11,
+        };
         assert!(tg1 < (1 << 2), "field size mismatch");
         assert!(tg1 != 0b00, "reserved encoding");
         self.difference(Self::TG1)
@@ -286,19 +302,19 @@ impl TcrEl1 {
 
     pub const fn default() -> Self {
         Self::empty()
-            .set_t0sz(0)
+            .set_t0sz(39) // 25 bits of address translation
             .difference(Self::EPD0)
             .set_irgn0(0b01)
             .set_orgn0(0b01)
             .set_sh0(0b10)
-            .set_tg0(0b00)
+            .set_tg0(PageSize::Size4KiB)
             .set_t1sz(39) // 25 bits of address translation
             .difference(Self::A1)
             .difference(Self::EPD1)
             .set_irgn1(0b01)
             .set_orgn1(0b01)
             .set_sh1(0b10)
-            .set_tg1(0b10) // 4KB kernel pages
+            .set_tg1(PageSize::Size4KiB)
             .set_ips(0b101)
             .union(Self::AS)
             .difference(Self::TBI0)
@@ -388,6 +404,28 @@ pub fn at_s1e1r(va: usize) -> Result<ParEl1Success, ParEl1Failure> {
     unsafe {
         asm! {
             "at s1e1r, {x}",
+            "isb",
+            "mrs {x}, par_el1",
+            x = inlateout(reg) va => par_el1,
+            options(readonly, preserves_flags, nostack)
+        }
+    };
+    if par_el1 & 1 == 0 {
+        // No fault
+        Ok(ParEl1Success::from_bits_retain(par_el1))
+    } else {
+        // Fault
+        Err(ParEl1Failure::from_bits_retain(par_el1))
+    }
+}
+
+#[inline]
+pub fn at_s1e0r(va: usize) -> Result<ParEl1Success, ParEl1Failure> {
+    let par_el1: u64;
+    // When an address translation instruction is executed, explicit synchronization is required to guarantee the result is visible to subsequent direct reads of PAR_EL1.
+    unsafe {
+        asm! {
+            "at s1e0r, {x}",
             "isb",
             "mrs {x}, par_el1",
             x = inlateout(reg) va => par_el1,

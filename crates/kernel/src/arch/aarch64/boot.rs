@@ -87,19 +87,22 @@ drop_to_el1:
     mov x5, #(1 << 31)
     // orr x5, x5, #0x38
     msr hcr_el2, x5
+
     ldr x5, ={SCTLR_EL1}
     msr SCTLR_EL1, x5
     ldr x5, ={TCR_EL1}
     msr TCR_EL1, x5
     adr x5, KERNEL_TRANSLATION_TABLE
     msr TTBR1_EL1, x5
+    ldr x5, =0b010001000000000011111111 // Entry 0 is normal memory, entry 1 is device memory, 2 = normal noncacheable memory
+    msr MAIR_EL1, x5
+
     mov x5, #0b0101
     msr SPSR_EL2, x5
+
     ldr x5, =0xFFFFFFFFFE000000 // TODO: slightly cleaner way of encoding this?
     orr lr, lr, x5
     msr ELR_EL2, lr
-    ldr x5, =0b010001000000000011111111 // Entry 0 is normal memory, entry 1 is device memory, 2 = normal noncacheable memory
-    msr MAIR_EL1, x5
     isb
     eret
 

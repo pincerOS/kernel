@@ -17,8 +17,50 @@ struct KernelTranslationTable([TranslationDescriptor; 16]);
 #[repr(C, align(4096))]
 struct KernelLeafTable([LeafDescriptor; KERNEL_LEAF_TABLE_SIZE]);
 
+const USER_PG_SZ: usize = 0x1000;
+const USER_LEAF_TABLE_SIZE: usize = USER_PG_SZ / 8 * 2;
+
+#[repr(C, align(128))]
+struct UserTranslationTable([TranslationDescriptor; 16]);
+
+#[allow(dead_code)]
+#[repr(C, align(4096))]
+struct UserLeafTable([LeafDescriptor; USER_LEAF_TABLE_SIZE]);
+
 fn virt_addr_base() -> NonNull<()> {
     NonNull::new(ptr::with_exposed_provenance_mut(0xFFFF_FFFF_FE00_0000)).unwrap()
+}
+
+fn create_user_table(phys_base: usize) -> alloc::boxed::Box<UserTranslationTable> {
+    let mut table = alloc::boxed::Box::new(UserTranslationTable(
+        [TranslationDescriptor {
+            table: TableDescriptor::empty(),
+        }; 16],
+    ));
+    let root_region_size = 0x20_0000; // 2 MiB
+    for (i, desc) in table.0.iter_mut().enumerate() {
+        let leaf = LeafDescriptor::new(phys_base + root_region_size * i)
+            // .clear_pxn()
+            .union(LeafDescriptor::UNPRIVILEGED_ACCESS)
+            .difference(LeafDescriptor::UXN)
+            .set_global()
+            .difference(LeafDescriptor::IS_PAGE_DESCRIPTOR);
+        desc.leaf = leaf;
+    }
+    table
+}
+
+pub unsafe fn create_user_region() -> (*mut [u8], usize) {
+    let phys_base = 1 << 28;
+    let user_table = create_user_table(phys_base);
+    let user_table_ptr = alloc::boxed::Box::into_raw(user_table);
+    let user_table_phys = physical_addr(user_table_ptr.addr()).unwrap();
+
+    let virt_region_base = 0x20_0000;
+    let region_size = 0x20_0000 * 15;
+    let ptr = core::ptr::with_exposed_provenance_mut::<u8>(virt_region_base);
+    let slice = core::ptr::slice_from_raw_parts_mut(ptr, region_size);
+    (slice, user_table_phys as usize)
 }
 
 /// only call once!
