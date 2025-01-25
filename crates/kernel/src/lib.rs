@@ -18,6 +18,7 @@ pub mod scheduler;
 pub mod sync;
 pub mod task;
 pub mod thread;
+pub mod util;
 
 use device::uart;
 use sync::SpinLock;

@@ -5,26 +5,7 @@ extern crate alloc;
 extern crate kernel;
 
 use kernel::*;
-
-use core::arch::global_asm;
-
-global_asm!(
-    "
-.global user_code_start, user_code_end
-user_code_start:
-    svc 2
-
-.balign 4
-user_code_end:
-    udf #2
-    "
-);
-
-#[allow(improper_ctypes)]
-extern "C" {
-    static user_code_start: ();
-    static user_code_end: ();
-}
+static INIT_CODE: &[u8] = kernel::util::include_bytes_align!(u32, "../../init/init.bin");
 
 #[no_mangle]
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
@@ -61,12 +42,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
 
     let start = sync::get_time();
     {
-        let code_start = (&raw const user_code_start).cast::<u32>();
-        let code_end = (&raw const user_code_end).cast::<u32>();
-        let len = unsafe { code_end.offset_from(code_start) }
-            .try_into()
-            .unwrap();
-        let code_src = unsafe { core::slice::from_raw_parts(code_start, len) };
+        let code_src = bytemuck::cast_slice::<_, u32>(INIT_CODE);
 
         let user_code_ptr = user_region.cast::<u32>();
         let user_code = unsafe { core::slice::from_raw_parts_mut(user_code_ptr, code_src.len()) };
