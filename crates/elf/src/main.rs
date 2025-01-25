@@ -1,7 +1,7 @@
 use std::fs;
 
 use elf::{
-    elf_header,
+    elf_header, program_header,
     section_header::{get_section_headers, get_string_table_header},
 };
 
@@ -55,10 +55,7 @@ fn output_elf_file_header(header: &elf_header::ElfHeader) {
         "  Start of section headers:          {} (bytes into file)",
         header.e_shoff()
     );
-    println!(
-        "  Flags:                             {}",
-        header.e_flags()
-    );
+    println!("  Flags:                             {}", header.e_flags());
     println!(
         "  Size of this header:               {} (bytes)",
         header.e_ehsize()
@@ -154,8 +151,53 @@ fn output_section_headers(data: &[u8], elf_header: &elf_header::ElfHeader) {
     println!("  D (mbind), p (processor specific)");
 }
 
+fn output_program_headers(data: &[u8], elf_header: &elf_header::ElfHeader) {
+    let program_headers = match program_header::get_program_headers(data, elf_header) {
+        Ok(headers) => headers,
+        Err(e) => {
+            eprintln!("Error: {:?}", e);
+            return;
+        }
+    };
+    let is_32_bit = elf_header.ident().class == elf::identity::Class::ELF32;
+    println!("Program Headers:");
+    if is_32_bit {
+        println!("  Type           Offset   VirtAddr   PhysAddr   FileSiz MemSiz  Flg Align");
+    } else {
+        println!("  Type           Offset             VirtAddr           PhysAddr");
+        println!("                 FileSiz            MemSiz              Flags  Align");
+    }
+    for header in program_headers {
+        if is_32_bit {
+            print!("  ");
+            print!("{:14} ", format!("{}", header.p_type));
+            print!("0x{:06x} ", header.p_offset);
+            print!("0x{:08x} ", header.p_vaddr);
+            print!("0x{:08x} ", header.p_paddr);
+            print!("0x{:05x} ", header.p_filesz);
+            print!("0x{:05x} ", header.p_memsz);
+            print!("{:3} ", format!("{}", header.p_flags));
+            print!("0x{:x} ", header.p_align);
+            println!();
+        } else {
+            print!("  ");
+            print!("{:14} ", format!("{}", header.p_type));
+            print!("0x{:016x} ", header.p_offset);
+            print!("0x{:016x} ", header.p_vaddr);
+            print!("0x{:016x} ", header.p_paddr);
+            println!();
+            print!("                 ");
+            print!("0x{:016x} ", header.p_filesz);
+            print!("0x{:016x}  ", header.p_memsz);
+            print!("{:3}    ", format!("{}", header.p_flags));
+            print!("0x{:x} ", header.p_align);
+            println!();
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let data: Vec<u8> = fs::read("crates/elf/examples/arm32/simple")?;
+    let data: Vec<u8> = fs::read("crates/elf/examples/x64/simple")?;
     let elf_header = match elf_header::ElfHeader::new(&data) {
         Ok(header) => header,
         Err(e) => {
@@ -166,5 +208,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     output_elf_file_header(&elf_header);
     println!();
     output_section_headers(&data, &elf_header);
+    println!();
+    output_program_headers(&data, &elf_header);
     Ok(())
 }

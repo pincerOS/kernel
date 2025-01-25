@@ -307,12 +307,8 @@ pub fn get_section_headers(
         let section_header =
             SectionHeader::new(&section_header_table[entry_start..entry_end], &elf_header);
         match section_header {
-            Ok(header) => {
-                section_headers.push(header);
-            }
-            Err(e) => {
-                return Err(e);
-            }
+            Ok(header) => section_headers.push(header),
+            Err(e) => return Err(e),
         }
     }
     Ok(section_headers)
@@ -348,7 +344,7 @@ impl SectionHeader {
     pub fn name<'a>(
         &self,
         data: &'a [u8],
-        string_table_header: &SectionHeader,
+        string_table_header: &Self,
     ) -> Result<&'a str, Utf8Error> {
         let string_table_offset = string_table_header.sh_offset as usize;
         let index = self.sh_name as usize;
@@ -361,10 +357,7 @@ impl SectionHeader {
         core::str::from_utf8(name)
     }
 
-    fn new_shdr32(
-        header: &[u8],
-        machine: elf_header::Machine,
-    ) -> Result<SectionHeader, SectionHeaderError> {
+    fn new_shdr32(header: &[u8], machine: elf_header::Machine) -> Result<Self, SectionHeaderError> {
         if header.len() != std::mem::size_of::<Elf32Shdr>() {
             return Err(SectionHeaderError::InvalidLength);
         }
@@ -408,7 +401,7 @@ impl SectionHeader {
         let sh_addralign = header.sh_addralign as u64;
         let sh_entsize = header.sh_entsize as u64;
 
-        Ok(SectionHeader {
+        Ok(Self {
             sh_name,
             sh_type,
             sh_flags,
@@ -421,10 +414,7 @@ impl SectionHeader {
             sh_entsize,
         })
     }
-    fn new_shdr64(
-        header: &[u8],
-        machine: elf_header::Machine,
-    ) -> Result<SectionHeader, SectionHeaderError> {
+    fn new_shdr64(header: &[u8], machine: elf_header::Machine) -> Result<Self, SectionHeaderError> {
         if header.len() != std::mem::size_of::<Elf64Shdr>() {
             return Err(SectionHeaderError::InvalidLength);
         }
@@ -468,7 +458,7 @@ impl SectionHeader {
         let sh_addralign = header.sh_addralign;
         let sh_entsize = header.sh_entsize;
 
-        Ok(SectionHeader {
+        Ok(Self {
             sh_name,
             sh_type,
             sh_flags,

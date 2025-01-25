@@ -573,10 +573,7 @@ impl ElfHeader {
         }
     }
 
-    fn new_elf32(
-        header: &[u8],
-        e_ident: identity::ElfIdentity,
-    ) -> Result<ElfHeader, ElfHeaderError> {
+    fn new_elf32(header: &[u8], e_ident: identity::ElfIdentity) -> Result<Self, ElfHeaderError> {
         if header.len() < std::mem::size_of::<Elf32Ehdr>() {
             return Err(ElfHeaderError::InvalidLength);
         }
@@ -594,6 +591,7 @@ impl ElfHeader {
         };
         let e_machine = match Machine::from(header.e_machine) {
             Machine::ARM => Machine::ARM,
+            Machine::I386 => Machine::I386,
             _ => return Err(ElfHeaderError::UnimplementedArchitecture),
         };
         let e_version = match header.e_version {
@@ -616,7 +614,7 @@ impl ElfHeader {
         let e_shnum = header.e_shnum;
         let e_shstrndx = header.e_shstrndx;
 
-        Ok(ElfHeader::Elf32Header {
+        Ok(Self::Elf32Header {
             e_ident,
             e_ident_bytes: header.e_ident,
             e_type,
@@ -634,10 +632,7 @@ impl ElfHeader {
             e_shstrndx,
         })
     }
-    fn new_elf64(
-        header: &[u8],
-        e_ident: identity::ElfIdentity,
-    ) -> Result<ElfHeader, ElfHeaderError> {
+    fn new_elf64(header: &[u8], e_ident: identity::ElfIdentity) -> Result<Self, ElfHeaderError> {
         if header.len() < std::mem::size_of::<Elf64Ehdr>() {
             return Err(ElfHeaderError::InvalidLength);
         }
@@ -674,7 +669,7 @@ impl ElfHeader {
         let e_shnum = header.e_shnum;
         let e_shstrndx = header.e_shstrndx;
 
-        Ok(ElfHeader::Elf64Header {
+        Ok(Self::Elf64Header {
             e_ident,
             e_ident_bytes: header.e_ident,
             e_type,
@@ -695,92 +690,92 @@ impl ElfHeader {
 
     pub fn ident_bytes(&self) -> &[u8] {
         match self {
-            ElfHeader::Elf32Header { e_ident_bytes, .. } => e_ident_bytes,
-            ElfHeader::Elf64Header { e_ident_bytes, .. } => e_ident_bytes,
+            Self::Elf32Header { e_ident_bytes, .. } => e_ident_bytes,
+            Self::Elf64Header { e_ident_bytes, .. } => e_ident_bytes,
         }
     }
     pub fn ident(&self) -> identity::ElfIdentity {
         match self {
-            ElfHeader::Elf32Header { e_ident, .. } => *e_ident,
-            ElfHeader::Elf64Header { e_ident, .. } => *e_ident,
+            Self::Elf32Header { e_ident, .. } => *e_ident,
+            Self::Elf64Header { e_ident, .. } => *e_ident,
         }
     }
     pub fn e_type(&self) -> Type {
         match self {
-            ElfHeader::Elf32Header { e_type, .. } => *e_type,
-            ElfHeader::Elf64Header { e_type, .. } => *e_type,
+            Self::Elf32Header { e_type, .. } => *e_type,
+            Self::Elf64Header { e_type, .. } => *e_type,
         }
     }
     pub fn e_machine(&self) -> Machine {
         match self {
-            ElfHeader::Elf32Header { e_machine, .. } => *e_machine,
-            ElfHeader::Elf64Header { e_machine, .. } => *e_machine,
+            Self::Elf32Header { e_machine, .. } => *e_machine,
+            Self::Elf64Header { e_machine, .. } => *e_machine,
         }
     }
     pub fn e_version(&self) -> Version {
         match self {
-            ElfHeader::Elf32Header { e_version, .. } => *e_version,
-            ElfHeader::Elf64Header { e_version, .. } => *e_version,
+            Self::Elf32Header { e_version, .. } => *e_version,
+            Self::Elf64Header { e_version, .. } => *e_version,
         }
     }
     pub fn e_entry(&self) -> u64 {
         match self {
-            ElfHeader::Elf32Header { e_entry, .. } => *e_entry as u64,
-            ElfHeader::Elf64Header { e_entry, .. } => *e_entry,
+            Self::Elf32Header { e_entry, .. } => *e_entry as u64,
+            Self::Elf64Header { e_entry, .. } => *e_entry,
         }
     }
     pub fn e_phoff(&self) -> u64 {
         match self {
-            ElfHeader::Elf32Header { e_phoff, .. } => *e_phoff as u64,
-            ElfHeader::Elf64Header { e_phoff, .. } => *e_phoff,
+            Self::Elf32Header { e_phoff, .. } => *e_phoff as u64,
+            Self::Elf64Header { e_phoff, .. } => *e_phoff,
         }
     }
     pub fn e_shoff(&self) -> u64 {
         match self {
-            ElfHeader::Elf32Header { e_shoff, .. } => *e_shoff as u64,
-            ElfHeader::Elf64Header { e_shoff, .. } => *e_shoff,
+            Self::Elf32Header { e_shoff, .. } => *e_shoff as u64,
+            Self::Elf64Header { e_shoff, .. } => *e_shoff,
         }
     }
     pub fn e_flags(&self) -> Flags {
         match self {
-            ElfHeader::Elf32Header { e_flags, .. } => *e_flags,
-            ElfHeader::Elf64Header { e_flags, .. } => *e_flags,
+            Self::Elf32Header { e_flags, .. } => *e_flags,
+            Self::Elf64Header { e_flags, .. } => *e_flags,
         }
     }
     pub fn e_ehsize(&self) -> u16 {
         match self {
-            ElfHeader::Elf32Header { e_ehsize, .. } => *e_ehsize,
-            ElfHeader::Elf64Header { e_ehsize, .. } => *e_ehsize,
+            Self::Elf32Header { e_ehsize, .. } => *e_ehsize,
+            Self::Elf64Header { e_ehsize, .. } => *e_ehsize,
         }
     }
     pub fn e_phentsize(&self) -> u16 {
         match self {
-            ElfHeader::Elf32Header { e_phentsize, .. } => *e_phentsize,
-            ElfHeader::Elf64Header { e_phentsize, .. } => *e_phentsize,
+            Self::Elf32Header { e_phentsize, .. } => *e_phentsize,
+            Self::Elf64Header { e_phentsize, .. } => *e_phentsize,
         }
     }
     pub fn e_phnum(&self) -> u16 {
         match self {
-            ElfHeader::Elf32Header { e_phnum, .. } => *e_phnum,
-            ElfHeader::Elf64Header { e_phnum, .. } => *e_phnum,
+            Self::Elf32Header { e_phnum, .. } => *e_phnum,
+            Self::Elf64Header { e_phnum, .. } => *e_phnum,
         }
     }
     pub fn e_shentsize(&self) -> u16 {
         match self {
-            ElfHeader::Elf32Header { e_shentsize, .. } => *e_shentsize,
-            ElfHeader::Elf64Header { e_shentsize, .. } => *e_shentsize,
+            Self::Elf32Header { e_shentsize, .. } => *e_shentsize,
+            Self::Elf64Header { e_shentsize, .. } => *e_shentsize,
         }
     }
     pub fn e_shnum(&self) -> u16 {
         match self {
-            ElfHeader::Elf32Header { e_shnum, .. } => *e_shnum,
-            ElfHeader::Elf64Header { e_shnum, .. } => *e_shnum,
+            Self::Elf32Header { e_shnum, .. } => *e_shnum,
+            Self::Elf64Header { e_shnum, .. } => *e_shnum,
         }
     }
     pub fn e_shstrndx(&self) -> u16 {
         match self {
-            ElfHeader::Elf32Header { e_shstrndx, .. } => *e_shstrndx,
-            ElfHeader::Elf64Header { e_shstrndx, .. } => *e_shstrndx,
+            Self::Elf32Header { e_shstrndx, .. } => *e_shstrndx,
+            Self::Elf64Header { e_shstrndx, .. } => *e_shstrndx,
         }
     }
 }

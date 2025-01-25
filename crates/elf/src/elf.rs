@@ -1,5 +1,6 @@
 pub mod elf_header;
 pub mod identity;
+pub mod program_header;
 pub mod section_header;
 
 // /usr/include/elf.h
