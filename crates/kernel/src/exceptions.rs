@@ -189,6 +189,10 @@ unsafe extern "C" fn exception_handler_example(
                     ctx.regs[0] = ctx.regs[0] * ctx.regs[1];
                     return ctx;
                 }
+                2 => {
+                    println!("Got syscall #2!  Shutting down");
+                    crate::shutdown();
+                }
                 _ => {
                     println!("Unknown syscall number {arg:#x}");
                     halt()
