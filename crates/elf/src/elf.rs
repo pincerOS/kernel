@@ -6,7 +6,9 @@ use core::{
 pub mod elf_header;
 pub mod identity;
 pub mod program_header;
+pub mod relocation;
 pub mod section_header;
+pub mod symbol;
 
 // /usr/include/elf.h
 
@@ -27,50 +29,67 @@ mod types {
     pub type Elf64Sxword = i64;
 }
 
+#[derive(Debug)]
 pub struct Elf<'a> {
     file_data: &'a [u8],
     elf_header: elf_header::ElfHeader<'a>,
 }
 
 #[derive(Debug)]
-pub enum ElfError<'a> {
-    ElfHeaderError(elf_header::ElfHeaderError<'a>),
+pub enum ElfError {
+    ElfHeaderError(elf_header::ElfHeaderError),
     SectionHeaderError(section_header::SectionHeaderError),
     ProgramHeaderError(program_header::ProgramHeaderError),
+    RelocationError(relocation::RelocationError),
+    SymbolError(symbol::SymbolError),
 }
 
-impl Display for ElfError<'_> {
+impl Display for ElfError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::ElfHeaderError(e) => write!(f, "Error parsing ELF header: {}", e),
             Self::SectionHeaderError(e) => write!(f, "Error parsing section header: {}", e),
             Self::ProgramHeaderError(e) => write!(f, "Error parsing program header: {}", e),
+            Self::RelocationError(e) => write!(f, "Error parsing relocation: {}", e),
+            Self::SymbolError(e) => write!(f, "Error parsing symbol: {}", e),
         }
     }
 }
 
-impl<'a> From<elf_header::ElfHeaderError<'a>> for ElfError<'a> {
-    fn from(e: elf_header::ElfHeaderError<'a>) -> Self {
+impl From<elf_header::ElfHeaderError> for ElfError {
+    fn from(e: elf_header::ElfHeaderError) -> Self {
         Self::ElfHeaderError(e)
     }
 }
 
-impl From<section_header::SectionHeaderError> for ElfError<'_> {
+impl From<section_header::SectionHeaderError> for ElfError {
     fn from(e: section_header::SectionHeaderError) -> Self {
         Self::SectionHeaderError(e)
     }
 }
 
-impl From<program_header::ProgramHeaderError> for ElfError<'_> {
+impl From<program_header::ProgramHeaderError> for ElfError {
     fn from(e: program_header::ProgramHeaderError) -> Self {
         Self::ProgramHeaderError(e)
     }
 }
 
-impl Error for ElfError<'_> {}
+impl From<relocation::RelocationError> for ElfError {
+    fn from(e: relocation::RelocationError) -> Self {
+        Self::RelocationError(e)
+    }
+}
+
+impl From<symbol::SymbolError> for ElfError {
+    fn from(e: symbol::SymbolError) -> Self {
+        Self::SymbolError(e)
+    }
+}
+
+impl Error for ElfError {}
 
 impl<'a> Elf<'a> {
-    pub fn new(elf_data: &'a [u8]) -> Result<Self, ElfError<'a>> {
+    pub fn new(elf_data: &'a [u8]) -> Result<Self, ElfError> {
         let elf_header = elf_header::ElfHeader::new(elf_data)?;
         Ok(Self {
             file_data: elf_data,
@@ -88,10 +107,8 @@ impl<'a> Elf<'a> {
 
     pub fn section_headers(
         &'a self,
-    ) -> Result<
-        impl Iterator<Item = Result<section_header::SectionHeader<'a>, ElfError<'a>>>,
-        ElfError<'a>,
-    > {
+    ) -> Result<impl Iterator<Item = Result<section_header::SectionHeader<'a>, ElfError>>, ElfError>
+    {
         let table_start = self.elf_header.e_shoff() as usize;
         let entry_size = self.elf_header.e_shentsize() as usize;
         let entry_count = if self.elf_header.e_shnum() == section_header::SHN_UNDEF {
@@ -100,34 +117,62 @@ impl<'a> Elf<'a> {
         } else {
             self.elf_header.e_shnum() as usize
         };
+        let table_end = table_start + entry_size * entry_count;
 
-        let iter = (0..entry_count).map(move |i| {
-            let entry_start = i * entry_size + table_start;
-            match section_header::SectionHeader::new(&self, entry_start) {
-                Ok(header) => Ok(header),
-                Err(e) => Err(e.into()),
-            }
-        });
+        let iter = (table_start..table_end)
+            .step_by(entry_size)
+            .map(
+                move |offset| match section_header::SectionHeader::new(&self, offset) {
+                    Ok(header) => Ok(header),
+                    Err(e) => Err(e.into()),
+                },
+            );
         Ok(iter)
+    }
+
+    pub fn symtab_header(&'a self) -> Result<Option<section_header::SectionHeader<'a>>, ElfError> {
+        let mut symtab_header = None;
+        for header in self.section_headers()? {
+            let header = header?;
+            if matches!(header.sh_type, section_header::Type::SymTab) {
+                symtab_header = Some(header);
+                break;
+            }
+        }
+        Ok(symtab_header)
+    }
+
+    pub fn dynsym_header(&'a self) -> Result<Option<section_header::SectionHeader<'a>>, ElfError> {
+        let mut dynsym_header = None;
+        for header in self.section_headers()? {
+            let header = header?;
+            if matches!(header.sh_type, section_header::Type::DynSym) {
+                dynsym_header = Some(header);
+                break;
+            }
+        }
+        Ok(dynsym_header)
     }
 
     pub fn program_headers(
         &'a self,
-    ) -> Result<
-        impl Iterator<Item = Result<program_header::ProgramHeader<'a>, ElfError<'a>>>,
-        ElfError<'a>,
-    > {
+    ) -> Option<impl Iterator<Item = Result<program_header::ProgramHeader<'a>, ElfError>>> {
         let table_start = self.elf_header.e_phoff() as usize;
+        if table_start == 0 {
+            return None;
+        }
         let entry_size = self.elf_header.e_phentsize() as usize;
         let entry_count = self.elf_header.e_phnum() as usize;
+        let table_end = table_start + entry_size * entry_count;
 
-        let iter = (0..entry_count).map(move |i| {
-            let entry_start = i * entry_size + table_start;
-            match program_header::ProgramHeader::new(&self, entry_start) {
-                Ok(header) => Ok(header),
-                Err(e) => Err(e.into()),
-            }
-        });
-        Ok(iter)
+        let iter = (table_start..table_end)
+            .step_by(entry_size)
+            .map(
+                move |offset| match program_header::ProgramHeader::new(&self, offset) {
+                    Ok(header) => Ok(header),
+                    Err(e) => Err(e.into()),
+                },
+            );
+        Some(iter)
     }
 }

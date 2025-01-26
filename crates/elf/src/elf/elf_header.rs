@@ -545,16 +545,16 @@ impl Display for Flags {
 }
 
 #[derive(Debug)]
-pub enum ElfHeaderError<'a> {
+pub enum ElfHeaderError {
     InvalidLength,
-    ElfIdentityError(identity::ElfIdentityError<'a>),
+    ElfIdentityError(identity::ElfIdentityError),
     InvalidType,
     InvalidVersion,
     UnknownVersion,
     UnimplementedArchitecture,
 }
 
-impl Display for ElfHeaderError<'_> {
+impl Display for ElfHeaderError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::InvalidLength => write!(f, "Invalid ELF header length"),
@@ -567,14 +567,14 @@ impl Display for ElfHeaderError<'_> {
     }
 }
 
-impl<'a> From<identity::ElfIdentityError<'a>> for ElfHeaderError<'a> {
-    fn from(e: identity::ElfIdentityError<'a>) -> Self {
+impl From<identity::ElfIdentityError> for ElfHeaderError {
+    fn from(e: identity::ElfIdentityError) -> Self {
         ElfHeaderError::ElfIdentityError(e)
     }
 }
 
 impl<'a> ElfHeader<'a> {
-    pub(crate) fn new(header: &'a [u8]) -> Result<Self, ElfHeaderError<'a>> {
+    pub(crate) fn new(header: &'a [u8]) -> Result<Self, ElfHeaderError> {
         if header.len() < identity::EI_NIDENT {
             return Err(ElfHeaderError::InvalidLength);
         }
@@ -589,7 +589,7 @@ impl<'a> ElfHeader<'a> {
     fn new_elf32(
         data: &'a [u8],
         e_ident: identity::ElfIdentity<'a>,
-    ) -> Result<Self, ElfHeaderError<'a>> {
+    ) -> Result<Self, ElfHeaderError> {
         if data.len() < size_of::<Elf32Ehdr>() {
             return Err(ElfHeaderError::InvalidLength);
         }
@@ -651,7 +651,7 @@ impl<'a> ElfHeader<'a> {
     fn new_elf64(
         data: &'a [u8],
         e_ident: identity::ElfIdentity<'a>,
-    ) -> Result<Self, ElfHeaderError<'a>> {
+    ) -> Result<Self, ElfHeaderError> {
         if data.len() < size_of::<Elf64Ehdr>() {
             return Err(ElfHeaderError::InvalidLength);
         }

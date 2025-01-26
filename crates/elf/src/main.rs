@@ -85,7 +85,7 @@ fn output_elf_file_header(elf: &Elf) {
     );
 }
 
-fn output_section_headers<'a>(elf: &'a Elf) -> Result<(), elf::ElfError<'a>> {
+fn output_section_headers<'a>(elf: &'a Elf) -> Result<(), elf::ElfError> {
     let section_string_table = match elf
         .section_headers()?
         .nth(elf.elf_header().e_shstrndx() as usize)
@@ -159,7 +159,15 @@ fn output_section_headers<'a>(elf: &'a Elf) -> Result<(), elf::ElfError<'a>> {
     Ok(())
 }
 
-fn output_program_headers<'a>(elf: &'a Elf) -> Result<(), elf::ElfError<'a>> {
+fn output_program_headers<'a>(elf: &'a Elf) -> Result<(), elf::ElfError> {
+    let program_headers = match elf.program_headers() {
+        Some(program_headers) => program_headers,
+        None => {
+            println!("There are no program headers in this file.");
+            return Ok(());
+        }
+    };
+
     let is_32_bit = matches!(elf.identity().class, elf::identity::Class::ELF32);
     println!("Program Headers:");
     if is_32_bit {
@@ -168,7 +176,7 @@ fn output_program_headers<'a>(elf: &'a Elf) -> Result<(), elf::ElfError<'a>> {
         println!("  Type           Offset             VirtAddr           PhysAddr");
         println!("                 FileSiz            MemSiz              Flags  Align");
     }
-    for header in elf.program_headers()? {
+    for header in program_headers {
         let header = header?;
         if is_32_bit {
             print!("  ");
@@ -199,16 +207,189 @@ fn output_program_headers<'a>(elf: &'a Elf) -> Result<(), elf::ElfError<'a>> {
     Ok(())
 }
 
+fn output_relocations<'a>(elf: &'a Elf) -> Result<(), elf::ElfError> {
+    let section_string_table = match elf
+        .section_headers()?
+        .nth(elf.elf_header().e_shstrndx() as usize)
+    {
+        Some(section_header) => section_header?,
+        None => {
+            return Err(elf::ElfError::SectionHeaderError(
+                section_header::SectionHeaderError::InvalidIndex,
+            ))
+        }
+    };
+    let symtab = match elf.symtab_header()? {
+        Some(symtab) => symtab,
+        None => {
+            return Err(elf::ElfError::SectionHeaderError(
+                section_header::SectionHeaderError::InvalidIndex,
+            ))
+        }
+    };
+    let section_headers = match elf.section_headers()?.collect::<Result<Vec<_>, _>>() {
+        Ok(section_headers) => section_headers,
+        Err(e) => return Err(e.into()),
+    };
+    let mut found_relocations = false;
+    for header in &section_headers {
+        match header.sh_type {
+            section_header::Type::Rel | section_header::Type::Rela => {
+                let name = match header.name(&section_string_table) {
+                    Ok(name) => name,
+                    Err(_) => "",
+                };
+                let relocations: Vec<_> = match header.get_relocations()?.into_iter().collect() {
+                    Ok(relocations) => relocations,
+                    Err(e) => return Err(e.into()),
+                };
+                println!(
+                    "Relocation section '{}' at offset 0x{:x} contains {} {}:",
+                    name,
+                    header.sh_offset,
+                    relocations.len(),
+                    if relocations.len() == 1 {
+                        "entry"
+                    } else {
+                        "entries"
+                    }
+                );
+                println!("  Offset          Info           Type           Sym. Value    Sym. Name + Addend");
+                for relocation in relocations {
+                    print!("{:012x}  ", relocation.r_offset());
+                    print!("{:012x} ", relocation.r_info_value());
+                    print!("{:16}  ", format!("{}", relocation.r_type()));
+                    let symbol = match relocation.r_sym(&symtab) {
+                        Ok(symbol) => symbol,
+                        Err(e) => return Err(e.into()),
+                    };
+                    print!("{:016x} ", symbol.st_value);
+                    let relocation_section = &section_headers[u16::from(symbol.st_shndx) as usize];
+                    let name = match relocation_section.name(&section_string_table) {
+                        Ok(name) => name,
+                        Err(_) => "",
+                    };
+                    print!("{} + {:x}", name, relocation.r_addend());
+                    println!();
+                    found_relocations = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    if !found_relocations {
+        println!("There are no relocations in this file.");
+    }
+    Ok(())
+}
+
+fn output_symbols<'a>(elf: &'a Elf<'a>) -> Result<(), elf::ElfError> {
+    let symbol_table_header = match elf.symtab_header()? {
+        Some(symbol_table_header) => symbol_table_header,
+        None => return Ok(()),
+    };
+    let section_headers = elf.section_headers()?.collect::<Result<Vec<_>, _>>()?;
+    let mut symbols = Vec::new();
+    let symbols_iter = match symbol_table_header.get_symbols() {
+        Ok(symbols) => symbols,
+        Err(e) => return Err(e.into()),
+    };
+    for symbol in symbols_iter {
+        match symbol {
+            Ok(symbol) => symbols.push(symbol),
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    let symbol_string_table = section_headers[symbol_table_header.sh_link as usize];
+    let section_string_table = match elf
+        .section_headers()?
+        .nth(elf.elf_header().e_shstrndx() as usize)
+    {
+        Some(section_header) => section_header?,
+        None => {
+            return Err(elf::ElfError::SectionHeaderError(
+                section_header::SectionHeaderError::InvalidIndex,
+            ))
+        }
+    };
+
+    let symbol_table_name = match symbol_table_header.name(&section_string_table) {
+        Ok(name) => name,
+        Err(_) => "",
+    };
+    println!(
+        "Symbol table '{}' contains {} {}:",
+        symbol_table_name,
+        symbols.len(),
+        if symbols.len() == 1 {
+            "entry"
+        } else {
+            "entries"
+        }
+    );
+    if matches!(elf.identity().class, elf::identity::Class::ELF32) {
+        println!("   Num:    Value  Size Type    Bind   Vis      Ndx Name");
+    } else {
+        println!("   Num:    Value          Size Type    Bind   Vis      Ndx Name");
+    }
+    for (i, symbol) in symbols.iter().enumerate() {
+        if matches!(elf.identity().class, elf::identity::Class::ELF32) {
+            print!("   {:3}: ", i);
+            print!("{:08x} ", symbol.st_value);
+            print!("{:5} ", symbol.st_size);
+            print!("{:7} ", format!("{}", symbol.st_type));
+            print!("{:6} ", format!("{}", symbol.st_bind));
+            print!("{:4}  ", format!("{}", symbol.st_visibility));
+            print!("{:3} ", symbol.st_shndx);
+            println!("{}", symbol.st_name);
+        } else {
+            print!("   {:3}: ", i);
+            print!("{:016x} ", symbol.st_value);
+            print!("{:5} ", symbol.st_size);
+            print!("{:7} ", format!("{}", symbol.st_type));
+            print!("{:6} ", format!("{}", symbol.st_bind));
+            print!("{:4}  ", format!("{}", symbol.st_visibility));
+            print!("{:>3} ", format!("{}", symbol.st_shndx));
+            let name = match symbol.name(&symbol_string_table) {
+                Ok(name) if name.len() > 0 => name,
+                _ => {
+                    let index = u16::from(symbol.st_shndx);
+                    if index < section_header::SHN_LORESERVE {
+                        let section = &section_headers[index as usize];
+                        match section.name(&section_string_table) {
+                            Ok(name) => name,
+                            Err(_) => "",
+                        }
+                    } else {
+                        ""
+                    }
+                }
+            };
+            print!("{}", name);
+
+            println!();
+        }
+    }
+    Ok(())
+}
+
 fn display_elf_file<'a>(elf: &'a Elf) -> Result<(), Box<dyn std::error::Error + 'a>> {
     output_elf_file_header(&elf);
     println!();
     output_section_headers(&elf)?;
     println!();
     output_program_headers(&elf)?;
+    println!();
+    output_relocations(&elf)?;
+    println!();
+    output_symbols(&elf)?;
+    println!();
     Ok(())
 }
 
 fn main() {
+    // /lib/libc.so.6
     let data: Vec<u8> = match fs::read("crates/elf/examples/x64/simple") {
         Ok(data) => data,
         Err(e) => {

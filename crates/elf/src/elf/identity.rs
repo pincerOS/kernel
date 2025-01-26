@@ -106,9 +106,9 @@ impl Display for OsAbi {
 }
 
 #[derive(Debug)]
-pub enum ElfIdentityError<'a> {
+pub enum ElfIdentityError {
     InvalidLength,
-    InvalidMagic(&'a [u8]),
+    InvalidMagic,
     InvalidClass,
     UnknownClass,
     InvalidEncoding,
@@ -118,11 +118,11 @@ pub enum ElfIdentityError<'a> {
     UnknownVersion,
 }
 
-impl Display for ElfIdentityError<'_> {
+impl Display for ElfIdentityError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::InvalidLength => write!(f, "Invalid length"),
-            Self::InvalidMagic(magic) => write!(f, "Invalid magic: {:?}", magic),
+            Self::InvalidMagic => write!(f, "Invalid magic"),
             Self::InvalidClass => write!(f, "Invalid class"),
             Self::UnknownClass => write!(f, "Unknown class"),
             Self::InvalidEncoding => write!(f, "Invalid data encoding"),
@@ -135,14 +135,14 @@ impl Display for ElfIdentityError<'_> {
 }
 
 impl<'a> ElfIdentity<'a> {
-    pub(crate) fn new(data: &'a [u8]) -> Result<Self, ElfIdentityError<'a>> {
+    pub(crate) fn new(data: &'a [u8]) -> Result<Self, ElfIdentityError> {
         if data.len() != EI_NIDENT {
             return Err(ElfIdentityError::InvalidLength);
         }
 
         let magic = [data[EI_MAG0], data[EI_MAG1], data[EI_MAG2], data[EI_MAG3]];
         if magic != [0x7F, b'E', b'L', b'F'] {
-            return Err(ElfIdentityError::InvalidMagic(&data[EI_MAG0..=EI_MAG3]));
+            return Err(ElfIdentityError::InvalidMagic);
         }
         let class = match data[EI_CLASS] {
             0 => return Err(ElfIdentityError::InvalidClass),

@@ -2,7 +2,7 @@
 
 use core::{error, fmt::Display, str::Utf8Error};
 
-use super::{elf_header, identity, types::*, Elf};
+use super::{elf_header, identity, relocation, symbol, types::*, Elf, ElfError};
 
 pub const SHN_UNDEF: u16 = 0;
 pub const SHN_LORESERVE: u16 = 0xff00;
@@ -34,7 +34,7 @@ pub struct SectionHeader<'a> {
     pub sh_info: Elf64Word,
     pub sh_addralign: Elf64Xword,
     pub sh_entsize: Elf64Xword,
-    file_data: &'a [u8],
+    elf: &'a Elf<'a>,
 }
 
 #[repr(C)]
@@ -274,11 +274,41 @@ impl Display for Flags {
     }
 }
 
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone)]
+pub struct Index(u16);
+
+impl Display for Index {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match self.0 {
+            SHN_UNDEF => write!(f, "UND"),
+            SHN_LORESERVE..=SHN_HIPROC => write!(f, "RESERVED ({})", self.0),
+            SHN_ABS => write!(f, "ABS"),
+            SHN_COMMON => write!(f, "COMMON"),
+            SHN_XINDEX => write!(f, "XINDEX"),
+            _ => write!(f, "{}", self.0),
+        }
+    }
+}
+
+impl From<u16> for Index {
+    fn from(value: u16) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Index> for u16 {
+    fn from(index: Index) -> Self {
+        index.0
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum SectionHeaderError {
     InvalidLength,
     InvalidIndex,
     UnknownType,
+    OperationNotSupportedForType,
 }
 
 impl error::Error for SectionHeaderError {}
@@ -289,6 +319,9 @@ impl Display for SectionHeaderError {
             Self::InvalidLength => write!(f, "Invalid section header length"),
             Self::InvalidIndex => write!(f, "Invalid section header index"),
             Self::UnknownType => write!(f, "Unknown section header type"),
+            Self::OperationNotSupportedForType => {
+                write!(f, "Operation not supported for section header type")
+            }
         }
     }
 }
@@ -296,12 +329,8 @@ impl Display for SectionHeaderError {
 impl<'a> SectionHeader<'a> {
     pub(crate) fn new(elf: &'a Elf, offset: usize) -> Result<Self, SectionHeaderError> {
         match elf.identity().class {
-            identity::Class::ELF32 => {
-                Self::new_shdr32(elf.file_data, offset, elf.elf_header().e_machine())
-            }
-            identity::Class::ELF64 => {
-                Self::new_shdr64(elf.file_data, offset, elf.elf_header().e_machine())
-            }
+            identity::Class::ELF32 => Self::new_shdr32(elf, offset),
+            identity::Class::ELF64 => Self::new_shdr64(elf, offset),
         }
     }
 
@@ -310,22 +339,69 @@ impl<'a> SectionHeader<'a> {
         let index = self.sh_name as usize;
         let byte_offset = string_table_offset + index;
         let mut end = byte_offset;
-        while self.file_data[end] != 0 {
+        while self.elf.file_data[end] != 0 {
             end += 1;
         }
-        let name = &self.file_data[byte_offset..end];
+        let name = &self.elf.file_data[byte_offset..end];
         core::str::from_utf8(name)
     }
 
-    fn new_shdr32(
-        file_data: &'a [u8],
-        offset: usize,
-        machine: elf_header::Machine,
-    ) -> Result<Self, SectionHeaderError> {
-        if file_data.len() < offset + size_of::<Elf32Shdr>() {
+    pub fn get_relocations(
+        &self,
+    ) -> Result<
+        impl Iterator<Item = Result<relocation::Relocation, relocation::RelocationError>>,
+        SectionHeaderError,
+    > {
+        let relocation_start = self.sh_offset as usize;
+        let entry_size = self.sh_entsize as usize;
+        let relocation_end = relocation_start + self.sh_size as usize;
+
+        if !matches!(self.sh_type, Type::Rela | Type::Rel) {
+            return Err(SectionHeaderError::OperationNotSupportedForType);
+        }
+
+        let iter = (relocation_start..relocation_end)
+            .step_by(entry_size)
+            .map(move |offset| match self.sh_type {
+                Type::Rela => match self.elf.identity().class {
+                    identity::Class::ELF32 => relocation::Relocation::new_rela32(self.elf, offset),
+                    identity::Class::ELF64 => relocation::Relocation::new_rela64(self.elf, offset),
+                },
+                Type::Rel => match self.elf.identity().class {
+                    identity::Class::ELF32 => relocation::Relocation::new_rel32(self.elf, offset),
+                    identity::Class::ELF64 => relocation::Relocation::new_rel64(self.elf, offset),
+                },
+                _ => unreachable!(),
+            });
+        return Ok(iter);
+    }
+
+    pub fn get_symbols(
+        &'a self,
+    ) -> Result<impl Iterator<Item = Result<symbol::Symbol<'a>, symbol::SymbolError>>, ElfError>
+    {
+        if !matches!(self.sh_type, Type::SymTab | Type::DynSym) {
+            return Err(SectionHeaderError::OperationNotSupportedForType.into());
+        }
+
+        let table_start = self.sh_offset as usize;
+        let entry_size = self.sh_entsize as usize;
+        let table_size = self.sh_size as usize;
+        let table_end = table_start + table_size;
+        if self.elf.file_data.len() < table_end {
+            return Err(symbol::SymbolError::InvalidLength.into());
+        }
+        let iter = (table_start..table_end)
+            .step_by(entry_size)
+            .map(move |offset| symbol::Symbol::new(self.elf, offset));
+        Ok(iter)
+    }
+
+    fn new_shdr32(elf: &'a Elf, offset: usize) -> Result<Self, SectionHeaderError> {
+        if elf.file_data.len() < offset + size_of::<Elf32Shdr>() {
             return Err(SectionHeaderError::InvalidLength);
         }
-        let data = &file_data[offset..offset + size_of::<Elf32Shdr>()];
+        let data = &elf.file_data[offset..offset + size_of::<Elf32Shdr>()];
         let header: &Elf32Shdr = unsafe { &*(data.as_ptr() as *const Elf32Shdr) };
 
         let sh_name = header.sh_name;
@@ -348,12 +424,14 @@ impl<'a> SectionHeader<'a> {
             17 => Type::Group,
             18 => Type::SymTabShndx,
             other if other >= SHT_LOOS && other <= SHT_HIOS => Type::OsSpecific(other),
-            other if other >= SHT_LOPROC && other <= SHT_HIPROC => match machine {
-                elf_header::Machine::ARM => {
-                    Type::ProcessorSpecific(ProcessorSpecificType::ARMType(ARMType::from(other)))
+            other if other >= SHT_LOPROC && other <= SHT_HIPROC => {
+                match elf.elf_header().e_machine() {
+                    elf_header::Machine::ARM => Type::ProcessorSpecific(
+                        ProcessorSpecificType::ARMType(ARMType::from(other)),
+                    ),
+                    _ => Type::ProcessorSpecific(ProcessorSpecificType::Other(other)),
                 }
-                _ => Type::ProcessorSpecific(ProcessorSpecificType::Other(other)),
-            },
+            }
             other if other >= SHT_LOUSER && other <= SHT_HIUSER => Type::UserApplication(other),
             _ => return Err(SectionHeaderError::UnknownType),
         };
@@ -377,18 +455,14 @@ impl<'a> SectionHeader<'a> {
             sh_info,
             sh_addralign,
             sh_entsize,
-            file_data,
+            elf,
         })
     }
-    fn new_shdr64(
-        file_data: &'a [u8],
-        offset: usize,
-        machine: elf_header::Machine,
-    ) -> Result<Self, SectionHeaderError> {
-        if file_data.len() < offset + size_of::<Elf64Shdr>() {
+    fn new_shdr64(elf: &'a Elf, offset: usize) -> Result<Self, SectionHeaderError> {
+        if elf.file_data.len() < offset + size_of::<Elf64Shdr>() {
             return Err(SectionHeaderError::InvalidLength);
         }
-        let data = &file_data[offset..offset + size_of::<Elf64Shdr>()];
+        let data = &elf.file_data[offset..offset + size_of::<Elf64Shdr>()];
         let header: &Elf64Shdr = unsafe { &*(data.as_ptr() as *const Elf64Shdr) };
 
         let sh_name = header.sh_name;
@@ -411,12 +485,14 @@ impl<'a> SectionHeader<'a> {
             17 => Type::Group,
             18 => Type::SymTabShndx,
             other if other >= SHT_LOOS && other <= SHT_HIOS => Type::OsSpecific(other),
-            other if other >= SHT_LOPROC && other <= SHT_HIPROC => match machine {
-                elf_header::Machine::ARM => {
-                    Type::ProcessorSpecific(ProcessorSpecificType::ARMType(ARMType::from(other)))
+            other if other >= SHT_LOPROC && other <= SHT_HIPROC => {
+                match elf.elf_header().e_machine() {
+                    elf_header::Machine::ARM => Type::ProcessorSpecific(
+                        ProcessorSpecificType::ARMType(ARMType::from(other)),
+                    ),
+                    _ => Type::ProcessorSpecific(ProcessorSpecificType::Other(other)),
                 }
-                _ => Type::ProcessorSpecific(ProcessorSpecificType::Other(other)),
-            },
+            }
             other if other >= SHT_LOUSER && other <= SHT_HIUSER => Type::UserApplication(other),
             _ => return Err(SectionHeaderError::UnknownType),
         };
@@ -440,7 +516,7 @@ impl<'a> SectionHeader<'a> {
             sh_info,
             sh_addralign,
             sh_entsize,
-            file_data,
+            elf,
         })
     }
 }
