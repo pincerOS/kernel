@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/device-tree",
     "crates/kernel",
+    "crates/lz4",
 ]
 
 [profile.release]

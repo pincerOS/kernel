@@ -29,3 +29,7 @@ dependencies = [
  "bytemuck",
  "device-tree",
 ]
+
+[[package]]
+name = "lz4"
+version = "0.1.0"
