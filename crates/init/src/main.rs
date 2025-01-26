@@ -4,13 +4,15 @@
 mod runtime;
 mod syscall;
 
-static ELF_FILE: &[u8] = include_bytes_align!(u32, "../example.elf.lz4");
+static ELF_FILE: &[u8] = include_bytes_align!(u32, "../fs.arc");
 
 #[no_mangle]
 pub extern "C" fn main() {
-    let file = ELF_FILE;
+    let archive = initfs::Archive::load(ELF_FILE).unwrap();
+
     let mut buf = [0; 0x8000];
-    let file = lz4::decode_into(file, &mut buf).unwrap();
+    let (_, file) = archive.find_file(b"example.elf").unwrap();
+    let file = archive.read_file(file, &mut buf).unwrap();
 
     let elf = elf::Elf::new(file).unwrap();
     let phdrs = elf.program_headers().unwrap();

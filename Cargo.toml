@@ -5,6 +5,7 @@ members = [
     "crates/elf",
     "crates/endian",
     "crates/init",
+    "crates/initfs",
     "crates/kernel",
     "crates/lz4",
 ]
