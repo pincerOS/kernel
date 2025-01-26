@@ -1,10 +1,31 @@
-#!/usr/bin/env -S bash -c "rustc --target=aarch64-unknown-none-softfloat -C opt-level=2 -C panic=abort -C link-arg=-T${PWD}/example.rs -C link-args='-zmax-page-size=0x1000' -C strip=debuginfo example.rs -o example.elf"
+#!/usr/bin/env bash
 #![doc = "<!-- Absolutely cursed hacks:
-/* -->"]
+/*usr/bin/env true <<'END_BASH_COMMENT' # -->"]
 #![no_std]
 #![no_main]
 
 mod runtime {
+    #[rustfmt::skip]
+    static _COMPILE_SCRIPT: () = { r##"
+END_BASH_COMMENT
+SOURCE=$(realpath $0)
+RELATIVE=$(realpath --relative-to=. $SOURCE)
+rustc --target=aarch64-unknown-none-softfloat \
+    -C opt-level=2 -C panic=abort \
+    -C strip=debuginfo \
+    -C link-arg=-T"${SOURCE}" -C link-args='-zmax-page-size=0x1000' \
+    "${SOURCE}" -o "${SOURCE%.rs}.elf"
+
+SIZE=$(stat -c %s "${SOURCE%.rs}.elf" | python3 -c \
+    "(lambda f:f(f,float(input()),0))\
+     (lambda f,i,j:print('%.4g'%i,'BKMGTPE'[j]+'iB' if j else 'bytes')\
+     if i<1024 else f(f,i/1024,j+1))"
+)
+echo "Built ${RELATIVE%.rs}.elf, file size ${SIZE}"
+lz4 -f --best --favor-decSpeed "${RELATIVE%.rs}.elf"
+exit
+    "##; };
+
     #[rustfmt::skip]
     static _LINKER_SCRIPT: () = { r"*/
     ENTRY(_start);
