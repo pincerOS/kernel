@@ -8,8 +8,9 @@ mod runtime {
     #[rustfmt::skip]
     static _COMPILE_SCRIPT: () = { r##"
 END_BASH_COMMENT
-SOURCE=$(realpath $0)
-RELATIVE=$(realpath --relative-to=. $SOURCE)
+set -e
+SOURCE=$(realpath "$0")
+RELATIVE=$(realpath --relative-to=. "$SOURCE")
 rustc --target=aarch64-unknown-none-softfloat \
     -C opt-level=2 -C panic=abort \
     -C strip=debuginfo \
@@ -22,7 +23,6 @@ SIZE=$(stat -c %s "${SOURCE%.rs}.elf" | python3 -c \
      if i<1024 else f(f,i/1024,j+1))"
 )
 echo "Built ${RELATIVE%.rs}.elf, file size ${SIZE}"
-lz4 -f --best --favor-decSpeed "${RELATIVE%.rs}.elf"
 exit
     "##; };
 

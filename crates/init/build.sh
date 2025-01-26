@@ -6,10 +6,16 @@ BIN="init"
 TARGET=aarch64-unknown-none-softfloat
 PROFILE=${PROFILE-"release"}
 
+mkdir -p fs
+
 ./example.rs
+cp example.elf fs/
+
+cargo run -q -p initfs --bin util \
+    -- create --compress --out fs.arc --root fs fs
 
 # cargo clean
-cargo rustc --profile=${PROFILE} \
+cargo rustc --profile="${PROFILE}" \
     --target=${TARGET} -- \
     -C relocation-model=static
 
@@ -19,5 +25,5 @@ else
     BINARY=../../target/${TARGET}/${PROFILE}/${BIN}
 fi
 
-cp ${BINARY} init.elf
-llvm-objcopy -O binary ${BINARY} init.bin
+cp "${BINARY}" init.elf
+llvm-objcopy -O binary "${BINARY}" init.bin

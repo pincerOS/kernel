@@ -1,3 +1,4 @@
 *.elf
 *.elf.lz4
+*.arc
 *.bin
