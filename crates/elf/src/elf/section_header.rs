@@ -1,29 +1,29 @@
 // https://refspecs.linuxfoundation.org/elf/gabi4+/ch4.sheader.html
 
-use core::{fmt::Display, str::Utf8Error};
+use core::{error, fmt::Display, str::Utf8Error};
 
-use super::{elf_header, identity, types::*};
+use super::{elf_header, identity, types::*, Elf};
 
-const SHN_UNDEF: u16 = 0;
-const SHN_LORESERVE: u16 = 0xff00;
-const SHN_LOPROC: u16 = 0xff00;
-const SHN_HIPROC: u16 = 0xff1f;
-const SHN_LOOS: u16 = 0xff20;
-const SHN_HIOS: u16 = 0xff3f;
-const SHN_ABS: u16 = 0xfff1;
-const SHN_COMMON: u16 = 0xfff2;
-const SHN_XINDEX: u16 = 0xffff;
-const SHN_HIRESERVE: u16 = 0xffff;
+pub const SHN_UNDEF: u16 = 0;
+pub const SHN_LORESERVE: u16 = 0xff00;
+pub const SHN_LOPROC: u16 = 0xff00;
+pub const SHN_HIPROC: u16 = 0xff1f;
+pub const SHN_LOOS: u16 = 0xff20;
+pub const SHN_HIOS: u16 = 0xff3f;
+pub const SHN_ABS: u16 = 0xfff1;
+pub const SHN_COMMON: u16 = 0xfff2;
+pub const SHN_XINDEX: u16 = 0xffff;
+pub const SHN_HIRESERVE: u16 = 0xffff;
 
-const SHT_LOOS: u32 = 0x60000000;
-const SHT_HIOS: u32 = 0x6fffffff;
-const SHT_LOPROC: u32 = 0x70000000;
-const SHT_HIPROC: u32 = 0x7fffffff;
-const SHT_LOUSER: u32 = 0x80000000;
-const SHT_HIUSER: u32 = 0xffffffff;
+pub const SHT_LOOS: u32 = 0x60000000;
+pub const SHT_HIOS: u32 = 0x6fffffff;
+pub const SHT_LOPROC: u32 = 0x70000000;
+pub const SHT_HIPROC: u32 = 0x7fffffff;
+pub const SHT_LOUSER: u32 = 0x80000000;
+pub const SHT_HIUSER: u32 = 0xffffffff;
 
-#[derive(Debug)]
-pub struct SectionHeader {
+#[derive(Debug, Copy, Clone)]
+pub struct SectionHeader<'a> {
     pub sh_name: Elf64Word,
     pub sh_type: Type,
     pub sh_flags: Flags,
@@ -34,6 +34,7 @@ pub struct SectionHeader {
     pub sh_info: Elf64Word,
     pub sh_addralign: Elf64Xword,
     pub sh_entsize: Elf64Xword,
+    file_data: &'a [u8],
 }
 
 #[repr(C)]
@@ -64,7 +65,7 @@ struct Elf64Shdr {
     sh_entsize: Elf64Xword,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum Type {
     Null,
     ProgBits,
@@ -88,7 +89,7 @@ pub enum Type {
     UserApplication(u32),
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum ProcessorSpecificType {
     ARMType(ARMType),
     Other(u32),
@@ -104,7 +105,7 @@ impl Display for ProcessorSpecificType {
 }
 
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub struct ARMType(u32);
 
 impl ARMType {
@@ -170,7 +171,7 @@ impl Display for Type {
 }
 
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub struct Flags(u64);
 
 impl Flags {
@@ -273,89 +274,59 @@ impl Display for Flags {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum SectionHeaderError {
     InvalidLength,
+    InvalidIndex,
     UnknownType,
 }
 
-pub fn get_section_headers<'a>(
-    data: &'a [u8],
-    elf_header: &'a elf_header::ElfHeader,
-) -> Result<impl Iterator<Item = Result<SectionHeader, SectionHeaderError>> + 'a, SectionHeaderError>
-{
-    let table_start = elf_header.e_shoff() as usize;
-    let entry_size = elf_header.e_shentsize() as usize;
-    let entry_count = if elf_header.e_shnum() == SHN_UNDEF {
-        let first_section_header = &data[table_start..table_start + entry_size];
-        let first_section_header = SectionHeader::new(first_section_header, &elf_header)?;
-        first_section_header.sh_size as usize
-    } else {
-        elf_header.e_shnum() as usize
-    };
-    let table_size = entry_size * entry_count;
-    let table_end = table_start + table_size;
-    if data.len() < table_end {
-        return Err(SectionHeaderError::InvalidLength);
-    }
-    let section_header_table = &data[table_start..table_end];
+impl error::Error for SectionHeaderError {}
 
-    let iter = (0..entry_count).map(move |i| {
-        let entry_start = i * entry_size;
-        let entry_end = entry_start + entry_size;
-        SectionHeader::new(&section_header_table[entry_start..entry_end], &elf_header)
-    });
-    Ok(iter)
+impl Display for SectionHeaderError {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match self {
+            Self::InvalidLength => write!(f, "Invalid section header length"),
+            Self::InvalidIndex => write!(f, "Invalid section header index"),
+            Self::UnknownType => write!(f, "Unknown section header type"),
+        }
+    }
 }
 
-pub fn get_string_table_header(
-    data: &[u8],
-    elf_header: &elf_header::ElfHeader,
-) -> Result<SectionHeader, SectionHeaderError> {
-    let entry_size = elf_header.e_shentsize() as usize;
-    let entry_count = elf_header.e_shnum() as usize;
-    let table_start = elf_header.e_shoff() as usize;
-    let table_size = entry_size * entry_count;
-    let table_end = table_start + table_size;
-    if data.len() < table_end {
-        return Err(SectionHeaderError::InvalidLength);
-    }
-    let section_header_table = &data[table_start..table_end];
-
-    let entry_start = elf_header.e_shstrndx() as usize * entry_size;
-    let entry_end = entry_start + entry_size;
-    SectionHeader::new(&section_header_table[entry_start..entry_end], &elf_header)
-}
-
-impl SectionHeader {
-    fn new(data: &[u8], elf_header: &elf_header::ElfHeader) -> Result<Self, SectionHeaderError> {
-        match elf_header.ident().class {
-            identity::Class::ELF32 => Self::new_shdr32(data, elf_header.e_machine()),
-            identity::Class::ELF64 => Self::new_shdr64(data, elf_header.e_machine()),
+impl<'a> SectionHeader<'a> {
+    pub(crate) fn new(elf: &'a Elf, offset: usize) -> Result<Self, SectionHeaderError> {
+        match elf.identity().class {
+            identity::Class::ELF32 => {
+                Self::new_shdr32(elf.file_data, offset, elf.elf_header().e_machine())
+            }
+            identity::Class::ELF64 => {
+                Self::new_shdr64(elf.file_data, offset, elf.elf_header().e_machine())
+            }
         }
     }
 
-    pub fn name<'a>(
-        &self,
-        data: &'a [u8],
-        string_table_header: &Self,
-    ) -> Result<&'a str, Utf8Error> {
-        let string_table_offset = string_table_header.sh_offset as usize;
+    pub fn name(&self, section_string_table_header: &SectionHeader) -> Result<&'a str, Utf8Error> {
+        let string_table_offset = section_string_table_header.sh_offset as usize;
         let index = self.sh_name as usize;
         let byte_offset = string_table_offset + index;
         let mut end = byte_offset;
-        while data[end] != 0 {
+        while self.file_data[end] != 0 {
             end += 1;
         }
-        let name = &data[byte_offset..end];
+        let name = &self.file_data[byte_offset..end];
         core::str::from_utf8(name)
     }
 
-    fn new_shdr32(header: &[u8], machine: elf_header::Machine) -> Result<Self, SectionHeaderError> {
-        if header.len() != size_of::<Elf32Shdr>() {
+    fn new_shdr32(
+        file_data: &'a [u8],
+        offset: usize,
+        machine: elf_header::Machine,
+    ) -> Result<Self, SectionHeaderError> {
+        if file_data.len() < offset + size_of::<Elf32Shdr>() {
             return Err(SectionHeaderError::InvalidLength);
         }
-        let header: &Elf32Shdr = unsafe { &*(header.as_ptr() as *const Elf32Shdr) };
+        let data = &file_data[offset..offset + size_of::<Elf32Shdr>()];
+        let header: &Elf32Shdr = unsafe { &*(data.as_ptr() as *const Elf32Shdr) };
 
         let sh_name = header.sh_name;
         let sh_type = match header.sh_type {
@@ -406,13 +377,19 @@ impl SectionHeader {
             sh_info,
             sh_addralign,
             sh_entsize,
+            file_data,
         })
     }
-    fn new_shdr64(header: &[u8], machine: elf_header::Machine) -> Result<Self, SectionHeaderError> {
-        if header.len() != size_of::<Elf64Shdr>() {
+    fn new_shdr64(
+        file_data: &'a [u8],
+        offset: usize,
+        machine: elf_header::Machine,
+    ) -> Result<Self, SectionHeaderError> {
+        if file_data.len() < offset + size_of::<Elf64Shdr>() {
             return Err(SectionHeaderError::InvalidLength);
         }
-        let header: &Elf64Shdr = unsafe { &*(header.as_ptr() as *const Elf64Shdr) };
+        let data = &file_data[offset..offset + size_of::<Elf64Shdr>()];
+        let header: &Elf64Shdr = unsafe { &*(data.as_ptr() as *const Elf64Shdr) };
 
         let sh_name = header.sh_name;
         let sh_type = match header.sh_type {
@@ -463,6 +440,7 @@ impl SectionHeader {
             sh_info,
             sh_addralign,
             sh_entsize,
+            file_data,
         })
     }
 }

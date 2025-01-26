@@ -1,15 +1,19 @@
 // https://refspecs.linuxfoundation.org/elf/gabi4+/ch5.pheader.html
 
-use core::fmt::{Display, Formatter};
+use core::{
+    error::Error,
+    fmt::{Display, Formatter},
+};
 
-use super::{elf_header, identity, types::*};
+use super::{elf_header, identity, types::*, Elf};
 
 const PT_LOOS: u32 = 0x60000000;
 const PT_HIOS: u32 = 0x6fffffff;
 const PT_LOPROC: u32 = 0x70000000;
 const PT_HIPROC: u32 = 0x7fffffff;
 
-pub struct ProgramHeader {
+#[derive(Debug, Copy, Clone)]
+pub struct ProgramHeader<'a> {
     pub p_type: Type,
     pub p_offset: u64,
     pub p_vaddr: u64,
@@ -18,6 +22,7 @@ pub struct ProgramHeader {
     pub p_memsz: u64,
     pub p_flags: Flags,
     pub p_align: u64,
+    file_data: &'a [u8],
 }
 
 #[repr(C)]
@@ -44,7 +49,7 @@ struct Elf64Phdr {
     p_align: Elf64Xword,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum GnuType {
     EhFrame,
     Stack,
@@ -53,13 +58,13 @@ pub enum GnuType {
     SFrame,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum SunType {
     Bss,
     Stack,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum OsSpecificType {
     GNU(GnuType),
     Sun(SunType),
@@ -108,17 +113,17 @@ impl From<u32> for OsSpecificType {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum ARMType {
     Exidx,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum AArch64Type {
     MemTagMTE,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum ProcessorSpecificType {
     ARM(ARMType),
     AArch64(AArch64Type),
@@ -128,10 +133,10 @@ pub enum ProcessorSpecificType {
 impl ProcessorSpecificType {
     fn new(value: u32, machine: elf_header::Machine) -> Self {
         match value {
-            val if machine == elf_header::Machine::ARM && val == PT_LOPROC + 1 => {
+            val if matches!(machine, elf_header::Machine::ARM) && val == PT_LOPROC + 1 => {
                 ProcessorSpecificType::ARM(ARMType::Exidx)
             }
-            val if machine == elf_header::Machine::AArch64 && val == PT_LOPROC + 2 => {
+            val if matches!(machine, elf_header::Machine::AArch64) && val == PT_LOPROC + 2 => {
                 ProcessorSpecificType::AArch64(AArch64Type::MemTagMTE)
             }
             other => ProcessorSpecificType::Unknown(other),
@@ -161,7 +166,7 @@ impl Display for ProcessorSpecificType {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum Type {
     Null,
     Load,
@@ -193,7 +198,7 @@ impl Display for Type {
 }
 
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub struct Flags(u64);
 
 impl Flags {
@@ -253,41 +258,39 @@ pub enum ProgramHeaderError {
     UnknownType,
 }
 
-pub fn get_program_headers<'a>(
-    data: &'a [u8],
-    elf_header: &'a elf_header::ElfHeader,
-) -> Result<impl Iterator<Item = Result<ProgramHeader, ProgramHeaderError>> + 'a, ProgramHeaderError>
-{
-    let table_start = elf_header.e_phoff() as usize;
-    let entry_size = elf_header.e_phentsize() as usize;
-    let entry_count = elf_header.e_phnum() as usize;
-    let table_size = entry_size * entry_count;
-    let table_end = table_start + table_size;
-    if data.len() < table_end {
-        return Err(ProgramHeaderError::InvalidLength);
+impl Display for ProgramHeaderError {
+    fn fmt(&self, f: &mut Formatter) -> core::fmt::Result {
+        match self {
+            Self::InvalidLength => write!(f, "Invalid length"),
+            Self::UnknownType => write!(f, "Unknown type"),
+        }
     }
-    let program_header_table = &data[table_start..table_end];
-    let iter = (0..entry_count).map(move |i| {
-        let entry_start = i * entry_size;
-        let entry_end = entry_start + entry_size;
-        ProgramHeader::new(&program_header_table[entry_start..entry_end], elf_header)
-    });
-    Ok(iter)
 }
 
-impl ProgramHeader {
-    fn new(data: &[u8], elf_header: &elf_header::ElfHeader) -> Result<Self, ProgramHeaderError> {
-        match elf_header.ident().class {
-            identity::Class::ELF32 => Self::new_phdr32(data, elf_header.e_machine()),
-            identity::Class::ELF64 => Self::new_phdr64(data, elf_header.e_machine()),
+impl Error for ProgramHeaderError {}
+
+impl<'a> ProgramHeader<'a> {
+    pub(crate) fn new(elf: &'a Elf, offset: usize) -> Result<Self, ProgramHeaderError> {
+        match elf.identity().class {
+            identity::Class::ELF32 => {
+                Self::new_phdr32(elf.file_data, offset, elf.elf_header.e_machine())
+            }
+            identity::Class::ELF64 => {
+                Self::new_phdr64(elf.file_data, offset, elf.elf_header.e_machine())
+            }
         }
     }
 
-    fn new_phdr32(header: &[u8], machine: elf_header::Machine) -> Result<Self, ProgramHeaderError> {
-        if header.len() != size_of::<Elf32Phdr>() {
+    fn new_phdr32(
+        file_data: &'a [u8],
+        offset: usize,
+        machine: elf_header::Machine,
+    ) -> Result<Self, ProgramHeaderError> {
+        if file_data.len() < offset + size_of::<Elf32Phdr>() {
             return Err(ProgramHeaderError::InvalidLength);
         }
-        let header: &Elf32Phdr = unsafe { &*(header.as_ptr() as *const Elf32Phdr) };
+        let data = &file_data[offset..offset + size_of::<Elf32Phdr>()];
+        let header: &Elf32Phdr = unsafe { &*(data.as_ptr() as *const Elf32Phdr) };
 
         let p_type = match header.p_type {
             0 => Type::Null,
@@ -323,13 +326,19 @@ impl ProgramHeader {
             p_memsz,
             p_flags,
             p_align,
+            file_data,
         })
     }
-    fn new_phdr64(header: &[u8], machine: elf_header::Machine) -> Result<Self, ProgramHeaderError> {
-        if header.len() != size_of::<Elf64Phdr>() {
+    fn new_phdr64(
+        file_data: &'a [u8],
+        offset: usize,
+        machine: elf_header::Machine,
+    ) -> Result<Self, ProgramHeaderError> {
+        if file_data.len() < offset + size_of::<Elf64Phdr>() {
             return Err(ProgramHeaderError::InvalidLength);
         }
-        let header: &Elf64Phdr = unsafe { &*(header.as_ptr() as *const Elf64Phdr) };
+        let data = &file_data[offset..offset + size_of::<Elf64Phdr>()];
+        let header: &Elf64Phdr = unsafe { &*(data.as_ptr() as *const Elf64Phdr) };
 
         let p_type = match header.p_type {
             0 => Type::Null,
@@ -365,6 +374,7 @@ impl ProgramHeader {
             p_memsz,
             p_flags,
             p_align,
+            file_data,
         })
     }
 }

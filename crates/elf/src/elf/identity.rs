@@ -23,21 +23,22 @@ const EI_PAD: usize = 9;
 pub const EI_NIDENT: usize = 16;
 
 #[derive(Debug, Copy, Clone)]
-pub struct ElfIdentity {
+pub struct ElfIdentity<'a> {
     pub class: Class,
     pub data: DataEncoding,
     pub version: Version,
     pub os_abi: OsAbi,
     pub abi_version: u8,
+    _data: &'a [u8],
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum Class {
     ELF32,
     ELF64,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum DataEncoding {
     LSB,
     MSB,
@@ -52,7 +53,7 @@ impl Display for DataEncoding {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum Version {
     Current,
 }
@@ -65,7 +66,7 @@ impl Display for Version {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum OsAbi {
     None,
     HPUX,
@@ -105,8 +106,9 @@ impl Display for OsAbi {
 }
 
 #[derive(Debug)]
-pub enum ElfIdentityError {
-    InvalidMagic,
+pub enum ElfIdentityError<'a> {
+    InvalidLength,
+    InvalidMagic(&'a [u8]),
     InvalidClass,
     UnknownClass,
     InvalidEncoding,
@@ -116,29 +118,39 @@ pub enum ElfIdentityError {
     UnknownVersion,
 }
 
-impl ElfIdentity {
-    pub(crate) fn new(ident: &[u8]) -> Result<Self, ElfIdentityError> {
-        let len = ident.len();
-        assert!(
-            len == EI_NIDENT,
-            "Need {EI_NIDENT} bytes for an ELF header identity, got {len}"
-        );
-        let magic = [
-            ident[EI_MAG0],
-            ident[EI_MAG1],
-            ident[EI_MAG2],
-            ident[EI_MAG3],
-        ];
-        if magic != [0x7F, b'E', b'L', b'F'] {
-            return Err(ElfIdentityError::InvalidMagic);
+impl Display for ElfIdentityError<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::InvalidLength => write!(f, "Invalid length"),
+            Self::InvalidMagic(magic) => write!(f, "Invalid magic: {:?}", magic),
+            Self::InvalidClass => write!(f, "Invalid class"),
+            Self::UnknownClass => write!(f, "Unknown class"),
+            Self::InvalidEncoding => write!(f, "Invalid data encoding"),
+            Self::UnknownDataEncoding => write!(f, "Unknown data encoding"),
+            Self::BigEndian => write!(f, "Big-endian encoding not supported"),
+            Self::InvalidVersion => write!(f, "Invalid version"),
+            Self::UnknownVersion => write!(f, "Unknown version"),
         }
-        let class = match ident[EI_CLASS] {
+    }
+}
+
+impl<'a> ElfIdentity<'a> {
+    pub(crate) fn new(data: &'a [u8]) -> Result<Self, ElfIdentityError<'a>> {
+        if data.len() != EI_NIDENT {
+            return Err(ElfIdentityError::InvalidLength);
+        }
+
+        let magic = [data[EI_MAG0], data[EI_MAG1], data[EI_MAG2], data[EI_MAG3]];
+        if magic != [0x7F, b'E', b'L', b'F'] {
+            return Err(ElfIdentityError::InvalidMagic(&data[EI_MAG0..=EI_MAG3]));
+        }
+        let class = match data[EI_CLASS] {
             0 => return Err(ElfIdentityError::InvalidClass),
             1 => Class::ELF32,
             2 => Class::ELF64,
             _ => return Err(ElfIdentityError::UnknownClass),
         };
-        let data = match ident[EI_DATA] {
+        let data_encoding = match data[EI_DATA] {
             0 => return Err(ElfIdentityError::InvalidEncoding),
             1 => DataEncoding::LSB,
             // 2 => DataEncoding::MSB,
@@ -146,12 +158,12 @@ impl ElfIdentity {
             2 => return Err(ElfIdentityError::BigEndian),
             _ => return Err(ElfIdentityError::UnknownDataEncoding),
         };
-        let version = match ident[EI_VERSION] {
+        let version = match data[EI_VERSION] {
             0 => return Err(ElfIdentityError::InvalidVersion),
             1 => Version::Current,
             _ => return Err(ElfIdentityError::UnknownVersion),
         };
-        let os_abi = match ident[EI_OSABI] {
+        let os_abi = match data[EI_OSABI] {
             0 => OsAbi::None,
             1 => OsAbi::HPUX,
             2 => OsAbi::NetBSD,
@@ -168,14 +180,19 @@ impl ElfIdentity {
             14 => OsAbi::NSK,
             other => OsAbi::Other(other),
         };
-        let abi_version = ident[EI_ABIVERSION];
+        let abi_version = data[EI_ABIVERSION];
 
         Ok(Self {
             class,
-            data,
+            data: data_encoding,
             version,
             os_abi,
             abi_version,
+            _data: data,
         })
+    }
+
+    pub fn bytes(&self) -> &'a [u8] {
+        self._data
     }
 }

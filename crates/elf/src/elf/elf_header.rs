@@ -12,11 +12,10 @@ const ET_HIOS: u16 = 0xfeff;
 const ET_LOPROC: u16 = 0xff00;
 const ET_HIPROC: u16 = 0xffff;
 
-#[derive(Debug)]
-pub enum ElfHeader {
+#[derive(Debug, Copy, Clone)]
+pub enum ElfHeader<'a> {
     Elf32Header {
-        e_ident: identity::ElfIdentity,
-        e_ident_bytes: [u8; identity::EI_NIDENT],
+        e_ident: identity::ElfIdentity<'a>,
         e_type: Type,
         e_machine: Machine,
         e_version: Version,
@@ -30,10 +29,10 @@ pub enum ElfHeader {
         e_shentsize: u16,
         e_shnum: u16,
         e_shstrndx: u16,
+        data: &'a [u8],
     },
     Elf64Header {
-        e_ident: identity::ElfIdentity,
-        e_ident_bytes: [u8; identity::EI_NIDENT],
+        e_ident: identity::ElfIdentity<'a>,
         e_type: Type,
         e_machine: Machine,
         e_version: Version,
@@ -47,6 +46,7 @@ pub enum ElfHeader {
         e_shentsize: u16,
         e_shnum: u16,
         e_shstrndx: u16,
+        data: &'a [u8],
     },
 }
 
@@ -86,7 +86,7 @@ struct Elf64Ehdr {
     e_shstrndx: Elf64Half,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum Type {
     None,
     Relocatable,
@@ -111,7 +111,7 @@ impl Display for Type {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum Machine {
     None,
     Bellmac32,
@@ -385,7 +385,7 @@ impl From<u16> for Machine {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum Version {
     Current,
 }
@@ -399,7 +399,7 @@ impl Display for Version {
 }
 
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub struct ARMFlags(u32);
 
 impl ARMFlags {
@@ -527,7 +527,7 @@ impl From<Elf32Word> for ARMFlags {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum Flags {
     ARM(ARMFlags),
     AArch64,
@@ -545,23 +545,36 @@ impl Display for Flags {
 }
 
 #[derive(Debug)]
-pub enum ElfHeaderError {
+pub enum ElfHeaderError<'a> {
     InvalidLength,
-    ElfIdentityError(identity::ElfIdentityError),
+    ElfIdentityError(identity::ElfIdentityError<'a>),
     InvalidType,
     InvalidVersion,
     UnknownVersion,
     UnimplementedArchitecture,
 }
 
-impl From<identity::ElfIdentityError> for ElfHeaderError {
-    fn from(e: identity::ElfIdentityError) -> Self {
+impl Display for ElfHeaderError<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::InvalidLength => write!(f, "Invalid ELF header length"),
+            Self::ElfIdentityError(e) => write!(f, "Invalid ELF identity: {}", e),
+            Self::InvalidType => write!(f, "Invalid ELF type"),
+            Self::InvalidVersion => write!(f, "Invalid ELF version"),
+            Self::UnknownVersion => write!(f, "Unknown ELF version"),
+            Self::UnimplementedArchitecture => write!(f, "Unimplemented architecture"),
+        }
+    }
+}
+
+impl<'a> From<identity::ElfIdentityError<'a>> for ElfHeaderError<'a> {
+    fn from(e: identity::ElfIdentityError<'a>) -> Self {
         ElfHeaderError::ElfIdentityError(e)
     }
 }
 
-impl ElfHeader {
-    pub fn new(header: &[u8]) -> Result<Self, ElfHeaderError> {
+impl<'a> ElfHeader<'a> {
+    pub(crate) fn new(header: &'a [u8]) -> Result<Self, ElfHeaderError<'a>> {
         if header.len() < identity::EI_NIDENT {
             return Err(ElfHeaderError::InvalidLength);
         }
@@ -573,11 +586,14 @@ impl ElfHeader {
         }
     }
 
-    fn new_elf32(header: &[u8], e_ident: identity::ElfIdentity) -> Result<Self, ElfHeaderError> {
-        if header.len() < size_of::<Elf32Ehdr>() {
+    fn new_elf32(
+        data: &'a [u8],
+        e_ident: identity::ElfIdentity<'a>,
+    ) -> Result<Self, ElfHeaderError<'a>> {
+        if data.len() < size_of::<Elf32Ehdr>() {
             return Err(ElfHeaderError::InvalidLength);
         }
-        let header: &Elf32Ehdr = unsafe { &*(header.as_ptr() as *const Elf32Ehdr) };
+        let header: &Elf32Ehdr = unsafe { &*(data.as_ptr() as *const Elf32Ehdr) };
 
         let e_type = match header.e_type {
             0x00 => Type::None,
@@ -616,7 +632,6 @@ impl ElfHeader {
 
         Ok(Self::Elf32Header {
             e_ident,
-            e_ident_bytes: header.e_ident,
             e_type,
             e_machine,
             e_version,
@@ -630,13 +645,17 @@ impl ElfHeader {
             e_shentsize,
             e_shnum,
             e_shstrndx,
+            data,
         })
     }
-    fn new_elf64(header: &[u8], e_ident: identity::ElfIdentity) -> Result<Self, ElfHeaderError> {
-        if header.len() < size_of::<Elf64Ehdr>() {
+    fn new_elf64(
+        data: &'a [u8],
+        e_ident: identity::ElfIdentity<'a>,
+    ) -> Result<Self, ElfHeaderError<'a>> {
+        if data.len() < size_of::<Elf64Ehdr>() {
             return Err(ElfHeaderError::InvalidLength);
         }
-        let header: &Elf64Ehdr = unsafe { &*(header.as_ptr() as *const Elf64Ehdr) };
+        let header: &Elf64Ehdr = unsafe { &*(data.as_ptr() as *const Elf64Ehdr) };
 
         let e_type = match header.e_type {
             0x00 => Type::None,
@@ -671,7 +690,6 @@ impl ElfHeader {
 
         Ok(Self::Elf64Header {
             e_ident,
-            e_ident_bytes: header.e_ident,
             e_type,
             e_machine,
             e_version,
@@ -685,16 +703,11 @@ impl ElfHeader {
             e_shentsize,
             e_shnum,
             e_shstrndx,
+            data,
         })
     }
 
-    pub fn ident_bytes(&self) -> &[u8] {
-        match self {
-            Self::Elf32Header { e_ident_bytes, .. } => e_ident_bytes,
-            Self::Elf64Header { e_ident_bytes, .. } => e_ident_bytes,
-        }
-    }
-    pub fn ident(&self) -> identity::ElfIdentity {
+    pub fn e_ident(&self) -> identity::ElfIdentity {
         match self {
             Self::Elf32Header { e_ident, .. } => *e_ident,
             Self::Elf64Header { e_ident, .. } => *e_ident,

@@ -1,97 +1,103 @@
 use std::fs;
 
-use elf::{
-    elf_header, program_header,
-    section_header::{get_section_headers, get_string_table_header},
-};
+use elf::{section_header, Elf};
 
 // Readelf-like tool to output the parsed elf structs
 
-fn output_elf_file_header(header: &elf_header::ElfHeader) {
+fn output_elf_file_header(elf: &Elf) {
     println!("ELF Header:");
     print!("  Magic:   ");
-    for byte in header.ident_bytes() {
+    for byte in elf.identity().bytes() {
         print!("{:02x} ", byte);
     }
     println!();
     println!(
         "  Class:                             {:?}",
-        header.ident().class
+        elf.identity().class
     );
     println!(
         "  Data:                              {}",
-        header.ident().data
+        elf.identity().data
     );
     println!(
         "  Version:                           {}",
-        header.ident().version
+        elf.identity().version
     );
     println!(
         "  OS/ABI:                            {}",
-        header.ident().os_abi
+        elf.identity().os_abi
     );
     println!(
         "  ABI Version:                       {}",
-        header.ident().abi_version
+        elf.identity().abi_version
     );
-    println!("  Type:                              {}", header.e_type());
+    println!(
+        "  Type:                              {}",
+        elf.elf_header().e_type()
+    );
     println!(
         "  Machine:                           {}",
-        header.e_machine()
+        elf.elf_header().e_machine()
     );
     println!(
         "  Version:                           {}",
-        header.e_version()
+        elf.elf_header().e_version()
     );
     println!(
         "  Entry point address:               0x{:x}",
-        header.e_entry()
+        elf.elf_header().e_entry()
     );
     println!(
         "  Start of program headers:          {} (bytes into file)",
-        header.e_phoff()
+        elf.elf_header().e_phoff()
     );
     println!(
         "  Start of section headers:          {} (bytes into file)",
-        header.e_shoff()
+        elf.elf_header().e_shoff()
     );
-    println!("  Flags:                             {}", header.e_flags());
+    println!(
+        "  Flags:                             {}",
+        elf.elf_header().e_flags()
+    );
     println!(
         "  Size of this header:               {} (bytes)",
-        header.e_ehsize()
+        elf.elf_header().e_ehsize()
     );
     println!(
         "  Size of program headers:           {} (bytes)",
-        header.e_phentsize()
+        elf.elf_header().e_phentsize()
     );
-    println!("  Number of program headers:         {}", header.e_phnum());
+    println!(
+        "  Number of program headers:         {}",
+        elf.elf_header().e_phnum()
+    );
     println!(
         "  Size of section headers:           {} (bytes)",
-        header.e_shentsize()
+        elf.elf_header().e_shentsize()
     );
-    println!("  Number of section headers:         {}", header.e_shnum());
+    println!(
+        "  Number of section headers:         {}",
+        elf.elf_header().e_shnum()
+    );
     println!(
         "  Section header string table index: {}",
-        header.e_shstrndx()
+        elf.elf_header().e_shstrndx()
     );
 }
 
-fn output_section_headers(data: &[u8], elf_header: &elf_header::ElfHeader) {
-    let section_headers = match get_section_headers(data, elf_header) {
-        Ok(headers) => headers,
-        Err(e) => {
-            eprintln!("Error: {:?}", e);
-            return;
+fn output_section_headers<'a>(elf: &'a Elf) -> Result<(), elf::ElfError<'a>> {
+    let section_string_table = match elf
+        .section_headers()?
+        .nth(elf.elf_header().e_shstrndx() as usize)
+    {
+        Some(section_header) => section_header?,
+        None => {
+            return Err(elf::ElfError::SectionHeaderError(
+                section_header::SectionHeaderError::InvalidIndex,
+            ))
         }
     };
-    let string_table = match get_string_table_header(data, elf_header) {
-        Ok(header) => header,
-        Err(e) => {
-            eprintln!("Error: {:?}", e);
-            return;
-        }
-    };
-    let is_32_bit = elf_header.ident().class == elf::identity::Class::ELF32;
+    let is_32_bit = matches!(elf.identity().class, elf::identity::Class::ELF32);
     println!("Section Headers:");
     if is_32_bit {
         println!(
@@ -101,15 +107,9 @@ fn output_section_headers(data: &[u8], elf_header: &elf_header::ElfHeader) {
         println!("  [Nr] Name              Type             Address           Offset");
         println!("       Size              EntSize          Flags  Link  Info  Align");
     }
-    for (i, header) in section_headers.enumerate() {
-        let header = match header {
-            Ok(h) => h,
-            Err(e) => {
-                eprintln!("Error: {:?}", e);
-                return;
-            }
-        };
-        let name = match header.name(data, &string_table) {
+    for (i, header) in elf.section_headers()?.enumerate() {
+        let header = header?;
+        let name = match header.name(&section_string_table) {
             Ok(name) => name,
             Err(_) => "",
         };
@@ -156,17 +156,11 @@ fn output_section_headers(data: &[u8], elf_header: &elf_header::ElfHeader) {
     println!("  L (link order), O (extra OS processing required), G (group), T (TLS),");
     println!("  C (compressed), x (unknown), o (OS specific), E (exclude),");
     println!("  D (mbind), p (processor specific)");
+    Ok(())
 }
 
-fn output_program_headers(data: &[u8], elf_header: &elf_header::ElfHeader) {
-    let program_headers = match program_header::get_program_headers(data, elf_header) {
-        Ok(headers) => headers,
-        Err(e) => {
-            eprintln!("Error: {:?}", e);
-            return;
-        }
-    };
-    let is_32_bit = elf_header.ident().class == elf::identity::Class::ELF32;
+fn output_program_headers<'a>(elf: &'a Elf) -> Result<(), elf::ElfError<'a>> {
+    let is_32_bit = matches!(elf.identity().class, elf::identity::Class::ELF32);
     println!("Program Headers:");
     if is_32_bit {
         println!("  Type           Offset   VirtAddr   PhysAddr   FileSiz MemSiz  Flg Align");
@@ -174,14 +168,8 @@ fn output_program_headers(data: &[u8], elf_header: &elf_header::ElfHeader) {
         println!("  Type           Offset             VirtAddr           PhysAddr");
         println!("                 FileSiz            MemSiz              Flags  Align");
     }
-    for header in program_headers {
-        let header = match header {
-            Ok(h) => h,
-            Err(e) => {
-                eprintln!("Error: {:?}", e);
-                return;
-            }
-        };
+    for header in elf.program_headers()? {
+        let header = header?;
         if is_32_bit {
             print!("  ");
             print!("{:14} ", format!("{}", header.p_type));
@@ -208,21 +196,39 @@ fn output_program_headers(data: &[u8], elf_header: &elf_header::ElfHeader) {
             println!();
         }
     }
+    Ok(())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let data: Vec<u8> = fs::read("crates/elf/examples/x64/simple")?;
-    let elf_header = match elf_header::ElfHeader::new(&data) {
-        Ok(header) => header,
+fn display_elf_file<'a>(elf: &'a Elf) -> Result<(), Box<dyn std::error::Error + 'a>> {
+    output_elf_file_header(&elf);
+    println!();
+    output_section_headers(&elf)?;
+    println!();
+    output_program_headers(&elf)?;
+    Ok(())
+}
+
+fn main() {
+    let data: Vec<u8> = match fs::read("crates/elf/examples/x64/simple") {
+        Ok(data) => data,
         Err(e) => {
-            eprintln!("Error: {:?}", e);
-            return Ok(());
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
         }
     };
-    output_elf_file_header(&elf_header);
-    println!();
-    output_section_headers(&data, &elf_header);
-    println!();
-    output_program_headers(&data, &elf_header);
-    Ok(())
+    let elf = match elf::Elf::new(&data) {
+        Ok(elf) => elf,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    };
+    match display_elf_file(&elf) {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    }
+    drop(elf);
 }
