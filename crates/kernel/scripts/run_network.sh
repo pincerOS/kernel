@@ -6,4 +6,5 @@ qemu-system-aarch64 -M raspi3b -dtb bcm2710-rpi-3-b-plus.dtb -display none -seri
     -device usb-net,netdev=net0 \
     -netdev tap,id=net0
 
-#requires to be run sudo
+# -netdev tap,id=net0,script=no,downscript=no
+#requires to be run sudo, if it hangs, make sure to turn down script and downscript
