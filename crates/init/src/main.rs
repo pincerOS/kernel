@@ -36,6 +36,19 @@ pub extern "C" fn main() {
         println!("Running in usermode! {}", i);
     }
 
+    let (send, recv) = unsafe { syscall::channel() };
+    println!("send {:?}, recv {:?}", send, recv);
+
+    let msg = syscall::Message { tag: 0, objects: [0; 4] };
+    let buf = b"Hello world!";
+    let a = unsafe { syscall::send(send, &msg, buf.as_ptr(), buf.len()) };
+    println!("send -> {a}");
+
+    let mut msg = syscall::Message { tag: 0, objects: [0; 4] };
+    let mut buf = [0; 4096];
+    let a = unsafe { syscall::recv(recv, &mut msg, buf.as_mut_ptr(), buf.len()) };
+    println!("recv -> {a} ({msg:?}, {:?}", buf.get(..a as usize));
+
     unsafe { syscall::exit() };
     unreachable!();
 }

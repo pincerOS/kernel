@@ -8,6 +8,7 @@ mod runtime {
     #[rustfmt::skip]
     static _COMPILE_SCRIPT: () = { r##"
 END_BASH_COMMENT
+set -e
 SOURCE=$(realpath $0)
 RELATIVE=$(realpath --relative-to=. $SOURCE)
 rustc --target=aarch64-unknown-none-softfloat \
@@ -47,14 +48,14 @@ exit
     #[no_mangle]
     extern "C" fn _start() -> ! {
         crate::main();
-        unsafe { core::arch::asm!("svc #6") }; // exit
+        unsafe { exit() };
         loop {}
     }
 
     pub struct Stdout;
     impl core::fmt::Write for Stdout {
         fn write_str(&mut self, s: &str) -> core::fmt::Result {
-            unsafe { core::arch::asm!("svc #4", in("x0") s.as_ptr(), in("x1") s.len()) };
+            unsafe { print(s.as_ptr(), s.len()) };
             Ok(())
         }
     }
@@ -79,16 +80,34 @@ exit
         println!("Panic: {}", info.message());
         loop {}
     }
+
+    macro_rules! syscall {
+        ($num:literal => $vis:vis fn $ident:ident ( $($arg:ident : $ty:ty),* $(,)? ) $( -> $ret:ty )?) => {
+            core::arch::global_asm!(
+                ".global {name}; {name}: svc #{num}; ret",
+                name = sym $ident,
+                num = const $num,
+            );
+            extern "C" {
+                $vis fn $ident( $($arg: $ty,)* ) $(-> $ret)?;
+            }
+        };
+    }
+
+    syscall!(1 => pub fn shutdown());
+    syscall!(2 => pub fn hello_world());
+    syscall!(3 => pub fn yield_());
+    syscall!(4 => pub fn print(buf: *const u8, len: usize));
+    syscall!(5 => pub fn spawn(pc: usize, sp: usize));
+    syscall!(6 => pub fn exit());
 }
 
 fn main() {
-    use core::arch::asm;
-
     for i in 0..10 {
         println!("Running in usermode! {}", i);
     }
 
-    unsafe { asm!("svc #1") };
+    unsafe { runtime::exit() };
 }
 
 // I'll just leave this here: */

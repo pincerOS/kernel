@@ -17,3 +17,29 @@ syscall!(3 => pub fn yield_());
 syscall!(4 => pub fn print(buf: *const u8, len: usize));
 syscall!(5 => pub fn spawn(pc: usize, sp: usize, flags: usize));
 syscall!(6 => pub fn exit());
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct SendDesc(pub u32);
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct RecvDesc(pub u32);
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct Message {
+    pub tag: u64,
+    pub objects: [u32; 4],
+}
+
+#[repr(C)]
+struct Channels(usize, usize);
+
+syscall!(7 => fn _channel() -> Channels);
+pub unsafe fn channel() -> (SendDesc, RecvDesc) {
+    let res = unsafe { _channel() };
+    (SendDesc(res.0 as u32), RecvDesc(res.1 as u32))
+}
+
+syscall!(8 => pub fn send(desc: SendDesc, msg: &Message, buf: *const u8, buf_len: usize) -> isize);
+syscall!(9 => pub fn recv(desc: RecvDesc, msg: &mut Message, buf: *mut u8, buf_cap: usize) -> isize);
