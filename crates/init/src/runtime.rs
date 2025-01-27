@@ -18,8 +18,31 @@ halt:
     "
 );
 
+pub struct Stdout;
+impl core::fmt::Write for Stdout {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        unsafe { super::syscall::print(s.as_ptr(), s.len()) };
+        Ok(())
+    }
+}
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        write!($crate::runtime::Stdout, $($arg)*).ok();
+    }};
+}
+#[macro_export]
+macro_rules! println {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        writeln!($crate::runtime::Stdout, $($arg)*).ok();
+    }};
+}
+
 #[cfg(not(test))]
 #[panic_handler]
-fn panic_handler(_info: &core::panic::PanicInfo) -> ! {
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+    println!("Panic: {}", info.message());
     loop {}
 }

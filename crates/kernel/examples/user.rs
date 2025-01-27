@@ -5,11 +5,74 @@ extern crate alloc;
 extern crate kernel;
 
 use kernel::*;
+
+use context::{deschedule_thread, Context, DescheduleAction, CORES};
+
+unsafe fn sys_shutdown(_ctx: &mut Context) -> *mut Context {
+    shutdown();
+}
+unsafe fn sys_hello(ctx: &mut Context) -> *mut Context {
+    println!("Hello world syscall");
+    ctx
+}
+unsafe fn sys_yield(ctx: &mut Context) -> *mut Context {
+    let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
+    let mut thread = thread.expect("usermode syscall without active thread");
+    unsafe { thread.save_context(ctx.into()) };
+
+    let action = DescheduleAction::Yield;
+    unsafe { deschedule_thread(core_sp, thread, action) }
+}
+unsafe fn sys_print(ctx: &mut Context) -> *mut Context {
+    let ptr = ctx.regs[0];
+    let len = ctx.regs[1];
+    // TODO: soundness (check user permissions for the range)
+    let data = unsafe { core::slice::from_raw_parts(ptr as *const u8, len) };
+    let mut stdout = device::uart::UART.get().lock();
+    for c in data {
+        stdout.writec(*c);
+    }
+    ctx
+}
+unsafe fn sys_exit(ctx: &mut Context) -> *mut Context {
+    let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
+    let mut thread = thread.expect("usermode syscall without active thread");
+    unsafe { thread.save_context(ctx.into()) };
+
+    let action = DescheduleAction::FreeThread;
+    unsafe { deschedule_thread(core_sp, thread, action) }
+}
+unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
+    let user_entry = ctx.regs[0];
+    let user_sp = ctx.regs[1];
+
+    let page_dir = CORES.with_current(|core| {
+        let thread = core.thread.take().unwrap();
+        let page_dir = thread.user_regs.as_ref().unwrap().ttbr0_el1;
+        core.thread.set(Some(thread));
+        page_dir
+    });
+
+    let user_thread = unsafe { thread::Thread::new_user(user_sp, user_entry, page_dir) };
+    event::SCHEDULER.add_task(event::Event::ScheduleThread(user_thread));
+
+    ctx
+}
+
 static INIT_CODE: &[u8] = kernel::util::include_bytes_align!(u32, "../../init/init.bin");
 
 #[no_mangle]
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
+
+    unsafe {
+        exceptions::register_syscall_handler(1, sys_shutdown);
+        exceptions::register_syscall_handler(2, sys_hello);
+        exceptions::register_syscall_handler(3, sys_yield);
+        exceptions::register_syscall_handler(4, sys_print);
+        exceptions::register_syscall_handler(5, sys_spawn);
+        exceptions::register_syscall_handler(6, sys_exit);
+    }
 
     // Create user region (mapped at 0x20_000 in virtual memory)
     let (user_region, ttbr0) = unsafe { crate::arch::memory::create_user_region() };

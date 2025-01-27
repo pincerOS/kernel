@@ -29,8 +29,11 @@ pub extern "C" fn main() {
     }
 
     let entry = elf.elf_header().e_entry();
-    let code: extern "C" fn() = unsafe { core::mem::transmute(entry as *const ()) };
-    (code)();
+    let new_sp = 0x80_0000;
+    unsafe { syscall::spawn(entry as usize, new_sp) };
+
+    unsafe { syscall::exit() };
+    unreachable!();
 }
 
 #[macro_use]

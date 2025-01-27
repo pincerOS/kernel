@@ -1,7 +1,8 @@
 use core::arch::{asm, global_asm};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::arch::halt;
-use crate::context::Context;
+use crate::context::{deschedule_thread, Context, DescheduleAction, CORES};
 use crate::uart;
 
 // TODO:
@@ -233,6 +234,23 @@ unsafe extern "C" fn exception_handler_unhandled(
     halt();
 }
 
+type SyscallHandler = unsafe fn(ctx: &mut Context) -> *mut Context;
+const NULL_HANDLER: AtomicUsize = AtomicUsize::new(0);
+static SYSCALL_HANDLERS: [AtomicUsize; 256] = [NULL_HANDLER; 256];
+
+pub unsafe fn register_syscall_handler(num: usize, handler: SyscallHandler) {
+    SYSCALL_HANDLERS[num].store(handler as usize, Ordering::SeqCst);
+}
+
+pub fn get_syscall_handler(num: usize) -> Option<SyscallHandler> {
+    let num = SYSCALL_HANDLERS.get(num)?.load(Ordering::Relaxed);
+    if num == 0 {
+        None
+    } else {
+        Some(unsafe { core::mem::transmute(num) })
+    }
+}
+
 #[no_mangle]
 unsafe extern "C" fn exception_handler_user(
     ctx: &mut Context,
@@ -266,40 +284,19 @@ unsafe extern "C" fn exception_handler_user(
         0x15 => {
             // supervisor call
             let arg = esr & 0xFFFF;
-            // println!("Got syscall with number: {arg:#x}");
-            match arg {
-                1 => crate::shutdown(),
-                2 => {
-                    println!("Hello world syscall");
-                    return ctx;
+            if let Some(handler) = get_syscall_handler(arg as usize) {
+                unsafe { handler(ctx) }
+            } else {
+                if uart::UART.is_initialized() {
+                    println!("Received exception from usermode: elr={elr:#x} spsr={spsr:#010x} esr={esr:#010x} far={far:#010x} (class {exception_class:#x} / {class_name}) {arg}");
                 }
-                3 => {
-                    // yield
-                    let (core_sp, thread) = crate::context::CORES
-                        .with_current(|core| (core.core_sp.get(), core.thread.take()));
-                    let mut thread = thread.expect("usermode syscall without active thread");
-                    unsafe { thread.save_context(ctx.into()) };
-                    unsafe { crate::context::deschedule_thread(core_sp, thread) }
-                }
-                4 => {
-                    // print
-                    let ptr = ctx.regs[0];
-                    let len = ctx.regs[1];
-                    // TODO: soundness (check user permissions)
-                    let data = unsafe { core::slice::from_raw_parts(ptr as *const u8, len) };
-                    let stdout = crate::uart::UART.get();
-                    for c in data {
-                        stdout.lock().writec(*c);
-                    }
-                    return ctx;
-                }
-                _ => {
-                    if uart::UART.is_initialized() {
-                        println!("Received exception from usermode: elr={elr:#x} spsr={spsr:#010x} esr={esr:#010x} far={far:#010x} (class {exception_class:#x} / {class_name}) {arg}");
-                    }
-                    println!("Unknown syscall number {arg:#x}");
-                    halt()
-                }
+                println!("Unknown syscall number {arg:#x}; stopping user thread");
+
+                let (core_sp, thread) =
+                    CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
+                let mut thread = thread.expect("usermode syscall without active thread");
+                unsafe { thread.save_context(ctx.into()) };
+                unsafe { deschedule_thread(core_sp, thread, DescheduleAction::FreeThread) }
             }
         }
         _ => {

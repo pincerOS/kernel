@@ -215,9 +215,15 @@ unsafe extern "C" fn context_switch_inner(
     unsafe { crate::event::run_event_loop() };
 }
 
+#[repr(C)]
+pub enum DescheduleAction {
+    Yield,
+    FreeThread,
+}
+
 #[allow(improper_ctypes)]
 extern "C" {
-    pub fn deschedule_thread(core_sp: usize, thread: Box<Thread>) -> !;
+    pub fn deschedule_thread(core_sp: usize, thread: Box<Thread>, action: DescheduleAction) -> !;
 }
 
 core::arch::global_asm!(
@@ -231,8 +237,15 @@ deschedule_thread:
 );
 
 #[no_mangle]
-unsafe extern "C" fn deschedule_thread_inner(_core_sp: usize, thread: Box<Thread>) -> ! {
+unsafe extern "C" fn deschedule_thread_inner(
+    _core_sp: usize,
+    thread: Box<Thread>,
+    action: DescheduleAction,
+) -> ! {
     unsafe { crate::sync::enable_interrupts() };
-    SCHEDULER.add_task(Event::ScheduleThread(thread));
+    match action {
+        DescheduleAction::Yield => SCHEDULER.add_task(Event::ScheduleThread(thread)),
+        DescheduleAction::FreeThread => drop(thread),
+    }
     unsafe { run_event_loop() }
 }

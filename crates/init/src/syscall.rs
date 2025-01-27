@@ -14,3 +14,6 @@ macro_rules! syscall {
 syscall!(1 => pub fn shutdown());
 syscall!(2 => pub fn hello_world());
 syscall!(3 => pub fn yield_());
+syscall!(4 => pub fn print(buf: *const u8, len: usize));
+syscall!(5 => pub fn spawn(pc: usize, sp: usize));
+syscall!(6 => pub fn exit());

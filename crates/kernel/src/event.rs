@@ -1,6 +1,6 @@
 use alloc::boxed::Box;
 
-use crate::context::{deschedule_thread, Context, CORES};
+use crate::context::{deschedule_thread, Context, DescheduleAction, CORES};
 use crate::scheduler::Scheduler;
 
 pub static SCHEDULER: Scheduler<Event> = Scheduler::new();
@@ -62,7 +62,7 @@ pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
 
     if let Some(mut thread) = thread {
         unsafe { thread.save_context(ctx.into()) };
-        unsafe { deschedule_thread(core_sp, thread) };
+        unsafe { deschedule_thread(core_sp, thread, DescheduleAction::Yield) };
     } else {
         ctx
     }

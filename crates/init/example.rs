@@ -47,12 +47,7 @@ exit
     #[no_mangle]
     extern "C" fn _start() -> ! {
         crate::main();
-        loop {}
-    }
-
-    #[cfg(not(test))]
-    #[panic_handler]
-    fn panic_handler(_info: &core::panic::PanicInfo) -> ! {
+        unsafe { core::arch::asm!("svc #6") }; // exit
         loop {}
     }
 
@@ -76,6 +71,13 @@ exit
             use core::fmt::Write;
             writeln!($crate::runtime::Stdout, $($arg)*).ok();
         }};
+    }
+
+    #[cfg(not(test))]
+    #[panic_handler]
+    fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+        println!("Panic: {}", info.message());
+        loop {}
     }
 }
 
