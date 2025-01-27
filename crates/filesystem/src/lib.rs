@@ -25,6 +25,7 @@ extern crate std;
 
 use alloc::borrow::Cow;
 use alloc::rc::Rc;
+use std::cell::RefCell;
 use std::fs::DirEntry;
 use std::prelude::v1::{String, Vec};
 use std::ptr::{read, write};
@@ -40,10 +41,12 @@ pub mod linux;
 pub const SECTOR_SIZE: usize = 512;
 pub const BLOCK_SIZE: usize = 1024;
 
+#[derive(Debug)]
 pub enum BlockDeviceError {
     Unknown,
 }
 
+#[derive(Debug)]
 pub enum Ext2Error {
     BlockDeviceError(BlockDeviceError),
 }
@@ -83,13 +86,13 @@ pub trait BlockDevice {
         sectors: usize,
         buffer: &mut [u8],
     ) -> Result<(), BlockDeviceError> {
-        let mut tmp_buf: [u8; 512] = [0; 512];
+        let mut tmp_buf: [u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
         for i in 0..sectors {
             let cur_sector = start_index + (i as u64);
             for j in 0..SECTOR_SIZE {
-                buffer[(i*SECTOR_SIZE)+j] = tmp_buf[j];
+                tmp_buf[j] = buffer[(i*SECTOR_SIZE)+j];
             }
-            self.read_sector(cur_sector, &mut tmp_buf)?;
+            self.write_sector(cur_sector, &tmp_buf)?;
         }
         Ok(())
     }
@@ -266,6 +269,11 @@ pub struct INode {
     i_osd2: [u8;12],
 }
 
+struct INodeBlockInfo {
+    block_num: usize,
+    block_offset: usize,
+}
+
 pub mod reserved_inodes {
     const EXT2_BAD_INO: u32 = 1;
     const EXT2_ROOT_INO: u32 = 2;
@@ -332,14 +340,10 @@ pub mod file_type {
 
 pub struct INodeWrapper {
     inode: INode,
-
-    inode_num: u32,
-    inode_block_index: usize,
-    inode_block_offset: usize,
-    block_group_index: usize,
-    remaining_block_slots_left: usize
+    inode_num: u32
 }
 
+#[derive(Debug)]
 pub struct DeferredWrite {
     buffer: [u8; BLOCK_SIZE],
     block_num: usize
@@ -401,9 +405,10 @@ where
         Self::read_logical_block(&mut self.device, logical_block_start, logical_block_length, 
                                  buffer)
     }
- 
-    fn get_inode(device: &mut D, superblock: &Superblock, block_group_descriptor_tables: &Vec<BGD>,
-                 inode_num: usize) -> INode {
+
+    fn get_block_that_has_inode(device: &mut D, superblock: &Superblock,
+                       block_group_descriptor_tables: &Vec<BGD>,
+                       inode_num: usize) -> INodeBlockInfo {
         let inode_size = superblock.s_inode_size as usize;
 
         let block_group_number = (inode_num - 1) / superblock.s_inodes_per_group as usize;
@@ -415,14 +420,25 @@ where
             ((inode_table_index * inode_size) / BLOCK_SIZE) + inode_table_block;
         let inode_table_interblock_offset: usize = (inode_table_index * inode_size) % BLOCK_SIZE;
 
+        INodeBlockInfo{
+            block_num: inode_table_block_with_offset,
+            block_offset: inode_table_interblock_offset
+        }
+    }
+
+    fn get_inode(device: &mut D, superblock: &Superblock, block_group_descriptor_tables: &Vec<BGD>,
+                 inode_num: usize) -> INode {
+        let inode_block_info: INodeBlockInfo =
+            Ext2::get_block_that_has_inode(device, superblock, block_group_descriptor_tables, inode_num);
         let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
 
-        Self::read_logical_block(device, inode_table_block_with_offset, 1,
+        Self::read_logical_block(device, inode_block_info.block_num, 1,
                                  &mut block_buffer);
 
         let mut inode_data: [u8; size_of::<INode>()] = [0x00; size_of::<INode>()];
 
-        inode_data.copy_from_slice(&block_buffer[inode_table_interblock_offset..inode_table_interblock_offset + size_of::<INode>()]);
+        inode_data.copy_from_slice(
+            &block_buffer[inode_block_info.block_offset..inode_block_info.block_offset + size_of::<INode>()]);
 
         let inode: INode =
             unsafe {std::mem::transmute::<[u8;size_of::<INode>()], INode>(inode_data)};
@@ -472,11 +488,7 @@ where
         Self { device, superblock, block_group_descriptor_tables, 
                root_inode: Rc::new(INodeWrapper{
                    inode: root_inode,
-                   inode_num: 2,
-                   inode_block_index: 0,
-                   inode_block_offset: 0,
-                   block_group_index: 0,
-                   remaining_block_slots_left: 0
+                   inode_num: 2
                }) }
     }
 
@@ -488,7 +500,7 @@ where
         self.superblock.s_inode_size as u32
     }
 
-    pub fn find(&mut self, node: &INodeWrapper, name: &str) -> Option<Rc<INodeWrapper>> {
+    pub fn find(&mut self, node: &INodeWrapper, name: &str) -> Option<Rc<RefCell<INodeWrapper>>> {
         let dir_entries: Vec<DirectoryEntry> = node.get_dir_entries(self);
 
         if node.is_dir() {
@@ -500,14 +512,10 @@ where
                                                        &self.block_group_descriptor_tables,
                                                        dir_entry.inode_number as usize);
 
-                    return Some(Rc::new(INodeWrapper {
+                    return Some(Rc::new(RefCell::new(INodeWrapper {
                         inode,
-                        inode_num: dir_entry.inode_number,
-                        inode_block_index: 0,
-                        inode_block_offset: 0,
-                        block_group_index: 0,
-                        remaining_block_slots_left: 0
-                    }));
+                        inode_num: dir_entry.inode_number
+                    })));
                 }
             }
         }
@@ -516,60 +524,63 @@ where
     }
 
     fn acquire_next_available_inode(&mut self, inode_data: INode) -> Option<Rc<INodeWrapper>> {
+        let found_block_group_index_option: Option<usize> = None;
+
         for (block_group_index, mut block_group_table)
         in self.block_group_descriptor_tables.iter_mut().enumerate() {
             if block_group_table.bg_free_inodes_count > 1 {
                 block_group_table.bg_free_inodes_count -= 1;
+            }
+        }
 
-                let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+        if found_block_group_index_option.is_some() {
+            let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+            let found_block_group_index: usize = found_block_group_index_option.unwrap();
 
-                self.read_logical_block_self(block_group_table.bg_block_bitmap as usize,
-                                             1, &mut block_buffer);
+            self.read_logical_block_self(
+                self.block_group_descriptor_tables[found_block_group_index].bg_block_bitmap as usize,
+                1, &mut block_buffer);
 
-                let mut found_new_inode: bool = false;
-                let mut new_inode_num: usize =
-                    (self.superblock.s_inodes_per_group as usize) * block_group_index;
+            let mut found_new_inode: bool = false;
+            let mut new_inode_num: usize =
+                (self.superblock.s_inodes_per_group as usize) * found_block_group_index;
 
-                for (inode_bitmap_byte_index, inode_bitmap_byte)
-                  in block_buffer.iter().enumerate() {
-                    for i in 0..8 {
-                        if(inode_bitmap_byte & (1 << (7 - i)) == 0) {
-                            new_inode_num = (inode_bitmap_byte_index * 8) + i;
-                            found_new_inode = true;
-                            break;
-                        }
-                    }
-
-                    if found_new_inode {
+            for (inode_bitmap_byte_index, inode_bitmap_byte)
+            in block_buffer.iter().enumerate() {
+                for i in 0..8 {
+                    if(inode_bitmap_byte & (1 << (7 - i)) == 0) {
+                        new_inode_num = (inode_bitmap_byte_index * 8) + i;
+                        found_new_inode = true;
                         break;
                     }
                 }
 
-                assert!(found_new_inode);
-
-                let num_of_inodes_per_block: usize = BLOCK_SIZE / size_of::<INode>();
-                let inode_block_index: usize =
-                    ((block_group_table.bg_inode_table as usize) +
-                     ((new_inode_num - 1) / num_of_inodes_per_block));
-                let inode_block_offset: usize = (new_inode_num - 1) % num_of_inodes_per_block;
-
-                self.read_logical_block_self(inode_block_index, 1,
-                                             &mut block_buffer);
-
-                let inode_bytes = bytemuck::bytes_of(&inode_data);
-
-                block_buffer[inode_block_offset..inode_block_offset + size_of::<INode>()].copy_from_slice(inode_bytes);
-
-                return Some(Rc::new(INodeWrapper{
-                    inode: inode_data,
-                    inode_num: new_inode_num as u32,
-                    inode_block_index: inode_block_index,
-                    inode_block_offset: inode_block_offset,
-                    block_group_index: 0,
-                    remaining_block_slots_left: 0
-                }));
+                if found_new_inode {
+                    break;
+                }
             }
+
+            assert!(found_new_inode);
+
+            let num_of_inodes_per_block: usize = BLOCK_SIZE / size_of::<INode>();
+            let inode_block_index: usize =
+                (self.block_group_descriptor_tables[found_block_group_index].bg_inode_table as usize) +
+                    ((new_inode_num - 1) / num_of_inodes_per_block);
+            let inode_block_offset: usize = (new_inode_num - 1) % num_of_inodes_per_block;
+
+            self.read_logical_block_self(inode_block_index, 1,
+                                         &mut block_buffer);
+
+            let inode_bytes = bytemuck::bytes_of(&inode_data);
+
+            block_buffer[inode_block_offset..inode_block_offset + size_of::<INode>()].copy_from_slice(inode_bytes);
+
+            return Some(Rc::new(INodeWrapper{
+                inode: inode_data,
+                inode_num: new_inode_num as u32
+            }));
         }
+
         None
     }
 
@@ -651,6 +662,41 @@ impl INodeWrapper
         // for regular files, but it will just be zero for others
         // so it doesn't really matter
         (self.inode.i_size as u64) | ((self.inode.i_dir_acl as u64) << 32)
+    }
+    
+    pub fn update_size(&mut self, new_size: u64) {
+        self.inode.i_size = ((new_size << 32) >> 32) as u32;
+        self.inode.i_dir_acl = (new_size >> 32) as u32;
+    }
+    
+    pub fn get_deferred_write_inode<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>) ->
+                                                               Result<DeferredWrite, Ext2Error> {
+        let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+        let inode_block_info: INodeBlockInfo =
+            Ext2::get_block_that_has_inode(&mut ext2.device, &ext2.superblock,
+                                           &ext2.block_group_descriptor_tables,
+                                           self.inode_num as usize);
+        let read_result: Result<(), Ext2Error> =
+            ext2.read_logical_block_self(inode_block_info.block_num, 1,
+                                         &mut block_buffer);
+        let inode_bytes = bytemuck::bytes_of(&self.inode);
+        let inode_slice: &mut[u8] =
+            &mut block_buffer[inode_block_info.block_offset..inode_block_info.block_offset + size_of::<INode>()];
+
+        inode_slice.copy_from_slice(inode_bytes);
+
+        if read_result.is_err() {
+            Err(read_result.unwrap_err())
+        } else {
+            Ok(DeferredWrite{
+                buffer: block_buffer,
+                block_num: inode_block_info.block_num,
+            })
+        }
+    }
+
+    pub fn get_block_group_index<D: BlockDevice>(&self, ext2: &Ext2<D>) -> usize {
+        (self.inode_num / ext2.superblock.s_inodes_per_group) as usize
     }
     
     pub fn block_allocated_count<D: BlockDevice>(&self, ext2: &Ext2<D>) -> usize {
@@ -754,12 +800,7 @@ impl INodeWrapper
             let cur_file_block: usize = logical_block_start + (i as usize);
             let logical_block_num: usize = self.get_inode_block_num(cur_file_block, ext2) as usize;
 
-            let read_result: Result<(), Ext2Error> =
-                ext2.read_logical_block_self(logical_block_num, 1, &mut block_tmp_buffer);
-
-            if read_result.is_err() {
-                return Err(read_result.unwrap_err());
-            }
+            ext2.read_logical_block_self(logical_block_num, 1, &mut block_tmp_buffer)?;
 
             for j in 0..BLOCK_SIZE {
                 buffer[(i*BLOCK_SIZE)+j] = block_tmp_buffer[j];
@@ -844,7 +885,7 @@ impl INodeWrapper
             blocks_needed_for_block_bitmap += 1;
         }
 
-        let mut current_block_group_index: usize = self.block_group_index;
+        let mut current_block_group_index: usize = self.get_block_group_index(ext2);
         let mut num_of_blocks_left: usize = num_of_blocks;
         let mut return_value: Vec<usize> = Vec::with_capacity(num_of_blocks);
         let mut deferred_writes: Vec<DeferredWrite> = Vec::new();
@@ -861,7 +902,7 @@ impl INodeWrapper
                     (current_block_group_index + 1) % num_of_block_groups;
                 free_block_count = current_block_group.bg_free_blocks_count as usize;
 
-                if current_block_group_index == self.inode_block_index {
+                if current_block_group_index == self.get_block_group_index(ext2) {
                     assert!(free_block_count == 0);
 
                     // we looped around all the block groups, which means there are no more
@@ -928,13 +969,8 @@ impl INodeWrapper
     fn write_back_deferred_writes<D: BlockDevice>(deferred_writes: Vec<DeferredWrite>,
                                                ext2: &mut Ext2<D>) -> Result<(), Ext2Error> {
         for mut deferred_write in deferred_writes {
-            let write_result: Result<(), Ext2Error> =
-                ext2.write_logical_block_self(deferred_write.block_num, 1,
-                                              &mut deferred_write.buffer);
-
-            if write_result.is_err() {
-                return write_result;
-            }
+            ext2.write_logical_block_self(deferred_write.block_num, 1,
+                                          &mut deferred_write.buffer)?;
         }
 
         Ok(())
@@ -1130,9 +1166,11 @@ impl INodeWrapper
     }
 
     // append to file, with the new file size being the existing file size + size of new_data
-    pub fn append_file<D: BlockDevice>(&self, ext2: &mut Ext2<D>, new_data: &[u8],
+    pub fn append_file<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>, new_data: &[u8],
                                        all_bytes_or_fail: bool) -> Result<usize, Ext2Error> {
-        let base_allocated_block: usize = self.block_allocated_count(ext2);
+        let allocated_block_count: usize = self.block_allocated_count(ext2);
+        let base_allocated_block: usize =
+            self.get_inode_block_num(allocated_block_count - 1, ext2) as usize;
         let mut base_allocated_block_offset: usize = (self.size() as usize) % BLOCK_SIZE;
 
         let needed_size: usize = (self.size() as usize) + new_data.len();
@@ -1145,8 +1183,11 @@ impl INodeWrapper
         }
 
         if (BLOCK_SIZE - base_allocated_block_offset) < new_data.len() {
+            let remaining_block_slots_left =
+                ext2.block_group_descriptor_tables[self.get_block_group_index(ext2)].bg_free_blocks_count;
+
             let num_of_blocks_needed: usize =
-                std::cmp::min(self.remaining_block_slots_left,
+                std::cmp::min(remaining_block_slots_left as usize,
                               (self.size() as usize) / BLOCK_SIZE);
 
             let new_blocks_allocated_result =
@@ -1179,18 +1220,30 @@ impl INodeWrapper
             } else {
                 0
             };
-            let write_size = if new_block == base_allocated_block {
+            let write_size = std::cmp::min(if new_block == base_allocated_block {
                 BLOCK_SIZE - base_allocated_block_offset
             } else {
                 BLOCK_SIZE
-            };
+            }, new_data.len() - bytes_written);
 
-            block_buffer[write_base..].copy_from_slice(&new_data[bytes_written..write_size]);
+            let current_byte_slice: &[u8] = &new_data[bytes_written..bytes_written+write_size];
+
+            block_buffer[write_base..write_base+write_size].copy_from_slice(current_byte_slice);
 
             bytes_written += write_size;
 
             deferred_writes.push(DeferredWrite{ buffer: block_buffer, block_num: new_block });
         }
+
+        self.update_size(self.size() + (bytes_written as u64));
+        let deferred_write_result: Result<DeferredWrite, Ext2Error> =
+            self.get_deferred_write_inode(ext2);
+
+        if deferred_write_result.is_err() {
+            return Err(deferred_write_result.unwrap_err());
+        }
+
+        deferred_writes.push(deferred_write_result?);
 
         let write_back_result =
             Self::write_back_deferred_writes(deferred_writes, ext2);
