@@ -2,6 +2,7 @@ use core::arch::{asm, global_asm};
 
 pub mod boot;
 pub mod interrupts;
+pub mod memory;
 
 pub fn get_time_ticks() -> usize {
     let time;

@@ -1,4 +1,4 @@
-use crate::memory::{INIT_TCR_EL1, INIT_TRANSLATION};
+use super::memory::{INIT_TCR_EL1, INIT_TRANSLATION};
 use core::arch::global_asm;
 
 #[allow(unused)]
