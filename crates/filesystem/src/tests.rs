@@ -1,11 +1,22 @@
 use alloc::rc::Rc;
 use crate::{linux::FileBlockDevice, INodeWrapper, Superblock};
 use std::fs::File;
-
+use std::io;
+use std::prelude::v1::{Box, String, ToString};
+use std::process::{Command, Output};
 use crate::{BlockDevice, Ext2};
+fn create_test_image_artifact(dir_path: String, block_size: usize, img_name: String) {
+    Command::new("mkfs.ext2")
+        .args(["-q", "-b", &*block_size.to_string(), "-i",
+                &*block_size.to_string(), "-d", &*dir_path, "-I",
+               "128", "-r", "0", "-t", "ext2", &*img_name, "10m"]).output().unwrap();
+}
 
 #[test]
 fn read_example_1() {
+    create_test_image_artifact("../../test/example_1.dir".parse().unwrap(), 1024,
+                               "example_1_ro.img".parse().unwrap());
+    
     let file = File::open("example_1_ro.img").unwrap();
     let disk = FileBlockDevice::new(file);
 
@@ -36,6 +47,9 @@ fn read_example_1() {
 
 #[test]
 fn read_write_example_1() {
+    create_test_image_artifact("../../test/example_1.dir".parse().unwrap(), 1024,
+                               "example_1_rw.img".parse().unwrap());
+    
     let file = File::options().read(true).write(true).open("example_1_rw.img").unwrap();
     let disk = FileBlockDevice::new(file);
 
