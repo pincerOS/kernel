@@ -13,6 +13,7 @@ pub mod event;
 pub mod exceptions;
 pub mod heap;
 pub mod memory;
+pub mod ringbuffer;
 pub mod runtime;
 pub mod scheduler;
 pub mod sync;
