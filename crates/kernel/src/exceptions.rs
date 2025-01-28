@@ -207,7 +207,7 @@ unsafe extern "C" fn exception_handler_irq(
     _esr: u64,
     _arg: u64,
 ) -> *mut Context {
-    let mut irq = crate::IRQ_CONTROLLER.get().lock();
+    let mut irq = crate::device::IRQ_CONTROLLER.get().lock();
     let _source = irq.irq_source();
     // source is 2048 for local timer interrupt
 

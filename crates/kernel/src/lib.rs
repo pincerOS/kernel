@@ -15,16 +15,11 @@ pub mod runtime;
 pub mod sync;
 pub mod thread;
 
-use device::{timer, uart, watchdog};
-use sync::{InterruptSpinLock, SpinLock, UnsafeInit};
+use device::uart;
+use sync::SpinLock;
 
 use core::arch::{asm, global_asm};
 use core::sync::atomic::{AtomicUsize, Ordering};
-
-static WATCHDOG: UnsafeInit<SpinLock<watchdog::bcm2835_wdt_driver>> =
-    unsafe { UnsafeInit::uninit() };
-static IRQ_CONTROLLER: UnsafeInit<InterruptSpinLock<timer::bcm2836_l1_intc_driver>> =
-    unsafe { UnsafeInit::uninit() };
 
 static INIT_BARRIER: AtomicUsize = AtomicUsize::new(0);
 static START_BARRIER: AtomicUsize = AtomicUsize::new(0);
@@ -34,6 +29,45 @@ const FLAG_PREEMPTION: bool = true;
 
 extern "Rust" {
     fn kernel_main(device_tree: device_tree::DeviceTree);
+}
+
+pub fn enable_other_cpus(tree: &device_tree::DeviceTree<'_>, start_fn: unsafe extern "C" fn()) {
+    use device_tree::format::StructEntry;
+    // TODO: proper discovery through the /cpus/cpu@* path, rather than compatible search
+    for mut iter in device::discover_compatible(tree, b"arm,cortex-a53").unwrap() {
+        let mut name = None;
+        let mut method = None;
+        let mut release_addr = None;
+        while let Some(Ok(entry)) = iter.next() {
+            match entry {
+                StructEntry::BeginNode { name: n } => {
+                    if name.is_none() {
+                        name = Some(n)
+                    }
+                }
+                StructEntry::Prop { name, data } => match name {
+                    "enable-method" => method = Some(data),
+                    "cpu-release-addr" => {
+                        let addr: endian::u64_be = bytemuck::pod_read_unaligned(data);
+                        release_addr = Some(addr.get() as usize);
+                    }
+                    _ => (),
+                },
+                _ => (),
+            }
+        }
+        match (method, release_addr) {
+            (Some(b"spin-table\0"), Some(release_addr)) => {
+                println!("| Waking cpu {:?}", name.unwrap_or("unknown"));
+
+                let start = unsafe { memory::map_physical(release_addr, 8).cast::<u64>() };
+                let physical_start = memory::physical_addr(start_fn as usize).unwrap();
+                unsafe { core::ptr::write_volatile(start.as_ptr(), physical_start) };
+                unsafe { asm!("sev") };
+            }
+            _ => println!("| Could not wake cpu {:?}", name),
+        }
+    }
 }
 
 #[no_mangle]
@@ -46,56 +80,18 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     // TODO: proper heap allocator, and physical memory allocation for heap space
     unsafe { heap::ALLOCATOR.init(0xFFFF_FFFF_FE20_0000 as *mut (), 0x20_0000 * 13) };
 
-    // TODO: device tree /soc/serial with compatible:arm,pl011
-    let uart_base = unsafe { memory::map_device(0x3f201000) }.as_ptr();
-    unsafe { uart::UART.init(SpinLock::new(uart::UARTInner::new(uart_base))) };
-    println!("| initialized UART");
-
-    // TODO: device tree /soc/?, compatible:brcm,bcm2835-pm-wdt
-    let watchdog_base = unsafe { memory::map_device(0x3f100000) }.as_ptr();
-    unsafe {
-        let watchdog = watchdog::bcm2835_wdt_driver::init(watchdog_base);
-        WATCHDOG.init(SpinLock::new(watchdog));
-    }
-    println!("| initialized power managment watchdog");
-    println!("| last reset: {:#08x}", WATCHDOG.get().lock().last_reset());
-
     let device_tree_base = unsafe { memory::map_physical(x0 as usize, u32::from_be(x4) as usize) };
-    let device_tree =
-        unsafe { device_tree::load_device_tree(device_tree_base.as_ptr().cast_const().cast()) }
-            .expect("Error parsing device tree");
+    let device_tree_base = device_tree_base.as_ptr().cast_const().cast();
+    let device_tree = unsafe { device_tree::DeviceTree::load(device_tree_base) }
+        .expect("Error parsing device tree");
 
-    // TODO: parse device tree and initialize kernel devices
-    // (use the device tree to discover the proper driver and base
-    // address of UART, watchdog)
+    device::init_devices(&device_tree);
 
     thread::CORES.init();
-
     println!("| initialized per-core data");
 
     println!("| starting other cores...");
-    // Start other cores; the bootloader has them waiting in a WFE loop,
-    // checking 0xd8 + core_id
-    // TODO: use device tree to discover 1. enable-method for the cpu
-    // and 2. the cpu-release-addr (the address it's spinning at)
-    let other_core_start = unsafe { memory::map_physical(0xd8, 4 * 8) }
-        .as_ptr()
-        .cast::<u64>();
-    let physical_alt_start =
-        memory::physical_addr(boot::kernel_entry_alt as usize).expect("boot code should be mapped");
-    for i in 1..4 {
-        let target = other_core_start.wrapping_add(i);
-        unsafe { core::ptr::write_volatile(target, physical_alt_start) };
-    }
-    unsafe {
-        asm!("sev");
-    }
-
-    println!("| initializing interrupt controller");
-    let timer_base = unsafe { memory::map_device(0x40000000) }.as_ptr();
-    let timer = device::timer::bcm2836_l1_intc_driver::new(timer_base);
-    let timer = sync::InterruptSpinLock::new(timer);
-    unsafe { IRQ_CONTROLLER.init(timer) };
+    enable_other_cpus(&device_tree, boot::kernel_entry_alt);
 
     INIT_BARRIER.fetch_add(1, Ordering::SeqCst);
     while INIT_BARRIER.load(Ordering::SeqCst) < 4 {
@@ -105,7 +101,7 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     if FLAG_PREEMPTION {
         println!("| enabling preemption on all cores");
         let preemption_time_ns = 500_000;
-        let mut irq = IRQ_CONTROLLER.get().lock();
+        let mut irq = device::IRQ_CONTROLLER.get().lock();
         for core in 0..4 {
             irq.start_timer(core, preemption_time_ns);
         }
@@ -149,7 +145,7 @@ pub unsafe extern "C" fn kernel_entry_rust_alt(_x0: u32, _x1: u64, _x2: u64, _x3
 fn shutdown() -> ! {
     println!("| shutting down");
 
-    let mut watchdog = WATCHDOG.get().lock();
+    let mut watchdog = device::WATCHDOG.get().lock();
     unsafe {
         watchdog.reset(63);
     }

@@ -4,15 +4,17 @@
 extern crate alloc;
 extern crate kernel;
 
-use device::mailbox;
+use device::{find_device_addr, mailbox};
 use kernel::*;
 
 #[no_mangle]
-extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
+extern "Rust" fn kernel_main(tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
 
-    // TODO: find mailbox address via device tree
-    let mailbox_base = unsafe { memory::map_device(0x3f00b880) }.as_ptr();
+    let (mailbox_addr, _) = find_device_addr(&tree, b"brcm,bcm2835-mbox")
+        .unwrap()
+        .unwrap();
+    let mailbox_base = unsafe { memory::map_device(mailbox_addr) }.as_ptr();
     let mut mailbox = unsafe { mailbox::VideoCoreMailbox::init(mailbox_base) };
 
     println!("| acquiring framebuffer");

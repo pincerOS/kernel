@@ -36,6 +36,7 @@ dependencies = [
  "bitflags",
  "bytemuck",
  "device-tree",
+ "endian",
 ]
 
 [[package]]

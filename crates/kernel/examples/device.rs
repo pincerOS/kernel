@@ -4,7 +4,6 @@
 extern crate alloc;
 extern crate kernel;
 
-use device::mailbox;
 use device::uart::UART;
 use kernel::*;
 
@@ -23,5 +22,5 @@ extern "Rust" fn kernel_main(device_tree: device_tree::DeviceTree) {
 
     println!("Device tree:");
 
-    device_tree::debug_device_tree(device_tree, &mut UART.get()).unwrap();
+    device_tree::debug_device_tree(&device_tree, &mut UART.get()).unwrap();
 }
