@@ -19,6 +19,14 @@ name = "device-tree"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "endian",
+]
+
+[[package]]
+name = "endian"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
 ]
 
 [[package]]

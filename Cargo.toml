@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/device-tree",
+    "crates/endian",
     "crates/kernel",
     "crates/lz4",
 ]

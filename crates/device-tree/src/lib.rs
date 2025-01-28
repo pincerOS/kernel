@@ -4,10 +4,8 @@
 #[cfg(test)]
 extern crate std;
 
-mod be;
-
-pub use be::{u32_be, u64_be};
 use core::ptr;
+use endian::{u32_be, u64_be};
 
 #[derive(Copy, Clone)]
 #[repr(C)]
