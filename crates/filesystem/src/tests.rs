@@ -30,7 +30,7 @@ fn read_example_1() {
 
     let test_node_binding = ext2.find(&root_node.borrow(), b"test.txt").unwrap();
     let test_node = test_node_binding.borrow();
-    let test_node_text: std::string::String = test_node.read_text_file_as_str(&mut ext2);
+    let test_node_text: String = test_node.read_text_file_as_str(&mut ext2).unwrap();
 
     assert_eq!(test_node_text, "asldfalsjdkfvnlasdfvnka,dsfvmna");
 
@@ -40,8 +40,8 @@ fn read_example_1() {
 
     let test_file_in_folder_binding = ext2.find(&test_folder, b"asdf.txt").unwrap();
     let test_file_in_folder = test_file_in_folder_binding.borrow();
-    let test_file_in_folder_text: std::string::String = 
-        test_file_in_folder.read_text_file_as_str(&mut ext2);
+    let test_file_in_folder_text: String = 
+        test_file_in_folder.read_text_file_as_str(&mut ext2).unwrap();
 
     assert_eq!(test_file_in_folder_text, "Hi");
 }
@@ -65,8 +65,8 @@ fn read_write_example_1() {
     let test_folder = test_folder_binding.borrow();
     let test_file_in_folder_binding = ext2.find(&test_folder, b"asdf.txt").unwrap();
     let mut test_file_in_folder = test_file_in_folder_binding.borrow_mut();
-    let test_file_in_folder_text: std::string::String =
-        test_file_in_folder.read_text_file_as_str(&mut ext2);
+    let test_file_in_folder_text: String =
+        test_file_in_folder.read_text_file_as_str(&mut ext2).unwrap();
 
     assert_eq!(test_file_in_folder_text, "Hi");
 
@@ -75,7 +75,7 @@ fn read_write_example_1() {
     test_file_in_folder.append_file(&mut ext2, new_append_string, true).unwrap();
 
     let test_file_in_folder_text: String =
-        test_file_in_folder.read_text_file_as_str(&mut ext2);
+        test_file_in_folder.read_text_file_as_str(&mut ext2).unwrap();
 
     assert_eq!(test_file_in_folder_text, "HiHi")
 }
@@ -102,7 +102,7 @@ fn file_creation_test() {
 
     new_file.borrow_mut().append_file(&mut ext2, test_string,true).unwrap();
 
-    let read_back_data = new_file_copy.borrow().read_file(&mut ext2); 
+    let read_back_data = new_file_copy.borrow().read_file(&mut ext2).unwrap(); 
     
     assert_eq!(read_back_data.as_slice(), test_string);
 }

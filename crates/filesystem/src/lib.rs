@@ -24,8 +24,9 @@ extern crate alloc;
 extern crate std;
 
 use alloc::borrow::Cow;
-use alloc::rc::Rc;
+use alloc::rc::{Rc, Weak};
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fs::DirEntry;
 use std::prelude::v1::{String, Vec};
 use std::ptr::{read, write};
@@ -105,7 +106,8 @@ pub struct Ext2<Device> {
     device: Device,
     superblock: Superblock,
     block_group_descriptor_tables: Vec<BGD>,
-    root_inode: Rc<RefCell<INodeWrapper>>
+    root_inode: Rc<RefCell<INodeWrapper>>,
+    inode_map: BTreeMap<usize, Weak<RefCell<INodeWrapper>>>
 }
 
 mod DirectoryEntryConstants {
@@ -505,12 +507,16 @@ where
 
         let root_inode: INode =
             Self::get_inode(&mut device, &superblock, &block_group_descriptor_tables, 2);
+        let root_inode_wrapper: Rc<RefCell<INodeWrapper>> = Rc::new(RefCell::new(INodeWrapper{
+            inode: root_inode,
+            inode_num: 2
+        }));
+        let mut inode_map: BTreeMap<usize, Weak<RefCell<INodeWrapper>>> = BTreeMap::new();
+        
+        inode_map.insert(2, Rc::downgrade(&root_inode_wrapper));
 
         Self { device, superblock, block_group_descriptor_tables, 
-               root_inode: Rc::new(RefCell::new(INodeWrapper{
-                   inode: root_inode,
-                   inode_num: 2
-               })) }
+               root_inode: root_inode_wrapper, inode_map }
     }
 
     pub fn get_block_size(&mut self) -> u32 {
@@ -530,14 +536,27 @@ where
                    &dir_entry.name_characters[0..name.len()] == name {
                     // TODO: find out how to do operator overloading in rust and convert this into
                     // TODO: a mut self method
+                    if self.inode_map.contains_key(&(dir_entry.inode_number as usize)) {
+                        let inode_strong_ref = 
+                            self.inode_map.get(&(dir_entry.inode_number as usize)).unwrap().upgrade();
+                        
+                        if inode_strong_ref.is_some() {
+                            return Some(inode_strong_ref.unwrap());
+                        }
+                    }
+                    
                     let inode: INode = Self::get_inode(&mut self.device, &self.superblock,
                                                        &self.block_group_descriptor_tables,
                                                        dir_entry.inode_number as usize);
-
-                    return Some(Rc::new(RefCell::new(INodeWrapper {
+                    let return_value: Rc<RefCell<INodeWrapper>> = Rc::new(RefCell::new(INodeWrapper {
                         inode,
                         inode_num: dir_entry.inode_number
-                    })));
+                    }));
+
+                    self.inode_map.insert(dir_entry.inode_number as usize, 
+                                          Rc::downgrade(&return_value));
+                    
+                    return Some(return_value);
                 }
             }
         }
@@ -723,6 +742,9 @@ where
                                       true, &mut deferred_writes)?;
 
         self.write_back_deferred_writes(deferred_writes)?;
+        
+        self.inode_map.insert(new_inode_wrapper.borrow().inode_num as usize,
+                              Rc::downgrade(&new_inode_wrapper));
 
         Ok(new_inode_wrapper)
     }
@@ -901,7 +923,7 @@ impl INodeWrapper
         Ok(())
     }
 
-    pub fn read_file<D: BlockDevice>(&self, ext2: &mut Ext2<D>) -> Vec<u8> {
+    pub fn read_file<D: BlockDevice>(&self, ext2: &mut Ext2<D>) -> Result<Vec<u8>, Ext2Error> {
         let mut return_value: Vec<u8> = Vec::new();
         let mut blocks_to_read: usize = (self.size() as usize) / BLOCK_SIZE;
 
@@ -911,15 +933,18 @@ impl INodeWrapper
 
         return_value.resize(blocks_to_read * BLOCK_SIZE,0);
 
-        self.read_block(0, blocks_to_read, return_value.as_mut_slice(), ext2);
+        self.read_block(0, blocks_to_read, return_value.as_mut_slice(), ext2)?;
+        
+        return_value.resize(self.size() as usize, 0);
 
-        return_value
+        Ok(return_value)
     }
 
-    pub fn read_text_file_as_str<D: BlockDevice>(&self, ext2: &mut Ext2<D>) -> String {
-        let mut bytes: Vec<u8> = self.read_file(ext2);
+    pub fn read_text_file_as_str<D: BlockDevice>(&self, ext2: &mut Ext2<D>) -> 
+                                                                         Result<String, Ext2Error> {
+        let mut bytes: Vec<u8> = self.read_file(ext2)?;
 
-        String::from_utf8_lossy(bytes.as_mut_slice()).into_owned().trim_end_matches('\0').into()
+        Ok(String::from_utf8_lossy(bytes.as_mut_slice()).into_owned())
     }
 
     pub fn get_dir_entries<D: BlockDevice>(&self, ext2: &mut Ext2<D>) -> Vec<DirectoryEntry> {
