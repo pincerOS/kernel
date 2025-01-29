@@ -768,23 +768,18 @@ impl INodeWrapper
             Ext2::get_block_that_has_inode(&mut ext2.device, &ext2.superblock,
                                            &ext2.block_group_descriptor_tables,
                                            self.inode_num as usize);
-        let read_result: Result<(), Ext2Error> =
-            ext2.read_logical_block_self(inode_block_info.block_num, 1,
-                                         &mut block_buffer);
+        ext2.read_logical_block_self(inode_block_info.block_num, 1,
+                                         &mut block_buffer)?;
         let inode_bytes = bytemuck::bytes_of(&self.inode);
         let inode_slice: &mut[u8] =
             &mut block_buffer[inode_block_info.block_offset..inode_block_info.block_offset + size_of::<INode>()];
 
         inode_slice.copy_from_slice(inode_bytes);
 
-        if read_result.is_err() {
-            Err(read_result.unwrap_err())
-        } else {
-            Ok(DeferredWrite{
-                buffer: block_buffer,
-                block_num: inode_block_info.block_num,
-            })
-        }
+        Ok(DeferredWrite{
+            buffer: block_buffer,
+            block_num: inode_block_info.block_num,
+        })
     }
 
     pub fn get_block_group_index<D: BlockDevice>(&self, ext2: &Ext2<D>) -> usize {
@@ -793,6 +788,10 @@ impl INodeWrapper
     
     pub fn block_allocated_count<D: BlockDevice>(&self, ext2: &Ext2<D>) -> usize {
         (self.inode.i_blocks / (2 << ext2.superblock.s_log_block_size)) as usize
+    }
+    
+    pub fn set_block_allocated_count<D: BlockDevice>(&mut self, ext2: &Ext2<D>, blocks: usize) {
+        self.inode.i_blocks = (blocks as u32) * (2 << ext2.superblock.s_log_block_size);
     }
 
     fn get_word(byte_array: &[u8]) -> u32 {
@@ -931,7 +930,7 @@ impl INodeWrapper
 
         entries_raw_bytes.resize(dir_size / 9, 0);
 
-        let directory_entry_size_blocks: usize = self.inode.i_blocks as usize;
+        let directory_entry_size_blocks: usize = self.block_allocated_count(ext2);
 
         entries_raw_bytes.resize(directory_entry_size_blocks * BLOCK_SIZE,
                                  0);
@@ -1118,6 +1117,9 @@ impl INodeWrapper
                                               deferred_writes)?;
 
                 if new_blocks_allocated.is_empty() {
+                    self.set_block_allocated_count(ext2, 
+                        self.block_allocated_count(ext2) + blocks_newly_allocated);
+
                     return Ok(blocks_newly_allocated);
                 }
 
@@ -1171,6 +1173,8 @@ impl INodeWrapper
                 let new_block_list: Vec<usize> = new_block_list_blocks_result?;
 
                 if new_block_list.len() == 0 {
+                    self.set_block_allocated_count(ext2,
+                                                   self.block_allocated_count(ext2) + blocks_newly_allocated);
                     return Ok(blocks_newly_allocated);
                 }
 
@@ -1212,6 +1216,8 @@ impl INodeWrapper
 
                 if block_list_u32_slice[block_num] == UNALLOCATED_BLOCK_SLOT {
                     if new_block_list_index >= new_block_list_blocks.len() {
+                        self.set_block_allocated_count(ext2,
+                                                       self.block_allocated_count(ext2) + blocks_newly_allocated);
                         return Ok(blocks_newly_allocated);
                     }
 
@@ -1243,26 +1249,37 @@ impl INodeWrapper
             }
 
             if !new_block_list_blocks.is_empty() {
+                self.set_block_allocated_count(ext2,
+                                               self.block_allocated_count(ext2) + blocks_newly_allocated);
                 return Ok(blocks_newly_allocated);
             }
         }
 
+        self.set_block_allocated_count(ext2,
+                                       self.block_allocated_count(ext2) + blocks_newly_allocated);
+
         Ok(blocks_newly_allocated)
+    }
+
+    fn div_up(a: usize, b: usize) -> usize {
+        (a / b) + (if a % b > 0 { 1 } else {0})
     }
 
     fn append_file_no_writeback<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>, new_data: &[u8],
                                 all_bytes_or_fail: bool,
                                 deferred_writes: &mut Vec<DeferredWrite>) -> Result<usize, Ext2Error> {
         let allocated_block_count: usize = self.block_allocated_count(ext2);
-        let base_allocated_block: usize =
-            self.get_inode_block_num(allocated_block_count - 1, ext2) as usize;
-        let base_allocated_block_offset: usize = (self.size() as usize) % BLOCK_SIZE;
+        let base_allocated_block: Option<usize> =
+            if allocated_block_count == 0 { None } else {
+                Some(self.get_inode_block_num(allocated_block_count - 1, ext2) as usize)
+            };
 
+        let base_allocated_block_offset: usize = (self.size() as usize) % BLOCK_SIZE;
         let mut new_blocks_allocated: Vec<usize> = Vec::new();
         let mut bytes_written: usize = 0;
 
         if base_allocated_block_offset > 0 {
-            new_blocks_allocated.push(base_allocated_block);
+            new_blocks_allocated.push(base_allocated_block.unwrap());
         }
 
         if base_allocated_block_offset == 0 ||
@@ -1272,7 +1289,7 @@ impl INodeWrapper
 
             let num_of_blocks_needed: usize =
                 std::cmp::min(remaining_block_slots_left as usize,
-                              (self.size() as usize) / BLOCK_SIZE);
+                              Self::div_up(new_data.len(), BLOCK_SIZE));
 
             let new_blocks_allocated_result =
                 self.find_new_blocks::<D>(ext2, num_of_blocks_needed, all_bytes_or_fail,
@@ -1299,12 +1316,12 @@ impl INodeWrapper
                 }
             }
 
-            let write_base = if new_block == base_allocated_block {
+            let write_base = if base_allocated_block.is_some() && new_block == base_allocated_block.unwrap() {
                 base_allocated_block_offset
             } else {
                 0
             };
-            let write_size = std::cmp::min(if new_block == base_allocated_block {
+            let write_size = std::cmp::min(if base_allocated_block.is_some() && new_block == base_allocated_block.unwrap() {
                 BLOCK_SIZE - base_allocated_block_offset
             } else {
                 BLOCK_SIZE

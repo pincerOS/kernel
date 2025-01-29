@@ -96,7 +96,15 @@ fn file_creation_test() {
     let new_file_copy = ext2.find(&root_node.borrow(),
                                                    b"weeee.txt").unwrap();
 
+    let test_string = b"Ding Ding Arriving outbound 2-car L to San Francisco Zoo";
+    
     assert_eq!(new_file_copy.borrow().inode_num, new_file.borrow().inode_num);
+
+    new_file.borrow_mut().append_file(&mut ext2, test_string,true).unwrap();
+
+    let read_back_data = new_file_copy.borrow().read_file(&mut ext2); 
+    
+    assert_eq!(read_back_data.as_slice(), test_string);
 }
 
 #[test]
