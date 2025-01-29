@@ -1,5 +1,6 @@
 use core::arch::asm;
 use core::cell::UnsafeCell;
+use core::future::Future;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -114,6 +115,9 @@ impl<T: ?Sized, L: LockImpl> Lock<T, L> {
 
 unsafe impl<T: Send + ?Sized, L: Send> Send for Lock<T, L> {}
 unsafe impl<T: Send + ?Sized, L: Sync> Sync for Lock<T, L> {}
+
+unsafe impl<T: Send + ?Sized, L: LockImpl + Send> Send for LockGuard<'_, T, L> {}
+unsafe impl<T: Sync + ?Sized, L: LockImpl + Sync> Sync for LockGuard<'_, T, L> {}
 
 impl<T: ?Sized, L: LockImpl> core::ops::Deref for LockGuard<'_, T, L> {
     type Target = T;
@@ -499,6 +503,70 @@ impl CondVar {
             f(guard);
         }
     }
+
+    pub fn wait_async<'a, 'b, T>(
+        &'b self,
+        guard: SpinLockGuard<'a, T>,
+    ) -> impl Future<Output = SpinLockGuard<'a, T>> + Send + Sync + use<'a, 'b, T>
+    where
+        T: Send + Sync,
+    {
+        let lock = guard.lock;
+        let task = WaitFuture {
+            this: self,
+            guard: Some(guard),
+        };
+        async {
+            task.await;
+            lock.lock()
+        }
+    }
+
+    pub async fn wait_while_async<'a, T, F>(
+        &self,
+        mut guard: SpinLockGuard<'a, T>,
+        mut condition: F,
+    ) -> SpinLockGuard<'a, T>
+    where
+        F: FnMut(&mut T) -> bool + Send + Sync,
+        T: Send + Sync,
+    {
+        while condition(&mut *guard) {
+            guard = self.wait_async(guard).await;
+        }
+        guard
+    }
+}
+
+struct WaitFuture<'a, 'b, T> {
+    this: &'b CondVar,
+    guard: Option<SpinLockGuard<'a, T>>,
+}
+
+unsafe impl<'a, 'b, T: Send> Send for WaitFuture<'a, 'b, T> {}
+
+impl<'a, 'b, T> Future for WaitFuture<'a, 'b, T> {
+    type Output = ();
+    fn poll(
+        mut self: core::pin::Pin<&mut Self>,
+        ctx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Self::Output> {
+        match self.guard.take() {
+            Some(guard) => {
+                // TODO: this is a hack that only works on our executor,
+                // and will break other async libraries
+                let task = crate::task::task_id_from_waker(ctx.waker()).unwrap();
+                self.this.queue.add(Event::AsyncTask(task));
+                drop(guard);
+                core::task::Poll::Pending
+            }
+            None => {
+                // TODO: make sure the task wasn't just spuriously polled
+                // (track if notify was called on this specific one)
+                core::task::Poll::Ready(())
+            }
+        }
+    }
 }
 
 pub struct Barrier {
@@ -558,6 +626,20 @@ impl Barrier {
                     f();
                 },
             );
+        }
+    }
+
+    pub async fn sync_async(&self) {
+        let mut guard = self.count.lock();
+        assert!(*guard > 0);
+        *guard -= 1;
+        if *guard == 0 {
+            self.condvar.notify_all();
+            drop(guard);
+        } else {
+            self.condvar
+                .wait_while_async(guard, |count| *count > 0)
+                .await;
         }
     }
 }

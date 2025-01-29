@@ -15,6 +15,7 @@ pub mod memory;
 pub mod runtime;
 pub mod scheduler;
 pub mod sync;
+pub mod task;
 pub mod thread;
 
 use device::uart;
