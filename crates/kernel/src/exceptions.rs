@@ -1,6 +1,6 @@
 use core::arch::{asm, global_asm};
 
-use crate::thread::Context;
+use crate::context::Context;
 use crate::{halt, uart};
 
 // TODO:

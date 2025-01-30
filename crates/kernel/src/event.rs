@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 
+use crate::context::{deschedule_thread, Context, CORES};
 use crate::scheduler::Scheduler;
-use crate::thread::CORES;
 
 pub static SCHEDULER: Scheduler<Event> = Scheduler::new();
 
@@ -39,7 +39,7 @@ pub unsafe extern "C" fn run_event_loop() -> ! {
                 assert!(old.is_none());
 
                 // switch into the thread
-                unsafe { crate::thread::restore_context(next_ctx) };
+                unsafe { crate::context::restore_context(next_ctx) };
                 // unreachable
             }
             Event::AsyncTask(task_id) => {
@@ -64,42 +64,18 @@ pub unsafe extern "C" fn run_event_loop() -> ! {
     }
 }
 
-#[allow(improper_ctypes)]
-extern "C" {
-    pub fn deschedule_thread(core_sp: usize, thread: Box<crate::thread::Thread>) -> !;
-}
-
-core::arch::global_asm!(
-    "
-.global deschedule_thread
-deschedule_thread:
-    mov sp, x0
-    bl deschedule_thread_inner
-    udf #0"
-);
-
-#[no_mangle]
-unsafe extern "C" fn deschedule_thread_inner(
-    _core_sp: usize,
-    thread: Box<crate::thread::Thread>,
-) -> ! {
-    unsafe { crate::sync::enable_interrupts() };
-    SCHEDULER.add_task(Event::ScheduleThread(thread));
-    unsafe { run_event_loop() }
-}
-
-pub unsafe fn timer_handler(ctx: &mut crate::thread::Context) -> *mut crate::thread::Context {
+pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
     // - if current core is running a thread:
     //    - suspend the thread, save its state
     //    - exit the interrupt handler
     //    - return to running the event loop
     // - otherwise, do nothing
 
-    let (helper_sp, thread) = CORES.with_current(|core| (core.helper_sp.get(), core.thread.take()));
+    let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
 
     if let Some(mut thread) = thread {
         thread.last_context = ctx.into();
-        unsafe { deschedule_thread(helper_sp, thread) };
+        unsafe { deschedule_thread(core_sp, thread) };
     } else {
         ctx
     }

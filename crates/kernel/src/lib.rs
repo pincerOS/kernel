@@ -8,6 +8,7 @@ extern crate alloc;
 pub mod device;
 
 pub mod boot;
+pub mod context;
 pub mod event;
 pub mod exceptions;
 pub mod heap;
@@ -91,7 +92,7 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
 
     device::init_devices(&device_tree);
 
-    unsafe { thread::CORES.init() };
+    unsafe { context::CORES.init() };
     println!("| initialized per-core data");
 
     println!("| starting other cores...");

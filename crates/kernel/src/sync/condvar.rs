@@ -1,5 +1,6 @@
 use core::future::Future;
 
+use crate::context::{context_switch, SwitchAction};
 use crate::event::Event;
 
 use super::lock::{Lock, OwnedSpinLockGuard, SpinLock, SpinLockGuard, SpinLockInner};
@@ -28,10 +29,7 @@ impl CondVar {
     pub fn wait<'a, T>(&self, guard: SpinLockGuard<'a, T>) -> SpinLockGuard<'a, T> {
         let lock = guard.lock;
         core::mem::forget(guard);
-        crate::thread::context_switch(crate::thread::SwitchAction::QueueAddUnlock(
-            &self.queue,
-            &lock.inner,
-        ));
+        context_switch(SwitchAction::QueueAddUnlock(&self.queue, &lock.inner));
         lock.lock()
     }
     pub fn wait_while<'a, T, F>(
