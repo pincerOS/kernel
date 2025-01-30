@@ -117,7 +117,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
             WATCHDOG.init(SpinLock::new(watchdog));
         }
         println!("| initialized power managment watchdog");
-        println!("| last reset: {:#08x}", WATCHDOG.get().lock().last_reset());
+        println!("| last reset: {:#010x}", WATCHDOG.get().lock().last_reset());
     }
 
     {

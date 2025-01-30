@@ -3,8 +3,7 @@ use core::future::Future;
 use crate::context::{context_switch, SwitchAction};
 use crate::event::Event;
 
-use super::lock::{Lock, OwnedSpinLockGuard, SpinLock, SpinLockGuard, SpinLockInner};
-use super::RefProvider;
+use super::lock::SpinLockGuard;
 
 type EventQueue = crate::scheduler::Queue<Event>;
 
@@ -32,6 +31,7 @@ impl CondVar {
         context_switch(SwitchAction::QueueAddUnlock(&self.queue, &lock.inner));
         lock.lock()
     }
+
     pub fn wait_while<'a, T, F>(
         &self,
         mut guard: SpinLockGuard<'a, T>,
@@ -44,88 +44,6 @@ impl CondVar {
             guard = self.wait(guard);
         }
         guard
-    }
-
-    pub fn wait_then<T, F, P, L>(&self, guard: OwnedSpinLockGuard<T, P>, f: F)
-    where
-        F: FnOnce(OwnedSpinLockGuard<T, P>) + Send + 'static,
-        T: Send + 'static,
-        P: RefProvider<Lock<T, SpinLockInner>> + Send + 'static,
-    {
-        let lock = guard.into_inner();
-        let lock_ref = lock.provide();
-        let lock_ptr = core::ptr::from_ref(lock_ref);
-
-        let wrap = move || {
-            let g = SpinLock::lock_owned(lock);
-            f(g);
-        };
-        let event = Event::Function(alloc::boxed::Box::new(wrap));
-        self.queue.add_then(event, move || {
-            // Safety: the queue must not drop or release the event before
-            // this function is called, so the ref provider must still be
-            // valid.
-            unsafe { &*lock_ptr }.inner.unlock()
-        });
-    }
-
-    pub fn wait_then_owned<T, F, P, P2>(this: P, guard: OwnedSpinLockGuard<T, P2>, f: F)
-    where
-        P: RefProvider<Self> + Send + 'static,
-        P2: RefProvider<Lock<T, SpinLockInner>> + Send + 'static,
-        F: FnOnce(P, OwnedSpinLockGuard<T, P2>) + Send + 'static,
-        T: Send + 'static,
-    {
-        // TODO: The arc should be downgraded to a weak pointer while in
-        // the queue, such that the queue doesn't become a leaked ref cycle,
-        // but there's no guarantee that the condvar is kept alive after
-        // notify is called, so the Event must keep the condvar alive.
-        let cond = this;
-        let cond_ref = cond.provide();
-        let cond_ptr = core::ptr::from_ref(cond_ref);
-
-        let lock = guard.into_inner();
-        let lock_ref = lock.provide();
-        let lock_ptr = core::ptr::from_ref(lock_ref);
-
-        let wrap = move || {
-            let g = SpinLock::lock_owned(lock);
-            f(cond, g);
-        };
-        let event = Event::Function(alloc::boxed::Box::new(wrap));
-
-        // TODO: this may be UB, depending on the example implementation
-        // of the queue's add -- there's no reasonable situation where it
-        // would happen, as this event must be the last thing keeping the
-        // queue alive, but if the queue implementation drops the thread,
-        // then it would free itself and &self would become an invalid ref.
-        unsafe { &(*cond_ptr) }.queue.add_then(event, move || {
-            // Safety: the queue must not drop or release the event before
-            // this function is called, so the ref provider must still be
-            // valid.
-            unsafe { &*lock_ptr }.inner.unlock();
-        });
-    }
-
-    pub fn wait_while_then<'a, T, P, P2, Cond, Then>(
-        this: P,
-        mut guard: OwnedSpinLockGuard<T, P2>,
-        mut condition: Cond,
-        f: Then,
-    ) where
-        P: RefProvider<Self> + Send + 'static,
-        Cond: FnMut(&mut T) -> bool + Send + 'static,
-        Then: FnOnce(OwnedSpinLockGuard<T, P2>) + Send + 'static,
-        P2: RefProvider<Lock<T, SpinLockInner>> + Send + 'static,
-        T: Send + 'static,
-    {
-        if condition(&mut *guard) {
-            Self::wait_then_owned(this, guard, move |this, guard| {
-                Self::wait_while_then(this, guard, condition, f);
-            });
-        } else {
-            f(guard);
-        }
     }
 
     pub fn wait_async<'a, 'b, T>(

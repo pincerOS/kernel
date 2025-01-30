@@ -3,7 +3,6 @@ use core::marker::PhantomData;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use super::interrupts::{disable_interrupts, restore_interrupts, InterruptsState};
-use super::RefProvider;
 
 pub trait LockImpl {
     const DEFAULT: Self;
@@ -22,11 +21,6 @@ pub struct LockGuard<'a, T: ?Sized, L: LockImpl> {
     marker: PhantomData<*mut ()>,
 }
 
-pub struct OwnedLockGuard<T: ?Sized, L: LockImpl, P: RefProvider<Lock<T, L>>> {
-    pub(super) lock: P,
-    marker: PhantomData<(*mut (), Lock<T, L>)>,
-}
-
 impl<T, L: LockImpl> Lock<T, L> {
     pub const fn new(value: T) -> Self {
         Lock {
@@ -41,16 +35,6 @@ impl<T: ?Sized, L: LockImpl> Lock<T, L> {
         self.inner.lock();
         LockGuard {
             lock: self,
-            marker: PhantomData,
-        }
-    }
-    pub fn lock_owned<P>(this: P) -> OwnedLockGuard<T, L, P>
-    where
-        P: RefProvider<Self>,
-    {
-        this.provide().inner.lock();
-        OwnedLockGuard {
-            lock: this,
             marker: PhantomData,
         }
     }
@@ -78,44 +62,6 @@ impl<T: ?Sized, L: LockImpl> core::ops::DerefMut for LockGuard<'_, T, L> {
 impl<T: ?Sized, L: LockImpl> core::ops::Drop for LockGuard<'_, T, L> {
     fn drop(&mut self) {
         self.lock.inner.unlock();
-    }
-}
-
-impl<T: ?Sized, L: LockImpl, P: RefProvider<Lock<T, L>>> core::ops::Deref
-    for OwnedLockGuard<T, L, P>
-{
-    type Target = T;
-    fn deref(&self) -> &T {
-        let ptr = self.lock.provide().value.get();
-        unsafe { &*ptr }
-    }
-}
-impl<T: ?Sized, L: LockImpl, P: RefProvider<Lock<T, L>>> core::ops::DerefMut
-    for OwnedLockGuard<T, L, P>
-{
-    fn deref_mut(&mut self) -> &mut T {
-        let ptr = self.lock.provide().value.get();
-        unsafe { &mut *ptr }
-    }
-}
-impl<T: ?Sized, L: LockImpl, P: RefProvider<Lock<T, L>>> core::ops::Drop
-    for OwnedLockGuard<T, L, P>
-{
-    fn drop(&mut self) {
-        self.lock.provide().inner.unlock();
-    }
-}
-
-impl<T: ?Sized, L: LockImpl, P: RefProvider<Lock<T, L>>> OwnedLockGuard<T, L, P> {
-    pub fn unlock(self) -> P {
-        self.lock.provide().inner.unlock();
-        self.into_inner()
-    }
-    pub fn into_inner(self) -> P {
-        let this = core::mem::ManuallyDrop::new(self);
-        // Manually move the lock out of the lock guard without calling
-        // its destructor.
-        unsafe { core::ptr::read(&this.lock) }
     }
 }
 
@@ -158,7 +104,6 @@ impl LockImpl for SpinLockInner {
 
 pub type SpinLock<T> = Lock<T, SpinLockInner>;
 pub type SpinLockGuard<'a, T> = LockGuard<'a, T, SpinLockInner>;
-pub type OwnedSpinLockGuard<'a, T, P> = OwnedLockGuard<T, SpinLockInner, P>;
 
 pub struct InterruptSpinLockInner {
     flag: AtomicBool,
