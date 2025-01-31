@@ -30,7 +30,11 @@ pub extern "C" fn main() {
 
     let entry = elf.elf_header().e_entry();
     let new_sp = 0x80_0000;
-    unsafe { syscall::spawn(entry as usize, new_sp) };
+    unsafe { syscall::spawn(entry as usize, new_sp, 0) };
+
+    for i in 0..10 {
+        println!("Running in usermode! {}", i);
+    }
 
     unsafe { syscall::exit() };
     unreachable!();

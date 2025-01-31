@@ -1,3 +1,4 @@
+use core::sync::atomic::{AtomicUsize, Ordering};
 use core::{
     arch::asm,
     ptr::{self, addr_of, NonNull},
@@ -31,6 +32,19 @@ fn virt_addr_base() -> NonNull<()> {
     NonNull::new(ptr::with_exposed_provenance_mut(0xFFFF_FFFF_FE00_0000)).unwrap()
 }
 
+#[allow(improper_ctypes)]
+extern "C" {
+    static __rpi_phys_binary_end_addr: ();
+}
+
+static PHYSICAL_ALLOC_BASE: AtomicUsize = AtomicUsize::new(0);
+
+pub unsafe fn init_physical_alloc() {
+    // TODO: proper physical memory layout documentation
+    let base = 0x20_0000 * 16;
+    PHYSICAL_ALLOC_BASE.store(base, Ordering::SeqCst);
+}
+
 fn create_user_table(phys_base: usize) -> alloc::boxed::Box<UserTranslationTable> {
     let mut table = alloc::boxed::Box::new(UserTranslationTable(
         [TranslationDescriptor {
@@ -51,13 +65,15 @@ fn create_user_table(phys_base: usize) -> alloc::boxed::Box<UserTranslationTable
 }
 
 pub unsafe fn create_user_region() -> (*mut [u8], usize) {
-    let phys_base = 1 << 28;
+    let virt_region_base = 0x20_0000;
+    let region_size = 0x20_0000 * 15;
+
+    let phys_base = PHYSICAL_ALLOC_BASE.fetch_add(region_size, Ordering::Relaxed);
+
     let user_table = create_user_table(phys_base);
     let user_table_ptr = alloc::boxed::Box::into_raw(user_table);
     let user_table_phys = physical_addr(user_table_ptr.addr()).unwrap();
 
-    let virt_region_base = 0x20_0000;
-    let region_size = 0x20_0000 * 15;
     let ptr = core::ptr::with_exposed_provenance_mut::<u8>(virt_region_base);
     let slice = core::ptr::slice_from_raw_parts_mut(ptr, region_size);
     (slice, user_table_phys as usize)

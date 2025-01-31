@@ -76,6 +76,19 @@ impl<'a> DeviceTree<'a> {
         let size = header.totalsize.get() as usize;
         let data: &[u64] = unsafe { core::slice::from_raw_parts(base, size) };
 
+        Self::load_device_tree_slice(data)
+    }
+
+    pub fn load_device_tree_slice(data: &[u64]) -> Result<DeviceTree<'_>, &'static str> {
+        let header_slice: &[u32] = bytemuck::cast_slice(data)
+            .get(..size_of::<fdt_header>() / 4)
+            .ok_or("buffer too small")?;
+        let header: &fdt_header = &bytemuck::cast_slice(header_slice)[0];
+
+        if header.magic.get() != DTB_MAGIC {
+            return Err("invalid device tree magic bytes");
+        }
+
         if header.last_comp_version.get() > DTB_VERSION {
             return Err("unsupported device tree version");
         }

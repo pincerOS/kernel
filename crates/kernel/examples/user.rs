@@ -4,6 +4,11 @@
 extern crate alloc;
 extern crate kernel;
 
+use core::arch::asm;
+use core::mem::MaybeUninit;
+use core::ptr::copy_nonoverlapping;
+
+use alloc::boxed::Box;
 use kernel::*;
 
 use context::{deschedule_thread, Context, DescheduleAction, CORES};
@@ -45,13 +50,40 @@ unsafe fn sys_exit(ctx: &mut Context) -> *mut Context {
 unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
     let user_entry = ctx.regs[0];
     let user_sp = ctx.regs[1];
+    let flags = ctx.regs[2];
 
-    let page_dir = CORES.with_current(|core| {
+    let cur_page_dir = CORES.with_current(|core| {
         let thread = core.thread.take().unwrap();
         let page_dir = thread.user_regs.as_ref().unwrap().ttbr0_el1;
         core.thread.set(Some(thread));
         page_dir
     });
+
+    let page_dir;
+    if flags == 1 {
+        // shared mem
+        page_dir = cur_page_dir;
+    } else {
+        // fork-style
+        let (dst_data, new_page_dir) = crate::arch::memory::create_user_region();
+        let dst_data = dst_data as *mut u8;
+        // This is a massive hack
+        let buf_size = 1 << 16;
+        let mut buffer: Box<[MaybeUninit<u8>]> = Box::new_uninit_slice(buf_size);
+
+        let buf_ptr = buffer.as_mut_ptr().cast();
+        let src_data = 0x20_0000 as *const u8;
+        let src_size = 0x20_0000 * 15;
+        for i in 0..(src_size / buf_size) {
+            unsafe {
+                copy_nonoverlapping(src_data.byte_add(i * buf_size), buf_ptr, buf_size);
+                asm!("msr TTBR0_EL1, {0}", "isb", in(reg) new_page_dir);
+                copy_nonoverlapping(buf_ptr, dst_data.byte_add(i * buf_size), buf_size);
+                asm!("msr TTBR0_EL1, {0}", "isb", in(reg) cur_page_dir);
+            }
+        }
+        page_dir = cur_page_dir;
+    }
 
     let user_thread = unsafe { thread::Thread::new_user(user_sp, user_entry, page_dir) };
     event::SCHEDULER.add_task(event::Event::ScheduleThread(user_thread));
@@ -74,7 +106,9 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         exceptions::register_syscall_handler(6, sys_exit);
     }
 
-    // Create user region (mapped at 0x20_000 in virtual memory)
+    unsafe { crate::arch::memory::init_physical_alloc() };
+
+    // Create user region (mapped at 0x20_0000 in virtual memory)
     let (user_region, ttbr0) = unsafe { crate::arch::memory::create_user_region() };
 
     // Mark current thread as using TTBR0, so that preemption saves
@@ -89,7 +123,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         core.thread.set(Some(thread));
     });
     // Enable the user-mode address space in this thread
-    unsafe { core::arch::asm!("msr TTBR0_EL1, {0}", "isb", in(reg) ttbr0) };
+    unsafe { asm!("msr TTBR0_EL1, {0}", "isb", in(reg) ttbr0) };
 
     println!("User ptr: {:p}", user_region);
     // TODO: sometimes get an insn abort here? (leads to UART deadlock)
