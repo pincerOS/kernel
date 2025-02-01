@@ -1,5 +1,6 @@
 #[macro_use]
 pub mod uart;
+pub mod bcm2835_aux;
 pub mod mailbox;
 pub mod timer;
 pub mod watchdog;
@@ -95,6 +96,16 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
 
         unsafe { uart::UART.init(SpinLock::new(uart::UARTInner::new(uart_base))) };
         println!("| initialized UART");
+    }
+
+    let mut miniuarts = discover_compatible(tree, b"brcm,bcm2835-aux").unwrap();
+    if let Some(miniuart) = miniuarts.next() {
+        use core::fmt::Write;
+        let (miniuart_addr, _) = find_device_addr(miniuart).unwrap().unwrap();
+        let miniuart_base = unsafe { map_device(miniuart_addr) }.as_ptr();
+        let mut miniuart = unsafe { bcm2835_aux::MiniUart::new(miniuart_base) };
+        writeln!(miniuart, "| initialized Mini UART (bcm2835-aux)").ok();
+        println!("| initialized Mini UART");
     }
 
     {

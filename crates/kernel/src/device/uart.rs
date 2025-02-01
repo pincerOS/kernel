@@ -1,5 +1,7 @@
 use crate::sync::{SpinLock, UnsafeInit, Volatile};
 
+// https://documentation-service.arm.com/static/5e8e36c2fd977155116a90b5
+
 pub static UART: UnsafeInit<SpinLock<UARTInner>> = unsafe { UnsafeInit::uninit() };
 
 pub struct UARTInner {
