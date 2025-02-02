@@ -297,7 +297,6 @@ impl<'a> Iterator for MappingIterator<'a> {
                         }
 
                         mapping.mapping = Some(slice);
-                        return self.next();
                     }
                 }
             }

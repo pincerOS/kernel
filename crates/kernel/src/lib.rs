@@ -22,63 +22,17 @@ pub mod thread;
 use device::uart;
 use sync::SpinLock;
 
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 static INIT_BARRIER: AtomicUsize = AtomicUsize::new(0);
 static START_BARRIER: AtomicUsize = AtomicUsize::new(0);
+static START_WAIT: AtomicBool = AtomicBool::new(false);
 
 const FLAG_MULTICORE: bool = true;
 const FLAG_PREEMPTION: bool = true;
 
-pub struct HardwareConfig {
-    cpu_type: &'static [u8],
-}
-
-const HARDWARE_CONFIG: HardwareConfig = HardwareConfig {
-    cpu_type: b"arm,cortex-a72",
-};
-
 extern "Rust" {
     fn kernel_main(device_tree: device_tree::DeviceTree);
-}
-
-pub fn enable_other_cpus(tree: &device_tree::DeviceTree<'_>, start_fn: unsafe extern "C" fn()) {
-    use device_tree::format::StructEntry;
-    // TODO: proper discovery through the /cpus/cpu@* path, rather than compatible search
-    for mut iter in device::discover_compatible(tree, HARDWARE_CONFIG.cpu_type).unwrap() {
-        let mut name = None;
-        let mut method = None;
-        let mut release_addr = None;
-        while let Some(Ok(entry)) = iter.next() {
-            match entry {
-                StructEntry::BeginNode { name: n } => {
-                    if name.is_none() {
-                        name = Some(n)
-                    }
-                }
-                StructEntry::Prop { name, data } => match name {
-                    "enable-method" => method = Some(data),
-                    "cpu-release-addr" => {
-                        let addr: endian::u64_be = bytemuck::pod_read_unaligned(data);
-                        release_addr = Some(addr.get() as usize);
-                    }
-                    _ => (),
-                },
-                _ => (),
-            }
-        }
-        match (method, release_addr) {
-            (Some(b"spin-table\0"), Some(release_addr)) => {
-                println!("| Waking cpu {:?}", name.unwrap_or("unknown"));
-
-                let start = unsafe { memory::map_physical(release_addr, 8).cast::<u64>() };
-                let physical_start = memory::physical_addr(start_fn as usize).unwrap();
-                unsafe { core::ptr::write_volatile(start.as_ptr(), physical_start) };
-                unsafe { arch::sev() };
-            }
-            _ => println!("| Could not wake cpu {:?}", name),
-        }
-    }
 }
 
 #[no_mangle]
@@ -101,10 +55,10 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     println!("| initialized per-core data");
 
     println!("| starting other cores...");
-    enable_other_cpus(&device_tree, arch::boot::kernel_entry_alt);
+    let core_count = device::enable_cpus(&device_tree, arch::boot::kernel_entry_alt);
 
     INIT_BARRIER.fetch_add(1, Ordering::SeqCst);
-    while INIT_BARRIER.load(Ordering::SeqCst) < 4 {
+    while INIT_BARRIER.load(Ordering::SeqCst) < core_count {
         unsafe { arch::yield_() };
     }
 
@@ -127,6 +81,7 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     while START_BARRIER.load(Ordering::SeqCst) < 4 {
         unsafe { arch::yield_() };
     }
+    START_WAIT.store(true, Ordering::SeqCst);
 
     println!("| running event loop on core {id}");
     unsafe { event::run_event_loop() }
@@ -140,7 +95,7 @@ pub unsafe extern "C" fn kernel_entry_rust_alt(_x0: u32, _x1: u64, _x2: u64, _x3
 
     INIT_BARRIER.fetch_add(1, Ordering::SeqCst);
     START_BARRIER.fetch_add(1, Ordering::SeqCst);
-    while START_BARRIER.load(Ordering::SeqCst) < 4 {
+    while !START_WAIT.load(Ordering::SeqCst) {
         unsafe { arch::yield_() };
     }
 
