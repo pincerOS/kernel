@@ -2,6 +2,7 @@
 
 set -e
 
+QEMU_TARGET_HARDWARE=${QEMU_TARGET_HARDWARE-"-M raspi4b -dtb bcm2711-rpi-4-b.dtb"}
 QEMU_DEBUG=${QEMU_DEBUG-"mmu,guest_errors"}
 QEMU_DISPLAY=${QEMU_DISPLAY-"-display none"}
 DEBUG_ARGS=${DEBUG_ARGS-"-s"}
@@ -26,7 +27,7 @@ if test "$DEBUG_ARGS" = "-s -S" ; then
 fi
 
 qemu-system-aarch64 \
-    -M raspi3b -dtb bcm2710-rpi-3-b-plus.dtb \
+    ${QEMU_TARGET_HARDWARE} \
     -kernel kernel.bin \
     -serial stdio \
     ${QEMU_DISPLAY} \

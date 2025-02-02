@@ -30,6 +30,14 @@ static START_BARRIER: AtomicUsize = AtomicUsize::new(0);
 const FLAG_MULTICORE: bool = true;
 const FLAG_PREEMPTION: bool = true;
 
+pub struct HardwareConfig {
+    cpu_type: &'static [u8],
+}
+
+const HARDWARE_CONFIG: HardwareConfig = HardwareConfig {
+    cpu_type: b"arm,cortex-a72",
+};
+
 extern "Rust" {
     fn kernel_main(device_tree: device_tree::DeviceTree);
 }
@@ -37,7 +45,7 @@ extern "Rust" {
 pub fn enable_other_cpus(tree: &device_tree::DeviceTree<'_>, start_fn: unsafe extern "C" fn()) {
     use device_tree::format::StructEntry;
     // TODO: proper discovery through the /cpus/cpu@* path, rather than compatible search
-    for mut iter in device::discover_compatible(tree, b"arm,cortex-a53").unwrap() {
+    for mut iter in device::discover_compatible(tree, HARDWARE_CONFIG.cpu_type).unwrap() {
         let mut name = None;
         let mut method = None;
         let mut release_addr = None;
