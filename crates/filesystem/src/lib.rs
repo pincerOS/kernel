@@ -254,7 +254,7 @@ pub mod s_algo_bitmap {
 const _: () = assert!(size_of::<Superblock>() == 1024);
 
 #[repr(C)]
-#[derive(Clone)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct BGD {
     bg_block_bitmap: u32, 
     bg_inode_bitmap: u32, 
@@ -467,6 +467,30 @@ where
         self.root_inode.clone()
     }
 
+    pub fn add_block_group_deferred_write(&mut self,
+                                          deferred_write_map: &mut DeferredWriteMap,
+                                          block_group_num: usize) -> Result<(), Ext2Error> {
+        let block_group_descriptor_block: usize =
+            if BLOCK_SIZE == 1024 {2} else {1} + ((block_group_num * size_of::<BGD>()) / BLOCK_SIZE);
+        let block_group_descriptor_offset: usize =
+            (block_group_num * size_of::<BGD>()) % BLOCK_SIZE;
+
+        let mut block_group_copy: [u8; size_of::<BGD>()] = [0; size_of::<BGD>()];
+        {
+            let block_group_as_bytes =
+                bytemuck::bytes_of(&self.block_group_descriptor_tables[block_group_num]);
+
+            block_group_copy.copy_from_slice(block_group_as_bytes);
+        }
+
+        self.add_write_to_deferred_writes_map(deferred_write_map,
+                                              block_group_descriptor_block,
+                                              block_group_descriptor_offset,
+                                              &block_group_copy, None)?;
+
+        Ok(())
+    }
+
     pub fn add_super_block_deferred_write(&mut self,
                                           deferred_write_map: &mut DeferredWriteMap) -> Result<(), Ext2Error> {
         let mut superblock_bytes_copy: [u8; size_of::<Superblock>()] = [0; size_of::<Superblock>()];
@@ -584,6 +608,7 @@ where
                 block_group_table.bg_free_inodes_count -= 1;
                 self.superblock.s_free_inodes_count -= 1;
                 found_block_group_index_option = Some(block_group_index);
+                break;
             }
         }
 
@@ -645,6 +670,8 @@ where
 
             new_inode_num += new_inode_num_base;
 
+            self.add_block_group_deferred_write(deferred_write_map,
+                                                found_block_group_index_option.unwrap())?;
             self.add_super_block_deferred_write(deferred_write_map)?;
 
             return Ok(Rc::new(RefCell::new(INodeWrapper{
@@ -680,7 +707,14 @@ where
         Ok(())
     }
 
-    pub fn write_back_deferred_writes(&mut self, deferred_writes: DeferredWriteMap) -> Result<(), Ext2Error> {
+    pub fn write_back_deferred_writes(&mut self,
+                                      mut deferred_writes: DeferredWriteMap) -> Result<(), Ext2Error> {
+        let start = SystemTime::now();
+        let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap();
+
+        self.superblock.s_wtime = since_the_epoch.as_secs() as u32;
+        self.add_super_block_deferred_write(&mut deferred_writes)?;
+
         for mut deferred_write in deferred_writes {
             self.write_logical_block_self(deferred_write.0, 1,
                                           &mut deferred_write.1)?;
@@ -1107,6 +1141,15 @@ impl INodeWrapper
                 }
 
                 if block_buffer_dirty {
+                    assert!(blocks_allocated_from_block_group == needed_blocks ||
+                            blocks_allocated_from_block_group == free_block_count);
+
+                    ext2.block_group_descriptor_tables[current_block_group_index].
+                        bg_free_blocks_count -= blocks_allocated_from_block_group as u16;
+                    ext2.superblock.s_free_blocks_count -= blocks_allocated_from_block_group as u32;
+
+                    ext2.add_super_block_deferred_write(deferred_writes)?;
+                    ext2.add_block_group_deferred_write(deferred_writes, current_block_group_index)?;
                     ext2.add_write_to_deferred_writes_map(deferred_writes, current_block_bitmap_block,
                                                           byte_write_pos, &byte_write,
                                                           Some(block_buffer))?;
