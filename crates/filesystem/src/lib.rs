@@ -32,7 +32,8 @@ use std::prelude::v1::{String, Vec};
 use std::ptr::{read, write};
 use std::time::{SystemTime, UNIX_EPOCH};
 use bytemuck::bytes_of;
-use crate::i_mode::EXT2_S_IFREG;
+use crate::i_mode::{EXT2_S_IFDIR, EXT2_S_IFREG};
+use crate::linux::FileBlockDevice;
 
 #[cfg(test)]
 mod tests;
@@ -53,7 +54,8 @@ pub enum Ext2Error {
     BlockDeviceError(BlockDeviceError),
     UnavailableINode,
     TooLongFileName,
-    InvalidMode
+    InvalidMode,
+    FileNotFound,
 }
 
 pub trait BlockDevice {
@@ -114,7 +116,7 @@ pub struct Ext2<Device> {
 type DeferredWriteMap = BTreeMap<usize, [u8; BLOCK_SIZE]>;
 
 mod DirectoryEntryConstants {
-    pub const MAX_FILE_NAME_LEN: usize = 32;
+    pub const MAX_FILE_NAME_LEN: usize = 255;
 }
 
 #[repr(C)]
@@ -126,7 +128,7 @@ struct DirectoryEntry {
     entry_size: u16,
     name_length: u16,
 
-    name_characters: [u8; DirectoryEntryConstants::MAX_FILE_NAME_LEN]
+    name_characters: [u8; 256]
 }
 // https://www.nongnu.org/ext2-doc/ext2.html
 
@@ -597,6 +599,35 @@ where
         None
     }
 
+    pub fn find_recursive(&mut self, node: Rc<RefCell<INodeWrapper>>, name: &[u8],
+                          create_dirs_if_nonexistent: bool,
+                          create_file_if_nonexistent: bool) -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
+        let path_split = name.split(|byte| *byte == b'/');
+        let path_split_vec = path_split.collect::<Vec<&[u8]>>();
+        let mut current_node: Rc<RefCell<INodeWrapper>> = node;
+
+        for (index, file_dir) in path_split_vec.iter().enumerate() {
+            let mut current_node_option: Option<Rc<RefCell<INodeWrapper>>> = 
+                self.find(&current_node.borrow(), file_dir);
+
+            if current_node_option.is_none() {
+                if index != path_split_vec.len() - 1 && create_dirs_if_nonexistent {
+                    current_node_option =
+                        Some(self.create_dir(&mut *current_node.borrow_mut(), *file_dir)?);
+                } else if index == path_split_vec.len() - 1 && create_file_if_nonexistent {
+                    current_node_option =
+                        Some(self.create_file(&mut *current_node.borrow_mut(), *file_dir)?);
+                } else {
+                    return Err(Ext2Error::FileNotFound);
+                }
+            }
+
+            current_node = current_node_option.unwrap();
+        }
+
+        Ok(current_node)
+    }
+
     fn acquire_next_available_inode(&mut self, inode_data: INode,
                                     deferred_write_map: &mut DeferredWriteMap) ->
                                                     Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
@@ -709,10 +740,7 @@ where
 
     pub fn write_back_deferred_writes(&mut self,
                                       mut deferred_writes: DeferredWriteMap) -> Result<(), Ext2Error> {
-        let start = SystemTime::now();
-        let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap();
-
-        self.superblock.s_wtime = since_the_epoch.as_secs() as u32;
+        self.superblock.s_wtime = get_epoch_time() as u32;
         self.add_super_block_deferred_write(&mut deferred_writes)?;
 
         for mut deferred_write in deferred_writes {
@@ -722,11 +750,9 @@ where
 
         Ok(())
     }
-
-    // Creates a file named name (<= 255 characters),
-    // returns None if out of disk space
-    pub fn create_file(&mut self, node: &mut INodeWrapper,
-                       name: &[u8]) -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
+    
+    pub fn create_file_with_mode(&mut self, node: &mut INodeWrapper,
+                                 name: &[u8], i_mode: u16) -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
         // what do we need to do when creating a new file?
         // go thru BGD inode bitmaps, find the next unallocated inode number and update it
         // update inode number
@@ -738,7 +764,7 @@ where
         let epoch_time: usize = get_epoch_time();
 
         let new_inode = INode {
-            i_mode: EXT2_S_IFREG,
+            i_mode,
             i_uid: 0x0,
             i_size: 0,
             i_atime: epoch_time as u32,
@@ -772,8 +798,12 @@ where
             inode_number: new_inode_wrapper.borrow().inode_num,
             entry_size: 8 + dir_entry_name_length,
             name_length: dir_entry_name_length,
-            name_characters: [0; DirectoryEntryConstants::MAX_FILE_NAME_LEN],
+            name_characters: [0; 256],
         };
+        
+        if new_directory_entry.entry_size % 4 != 0 {
+            new_directory_entry.entry_size += 4 - (new_directory_entry.entry_size % 4);
+        }
 
         new_directory_entry.name_characters[0..(new_directory_entry.name_length as usize)].copy_from_slice(name);
 
@@ -800,7 +830,7 @@ where
 
             dir_entry_bytes_with_padding.resize(dir_entry_bytes_with_padding.len() + remaining_bytes_in_block, 0);
         }
-        
+
         let actual_entry_size: usize = new_directory_entry.entry_size as usize;
         let slice_end: usize = dir_entry_padding + actual_entry_size;
 
@@ -811,11 +841,22 @@ where
                                       true, &mut deferred_writes)?;
 
         self.write_back_deferred_writes(deferred_writes)?;
-        
+
         self.inode_map.insert(new_inode_wrapper.borrow().inode_num as usize,
                               Rc::downgrade(&new_inode_wrapper));
 
         Ok(new_inode_wrapper)
+    }
+
+    pub fn create_dir(&mut self, node: &mut INodeWrapper, name: &[u8]) 
+        -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
+        self.create_file_with_mode(node, name, EXT2_S_IFDIR)
+    }
+
+    // Creates a file named name (<= 255 characters)
+    pub fn create_file(&mut self, node: &mut INodeWrapper,
+                       name: &[u8]) -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
+        self.create_file_with_mode(node, name, EXT2_S_IFREG)
     }
 
     pub fn num_of_block_groups(&self) -> usize {
@@ -1046,7 +1087,7 @@ impl INodeWrapper
                 entry_size: directory_entry_size as u16,
                 name_length: directory_entry_name_length,
 
-                name_characters: [0; DirectoryEntryConstants::MAX_FILE_NAME_LEN]
+                name_characters: [0; 256]
             });
 
             entries.iter_mut().next_back().unwrap().
@@ -1438,9 +1479,9 @@ impl INodeWrapper
 
             new_blocks_allocated.append(&mut new_blocks_allocated_result?);
 
-            self.write_new_blocks_to_inode(ext2,
-                                           &new_blocks_allocated[new_blocks_allocated.len() - 1..],
-                             true, deferred_writes)?;
+            let new_blocks_slice = &new_blocks_allocated[new_blocks_allocated.len() - 1..];
+            
+            self.write_new_blocks_to_inode(ext2, new_blocks_slice, true, deferred_writes)?;
         }
 
         for new_block in new_blocks_allocated {

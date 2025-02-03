@@ -2,117 +2,222 @@ use alloc::rc::Rc;
 use std::cell::RefCell;
 use crate::{linux::FileBlockDevice, INodeWrapper, Superblock};
 use std::fs::File;
-use std::io;
-use std::prelude::v1::{Box, String, ToString};
+use std::{io, vec};
+use std::io::Read;
+use std::prelude::v1::{Box, String, ToString, Vec};
 use std::process::{Command, Output};
 use crate::{BlockDevice, Ext2};
-fn create_test_image_artifact(dir_path: String, block_size: usize, img_name: String) {
+
+pub fn create_ext2_fs(dir_path: &str, block_size: usize, img_name: &str, ro: bool) -> Ext2<FileBlockDevice> {
     Command::new("mkfs.ext2")
         .args(["-q", "-b", &*block_size.to_string(), "-i",
-                &*block_size.to_string(), "-d", &*dir_path, "-I",
-               "128", "-r", "0", "-t", "ext2", &*img_name, "10m"]).output().unwrap();
+            &*block_size.to_string(), "-d", &*dir_path, "-I",
+            "128", "-r", "0", "-t", "ext2", &*img_name, "10m"]).output().unwrap();
+
+    let file: File = File::options().read(true).write(!ro).open(img_name).unwrap();
+    let disk: FileBlockDevice = FileBlockDevice::new(file);
+
+    let mut ext2 = Ext2::new(disk);
+
+    ext2
+}
+
+#[derive(PartialEq, Eq)]
+enum WriteMode {
+    None,
+    Write,
+    Append,
+    CreateWrite
+}
+
+struct VerifyRequest<'a> {
+    file_path: &'a [u8],
+    data: &'a [u8],
+    expect_data: Option<&'a [u8]>,
+    write_mode: WriteMode,
+    create_dirs_if_nonexistent: bool
+}
+
+fn read_and_verify_test(ext2: &mut Ext2<FileBlockDevice>, verify_requests: &Vec<VerifyRequest>) {
+    let root_node: Rc<RefCell<INodeWrapper>> = ext2.get_root_inode_wrapper();
+
+    for verify_request in verify_requests {
+        let file_node: Rc<RefCell<INodeWrapper>> =
+            ext2.find_recursive(root_node.clone(), verify_request.file_path, false, false).unwrap();
+
+        let file_bytes: Vec<u8> = file_node.borrow().read_file(ext2).unwrap();
+        let expected_data: Vec<u8> = if verify_request.expect_data.is_some() {
+            verify_request.expect_data.unwrap().to_vec()
+        } else {
+            verify_request.data.to_vec()
+        };
+
+        assert_eq!(file_bytes, expected_data);
+    }
+}
+
+fn write_and_verify_test(ext2: &mut Ext2<FileBlockDevice>, verify_requests: &Vec<VerifyRequest>) {
+    let root_node = ext2.get_root_inode_wrapper();
+
+    for verify_request in verify_requests {
+        let file_node: Rc<RefCell<INodeWrapper>> =
+            ext2.find_recursive(root_node.clone(), verify_request.file_path,
+                                verify_request.create_dirs_if_nonexistent,
+                                verify_request.write_mode == WriteMode::CreateWrite).unwrap();
+
+        match verify_request.write_mode {
+            WriteMode::CreateWrite | WriteMode::Write => {
+                file_node.borrow_mut().overwrite_file(ext2, verify_request.data, true).unwrap();
+            }
+            WriteMode::Append => {
+                file_node.borrow_mut().append_file(ext2, verify_request.data, true).unwrap();
+            }
+            WriteMode::None => {}
+        }
+    }
+
+    read_and_verify_test(ext2, verify_requests)
 }
 
 #[test]
 fn read_example_1() {
-    create_test_image_artifact("../../test/example_1.dir".parse().unwrap(), 1024,
-                               "example_1_ro.img".parse().unwrap());
+    let mut ext2 =
+        create_ext2_fs("../../test/example_1.dir", 1024, "ro.img", true);
 
-    let file = File::open("example_1_ro.img").unwrap();
-    let disk = FileBlockDevice::new(file);
+    let verify_requests = vec![
+        VerifyRequest {
+            file_path: b"test.txt",
+            data: b"asldfalsjdkfvnlasdfvnka,dsfvmna",
+            expect_data: None,
+            write_mode: WriteMode::None,
+            create_dirs_if_nonexistent: false
+        },
+        VerifyRequest {
+            file_path: b"folder/asdf.txt",
+            data: b"Hi",
+            expect_data: None,
+            write_mode: WriteMode::None,
+            create_dirs_if_nonexistent: false
+        }
+    ];
 
-    let mut ext2 = Ext2::new(disk);
-
-    assert_eq!(ext2.get_block_size(), 1024);
-    assert_eq!(ext2.get_inode_size(), 128);
-    
-    let root_node = ext2.get_root_inode_wrapper();
-
-    let test_node_binding = ext2.find(&root_node.borrow(), b"test.txt").unwrap();
-    let test_node = test_node_binding.borrow();
-    let test_node_text: String = test_node.read_text_file_as_str(&mut ext2).unwrap();
-
-    assert_eq!(test_node_text, "asldfalsjdkfvnlasdfvnka,dsfvmna");
-
-    let test_folder_binding = ext2.find(&root_node.borrow(), b"folder").unwrap();
-    
-    let test_folder = test_folder_binding.borrow();
-
-    let test_file_in_folder_binding = ext2.find(&test_folder, b"asdf.txt").unwrap();
-    let test_file_in_folder = test_file_in_folder_binding.borrow();
-    let test_file_in_folder_text: String = 
-        test_file_in_folder.read_text_file_as_str(&mut ext2).unwrap();
-
-    assert_eq!(test_file_in_folder_text, "Hi");
+    read_and_verify_test(&mut ext2, &verify_requests);
 }
 
 #[test]
 fn read_write_example_1() {
-    create_test_image_artifact("../../test/example_1.dir".parse().unwrap(), 1024,
-                               "example_1_rw.img".parse().unwrap());
+    let mut ext2 =
+        create_ext2_fs("../../test/example_1.dir", 1024, "rw.img", false);
 
-    let file = File::options().read(true).write(true).open("example_1_rw.img").unwrap();
-    let disk = FileBlockDevice::new(file);
+    let verify_requests = vec![
+        VerifyRequest {
+            file_path: b"folder/asdf.txt",
+            data: b"Hi",
+            expect_data: Some(b"HiHi"),
+            write_mode: WriteMode::Append,
+            create_dirs_if_nonexistent: false
+        }
+    ];
 
-    let mut ext2 = Ext2::new(disk);
-
-    assert_eq!(ext2.get_block_size(), 1024);
-    assert_eq!(ext2.get_inode_size(), 128);
-
-    let root_node: Rc<RefCell<INodeWrapper>> = ext2.get_root_inode_wrapper();
-
-    let test_folder_binding = ext2.find(&root_node.borrow(), b"folder").unwrap();
-    let test_folder = test_folder_binding.borrow();
-    let test_file_in_folder_binding = ext2.find(&test_folder, b"asdf.txt").unwrap();
-    let mut test_file_in_folder = test_file_in_folder_binding.borrow_mut();
-    let test_file_in_folder_text: String =
-        test_file_in_folder.read_text_file_as_str(&mut ext2).unwrap();
-
-    assert_eq!(test_file_in_folder_text, "Hi");
-
-    let new_append_string = b"Hi";
-
-    test_file_in_folder.append_file(&mut ext2, new_append_string, true).unwrap();
-
-    let test_file_in_folder_text: String =
-        test_file_in_folder.read_text_file_as_str(&mut ext2).unwrap();
-
-    assert_eq!(test_file_in_folder_text, "HiHi")
+    write_and_verify_test(&mut ext2, &verify_requests);
 }
 
 #[test]
 fn file_creation_test() {
-    create_test_image_artifact("../../test/example_1.dir".parse().unwrap(), 1024,
-                               "example_1_rw_file_creation.img".parse().unwrap());
+    let mut ext2 =
+        create_ext2_fs("../../test/example_1.dir", 1024, "rw_file_creation.img", false);
 
-    let file = File::options().read(true).write(true).open("example_1_rw_file_creation.img").unwrap();
-    let disk = FileBlockDevice::new(file);
+    let verify_requests = vec![
+        VerifyRequest {
+            file_path: b"weeee.txt",
+            data: b"Ding Ding Arriving outbound 2-car L to San Francisco Zoo",
+            expect_data: None,
+            write_mode: WriteMode::CreateWrite,
+            create_dirs_if_nonexistent: false
+        }
+    ];
 
-    let mut ext2 = Ext2::new(disk);
-    let root_node = ext2.get_root_inode_wrapper();
-    
-    let new_file = ext2.create_file(&mut root_node.borrow_mut(),
-                                                     b"weeee.txt").unwrap();
-    let new_file_copy = ext2.find(&root_node.borrow(),
-                                                   b"weeee.txt").unwrap();
-
-    let test_string = b"Ding Ding Arriving outbound 2-car L to San Francisco Zoo";
-    
-    assert_eq!(new_file_copy.borrow().inode_num, new_file.borrow().inode_num);
-
-    new_file.borrow_mut().append_file(&mut ext2, test_string,true).unwrap();
-
-    let read_back_data = new_file_copy.borrow().read_file(&mut ext2).unwrap(); 
-    
-    assert_eq!(read_back_data.as_slice(), test_string);
-}
-
-#[test]
-fn file_creation_and_rw_test() {
-    //
+    write_and_verify_test(&mut ext2, &verify_requests);
 }
 
 #[test]
 fn directory_creation_test() {
-    //
+    let mut ext2 =
+        create_ext2_fs("../../test/example_1.dir", 1024, "rw_dir_creation.img", false);
+
+    let verify_requests = vec![
+        VerifyRequest {
+            file_path: b"ilovetrains/train.txt",
+            data: b"Ding Ding Arriving outbound 2-car L to San Francisco Zoo",
+            expect_data: None,
+            write_mode: WriteMode::CreateWrite,
+            create_dirs_if_nonexistent: true
+        }
+    ];
+
+    write_and_verify_test(&mut ext2, &verify_requests);
+}
+
+#[test]
+fn big_file_creation_test() {
+    let mut ext2 =
+        create_ext2_fs("../../test/example_1.dir", 1024, "rw_big_file_creation.img", false);
+    let mut bee_movie_bytes: Vec<u8> = Vec::new();
+
+    File::open("../../test/files_to_add/bee_movie.txt").unwrap().read_to_end(
+                &mut bee_movie_bytes).unwrap();
+
+    let verify_requests = vec![
+        VerifyRequest {
+            file_path: b"beemovie.txt",
+            data: &*bee_movie_bytes,
+            expect_data: None,
+            write_mode: WriteMode::CreateWrite,
+            create_dirs_if_nonexistent: false
+        }
+    ];
+
+    write_and_verify_test(&mut ext2, &verify_requests);
+}
+
+#[test]
+fn dir_tree_test() {
+    let mut ext2 =
+        create_ext2_fs("../../test/example_1.dir", 1024, "rw_big_file_creation.img", false);
+    let mut bart_image_bytes: Vec<u8> = Vec::new();
+    let mut bee_movie_bytes: Vec<u8> = Vec::new();
+    let mut wmata_image_bytes: Vec<u8> = Vec::new();
+
+    File::open("../../test/files_to_add/image.png").unwrap().read_to_end(
+        &mut bart_image_bytes).unwrap();
+    File::open("../../test/files_to_add/bee_movie.txt").unwrap().read_to_end(
+        &mut bee_movie_bytes).unwrap();
+    File::open("../../test/files_to_add/wmata.png").unwrap().read_to_end(
+        &mut wmata_image_bytes).unwrap();
+
+    let verify_requests = vec![
+        VerifyRequest {
+            file_path: b"a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/image.png",
+            data: &*bart_image_bytes,
+            expect_data: None,
+            write_mode: WriteMode::CreateWrite,
+            create_dirs_if_nonexistent: true
+        },
+        VerifyRequest {
+            file_path: b"a/b/c/d/e/f/g/h/i/j/k/l/m/n/bee_movie.txt",
+            data: &*bee_movie_bytes,
+            expect_data: None,
+            write_mode: WriteMode::CreateWrite,
+            create_dirs_if_nonexistent: false // directories should already exist at this point
+        },
+        VerifyRequest {
+            file_path: b"a/b/c/wmata.png",
+            data: &*wmata_image_bytes,
+            expect_data: None,
+            write_mode: WriteMode::CreateWrite,
+            create_dirs_if_nonexistent: false
+        }
+    ];
+
+    write_and_verify_test(&mut ext2, &verify_requests);
 }
