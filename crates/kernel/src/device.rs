@@ -1,6 +1,7 @@
 #[macro_use]
 pub mod uart;
 pub mod bcm2835_aux;
+pub mod gic;
 pub mod mailbox;
 pub mod timer;
 pub mod watchdog;
@@ -9,7 +10,8 @@ use device_tree::format::StructEntry;
 use device_tree::util::MappingIterator;
 use device_tree::DeviceTree;
 
-use crate::memory::map_device;
+use crate::device::gic::gic_init;
+use crate::memory::{map_device, map_device_block};
 use crate::sync::{InterruptSpinLock, UnsafeInit};
 use crate::SpinLock;
 
@@ -132,9 +134,25 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
             .unwrap();
         let (intc_addr, _) = find_device_addr(intc).unwrap().unwrap();
         let intc_base = unsafe { map_device(intc_addr) }.as_ptr();
+        println!("| INT controller addr: {:#010x}", intc_addr as usize);
+        println!("| INT controller base: {:#010x}", intc_base as usize);
         let intc = timer::bcm2836_l1_intc_driver::new(intc_base);
         let intc = InterruptSpinLock::new(intc);
         unsafe { IRQ_CONTROLLER.init(intc) };
+    }
+
+    {
+        println!("| initializing GIC-400 interrupt controller");
+        let gic_iter = discover_compatible(tree, b"arm,gic-400")
+            .unwrap()
+            .next()
+            .unwrap();
+        let (gic_addr, _) = find_device_addr(gic_iter).unwrap().unwrap();
+        let gic_base = unsafe { map_device_block(gic_addr, 0x8000) }.as_ptr();
+
+        println!("| GIC-400 addr: {:#010x}", gic_addr as usize);
+        println!("| GIC-400 base: {:#010x}", gic_base as usize);
+        unsafe { gic_init(gic_base) };
     }
 }
 

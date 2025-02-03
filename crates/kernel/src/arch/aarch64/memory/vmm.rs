@@ -140,6 +140,37 @@ pub unsafe fn map_device(pa: usize) -> NonNull<()> {
 }
 
 /// not thread safe
+pub unsafe fn map_device_block(pa_start: usize, size: usize) -> NonNull<()> {
+    let pg_aligned_start = (pa_start / PG_SZ) * PG_SZ;
+    let table = &raw mut KERNEL_LEAF_TABLE;
+    let table_base = table.cast::<LeafDescriptor>();
+
+    let idx = unsafe { first_unused_virt_page(table) };
+    let idx = idx.expect("Out of space in kernel page table!");
+
+    for (pg, pg_idx) in (pg_aligned_start..(pa_start + size))
+        .step_by(PG_SZ)
+        .zip(idx..)
+    {
+        let entry = unsafe { table_base.add(pg_idx) };
+        assert!(!unsafe { entry.read() }.is_valid());
+        let desc = LeafDescriptor::new(pg).set_mair(1).set_global();
+        unsafe { entry.write(desc) };
+    }
+
+    unsafe {
+        asm! {
+            "dsb ISH",
+            options(readonly, nostack, preserves_flags)
+        }
+    }
+    // TEMP: Hardcoded offsets
+    unsafe {
+        virt_addr_base().byte_add(0x20_0000 * 14 + idx * PG_SZ + (pa_start - pg_aligned_start))
+    }
+}
+
+/// not thread safe
 pub unsafe fn map_physical(pa_start: usize, size: usize) -> NonNull<()> {
     let pg_aligned_start = (pa_start / PG_SZ) * PG_SZ;
     let table = &raw mut KERNEL_LEAF_TABLE;

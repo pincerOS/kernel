@@ -78,7 +78,7 @@ __exception_vector_start:
 .org 0x200
     save_context exception_handler_example, 4
 .org 0x280
-    save_context exception_handler_irq, 5
+    save_context gic_irq_handler, 5
 .org 0x300
     save_context exception_handler_unhandled, 6
 .org 0x380
@@ -88,7 +88,7 @@ __exception_vector_start:
 .org 0x400
     save_context exception_handler_user, 8
 .org 0x480
-    save_context exception_handler_irq, 9
+    save_context gic_irq_handler, 9
 .org 0x500
     save_context exception_handler_unhandled, 10
 .org 0x580
@@ -202,25 +202,6 @@ unsafe extern "C" fn exception_handler_example(
         }
         _ => halt(),
     }
-}
-
-#[no_mangle]
-unsafe extern "C" fn exception_handler_irq(
-    ctx: &mut Context,
-    _elr: u64,
-    _spsr: u64,
-    _esr: u64,
-    _arg: u64,
-) -> *mut Context {
-    let mut irq = crate::device::IRQ_CONTROLLER.get().lock();
-    let core = crate::arch::core_id() & 0b11;
-    let _source = unsafe { irq.irq_source(core) };
-    // source is 2048 for local timer interrupt
-
-    irq.timer_reload();
-    drop(irq);
-
-    unsafe { crate::event::timer_handler(ctx) }
 }
 
 #[no_mangle]
