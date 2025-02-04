@@ -85,7 +85,7 @@ fn output_elf_file_header(elf: &Elf) {
     );
 }
 
-fn output_section_headers<'a>(elf: &'a Elf) -> Result<(), elf::ElfError> {
+fn output_section_headers(elf: &Elf) -> Result<(), elf::ElfError> {
     let section_string_table = match elf
         .section_headers()?
         .nth(elf.elf_header().e_shstrndx() as usize)
@@ -109,10 +109,7 @@ fn output_section_headers<'a>(elf: &'a Elf) -> Result<(), elf::ElfError> {
     }
     for (i, header) in elf.section_headers()?.enumerate() {
         let header = header?;
-        let name = match header.name(&section_string_table) {
-            Ok(name) => name,
-            Err(_) => "",
-        };
+        let name = header.name(&section_string_table).unwrap_or("");
         if is_32_bit {
             print!("  [{i:2}] ");
             if name.len() > 17 {
@@ -159,7 +156,7 @@ fn output_section_headers<'a>(elf: &'a Elf) -> Result<(), elf::ElfError> {
     Ok(())
 }
 
-fn output_program_headers<'a>(elf: &'a Elf) -> Result<(), elf::ElfError> {
+fn output_program_headers(elf: &Elf) -> Result<(), elf::ElfError> {
     let program_headers = match elf.program_headers() {
         Some(program_headers) => program_headers,
         None => {
@@ -207,7 +204,7 @@ fn output_program_headers<'a>(elf: &'a Elf) -> Result<(), elf::ElfError> {
     Ok(())
 }
 
-fn output_relocations<'a>(elf: &'a Elf) -> Result<(), elf::ElfError> {
+fn output_relocations(elf: &Elf) -> Result<(), elf::ElfError> {
     let section_string_table = match elf
         .section_headers()?
         .nth(elf.elf_header().e_shstrndx() as usize)
@@ -227,19 +224,13 @@ fn output_relocations<'a>(elf: &'a Elf) -> Result<(), elf::ElfError> {
             ))
         }
     };
-    let section_headers = match elf.section_headers()?.collect::<Result<Vec<_>, _>>() {
-        Ok(section_headers) => section_headers,
-        Err(e) => return Err(e.into()),
-    };
+    let section_headers = elf.section_headers()?.collect::<Result<Vec<_>, _>>()?;
     let mut found_relocations = false;
     for header in &section_headers {
         match header.sh_type {
             section_header::Type::Rel | section_header::Type::Rela => {
-                let name = match header.name(&section_string_table) {
-                    Ok(name) => name,
-                    Err(_) => "",
-                };
-                let relocations: Vec<_> = match header.get_relocations()?.into_iter().collect() {
+                let name = header.name(&section_string_table).unwrap_or("");
+                let relocations: Vec<_> = match header.get_relocations()?.collect() {
                     Ok(relocations) => relocations,
                     Err(e) => return Err(e.into()),
                 };
@@ -265,10 +256,7 @@ fn output_relocations<'a>(elf: &'a Elf) -> Result<(), elf::ElfError> {
                     };
                     print!("{:016x} ", symbol.st_value);
                     let relocation_section = &section_headers[u16::from(symbol.st_shndx) as usize];
-                    let name = match relocation_section.name(&section_string_table) {
-                        Ok(name) => name,
-                        Err(_) => "",
-                    };
+                    let name = relocation_section.name(&section_string_table).unwrap_or("");
                     print!("{} + {:x}", name, relocation.r_addend());
                     println!();
                     found_relocations = true;
@@ -290,10 +278,7 @@ fn output_symbols<'a>(elf: &'a Elf<'a>) -> Result<(), elf::ElfError> {
     };
     let section_headers = elf.section_headers()?.collect::<Result<Vec<_>, _>>()?;
     let mut symbols = Vec::new();
-    let symbols_iter = match symbol_table_header.get_symbols() {
-        Ok(symbols) => symbols,
-        Err(e) => return Err(e.into()),
-    };
+    let symbols_iter = symbol_table_header.get_symbols()?;
     for symbol in symbols_iter {
         match symbol {
             Ok(symbol) => symbols.push(symbol),
@@ -314,10 +299,9 @@ fn output_symbols<'a>(elf: &'a Elf<'a>) -> Result<(), elf::ElfError> {
         }
     };
 
-    let symbol_table_name = match symbol_table_header.name(&section_string_table) {
-        Ok(name) => name,
-        Err(_) => "",
-    };
+    let symbol_table_name = symbol_table_header
+        .name(&section_string_table)
+        .unwrap_or("");
     println!(
         "Symbol table '{}' contains {} {}:",
         symbol_table_name,
@@ -352,15 +336,12 @@ fn output_symbols<'a>(elf: &'a Elf<'a>) -> Result<(), elf::ElfError> {
             print!("{:4}  ", format!("{}", symbol.st_visibility));
             print!("{:>3} ", format!("{}", symbol.st_shndx));
             let name = match symbol.name(&symbol_string_table) {
-                Ok(name) if name.len() > 0 => name,
+                Ok(name) if !name.is_empty() => name,
                 _ => {
                     let index = u16::from(symbol.st_shndx);
                     if index < section_header::SHN_LORESERVE {
                         let section = &section_headers[index as usize];
-                        match section.name(&section_string_table) {
-                            Ok(name) => name,
-                            Err(_) => "",
-                        }
+                        section.name(&section_string_table).unwrap_or("")
                     } else {
                         ""
                     }
@@ -375,15 +356,15 @@ fn output_symbols<'a>(elf: &'a Elf<'a>) -> Result<(), elf::ElfError> {
 }
 
 fn display_elf_file<'a>(elf: &'a Elf) -> Result<(), Box<dyn std::error::Error + 'a>> {
-    output_elf_file_header(&elf);
+    output_elf_file_header(elf);
     println!();
-    output_section_headers(&elf)?;
+    output_section_headers(elf)?;
     println!();
-    output_program_headers(&elf)?;
+    output_program_headers(elf)?;
     println!();
-    output_relocations(&elf)?;
+    output_relocations(elf)?;
     println!();
-    output_symbols(&elf)?;
+    output_symbols(elf)?;
     println!();
     Ok(())
 }
@@ -410,6 +391,5 @@ fn main() {
             eprintln!("Error: {}", e);
             std::process::exit(1);
         }
-    }
-    drop(elf);
+    };
 }

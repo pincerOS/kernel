@@ -120,7 +120,7 @@ impl<'a> Elf<'a> {
         let table_start = self.elf_header.e_shoff() as usize;
         let entry_size = self.elf_header.e_shentsize() as usize;
         let entry_count = if self.elf_header.e_shnum() == section_header::SHN_UNDEF {
-            let first_section_header = section_header::SectionHeader::new(&self, table_start)?;
+            let first_section_header = section_header::SectionHeader::new(self, table_start)?;
             first_section_header.sh_size as usize
         } else {
             self.elf_header.e_shnum() as usize
@@ -130,7 +130,7 @@ impl<'a> Elf<'a> {
         let iter = (table_start..table_end)
             .step_by(entry_size)
             .map(
-                move |offset| match section_header::SectionHeader::new(&self, offset) {
+                move |offset| match section_header::SectionHeader::new(self, offset) {
                     Ok(header) => Ok(header),
                     Err(e) => Err(e.into()),
                 },
@@ -176,7 +176,7 @@ impl<'a> Elf<'a> {
         let iter = (table_start..table_end)
             .step_by(entry_size)
             .map(
-                move |offset| match program_header::ProgramHeader::new(&self, offset) {
+                move |offset| match program_header::ProgramHeader::new(self, offset) {
                     Ok(header) => Ok(header),
                     Err(e) => Err(e.into()),
                 },

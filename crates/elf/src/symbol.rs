@@ -65,7 +65,7 @@ impl Info {
     }
 
     pub fn st_info(binding: u8, symbol_type: u8) -> Self {
-        Self(binding << 4 + symbol_type)
+        Self((binding << 4) + symbol_type)
     }
 }
 

@@ -131,11 +131,11 @@ impl Info {
     }
 
     pub fn elf32_r_info(symbol_index: u32, relocation_type: u8) -> Self {
-        Self::Elf32RelocationInfo(symbol_index << 8 + relocation_type)
+        Self::Elf32RelocationInfo((symbol_index << 8) + relocation_type as u32)
     }
 
     pub fn elf64_r_info(symbol_index: u32, relocation_type: u32) -> Self {
-        Self::Elf64RelocationInfo((symbol_index as Elf64Xword) << 32 + relocation_type)
+        Self::Elf64RelocationInfo(((symbol_index as Elf64Xword) << 32) + relocation_type as u64)
     }
 }
 

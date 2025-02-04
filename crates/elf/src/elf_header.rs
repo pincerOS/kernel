@@ -601,8 +601,8 @@ impl<'a> ElfHeader<'a> {
             0x02 => Type::Executable,
             0x03 => Type::SharedObject,
             0x04 => Type::Core,
-            other if other >= ET_LOOS && other <= ET_HIOS => Type::OsSpecific(other),
-            other if other >= ET_LOPROC && other <= ET_HIPROC => Type::ProcessorSpecific(other),
+            ET_LOOS..=ET_HIOS => Type::OsSpecific(header.e_type),
+            ET_LOPROC..=ET_HIPROC => Type::ProcessorSpecific(header.e_type),
             _ => return Err(ElfHeaderError::InvalidType),
         };
         let e_machine = match Machine::from(header.e_machine) {
@@ -663,8 +663,8 @@ impl<'a> ElfHeader<'a> {
             0x02 => Type::Executable,
             0x03 => Type::SharedObject,
             0x04 => Type::Core,
-            other if other >= ET_LOOS && other <= ET_HIOS => Type::OsSpecific(other),
-            other if other >= ET_LOPROC && other <= ET_HIPROC => Type::ProcessorSpecific(other),
+            ET_LOOS..=ET_HIOS => Type::OsSpecific(header.e_type),
+            ET_LOPROC..=ET_HIPROC => Type::ProcessorSpecific(header.e_type),
             _ => return Err(ElfHeaderError::InvalidType),
         };
         let e_machine = Machine::from(header.e_machine);

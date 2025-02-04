@@ -300,11 +300,9 @@ impl<'a> ProgramHeader {
             5 => Type::Shlib,
             6 => Type::Phdr,
             7 => Type::Tls,
-            other if other >= PT_LOOS && other <= PT_HIOS => {
-                Type::OsSpecific(OsSpecificType::from(other))
-            }
-            other if other >= PT_LOPROC && other <= PT_HIPROC => {
-                Type::ProcessorSpecific(ProcessorSpecificType::new(other, machine))
+            PT_LOOS..=PT_HIOS => Type::OsSpecific(OsSpecificType::from(header.p_type)),
+            PT_LOPROC..=PT_HIPROC => {
+                Type::ProcessorSpecific(ProcessorSpecificType::new(header.p_type, machine))
             }
             _ => return Err(ProgramHeaderError::UnknownType),
         };
@@ -347,11 +345,9 @@ impl<'a> ProgramHeader {
             5 => Type::Shlib,
             6 => Type::Phdr,
             7 => Type::Tls,
-            other if other >= PT_LOOS && other <= PT_HIOS => {
-                Type::OsSpecific(OsSpecificType::from(other))
-            }
-            other if other >= PT_LOPROC && other <= PT_HIPROC => {
-                Type::ProcessorSpecific(ProcessorSpecificType::new(other, machine))
+            PT_LOOS..=PT_HIOS => Type::OsSpecific(OsSpecificType::from(header.p_type)),
+            PT_LOPROC..=PT_HIPROC => {
+                Type::ProcessorSpecific(ProcessorSpecificType::new(header.p_type, machine))
             }
             _ => return Err(ProgramHeaderError::UnknownType),
         };

@@ -327,7 +327,7 @@ impl Display for SectionHeaderError {
 }
 
 impl<'a> SectionHeader<'a> {
-    pub(crate) fn new(elf: &'a Elf, offset: usize) -> Result<Self, SectionHeaderError> {
+    pub(crate) fn new(elf: &'a Elf<'a>, offset: usize) -> Result<Self, SectionHeaderError> {
         match elf.identity().class {
             identity::Class::ELF32 => Self::new_shdr32(elf, offset),
             identity::Class::ELF64 => Self::new_shdr64(elf, offset),
@@ -373,7 +373,7 @@ impl<'a> SectionHeader<'a> {
                 },
                 _ => unreachable!(),
             });
-        return Ok(iter);
+        Ok(iter)
     }
 
     pub fn get_symbols(
@@ -397,7 +397,7 @@ impl<'a> SectionHeader<'a> {
         Ok(iter)
     }
 
-    fn new_shdr32(elf: &'a Elf, offset: usize) -> Result<Self, SectionHeaderError> {
+    fn new_shdr32(elf: &'a Elf<'a>, offset: usize) -> Result<Self, SectionHeaderError> {
         if elf.file_data.len() < offset + size_of::<Elf32Shdr>() {
             return Err(SectionHeaderError::InvalidLength);
         }
@@ -423,16 +423,14 @@ impl<'a> SectionHeader<'a> {
             16 => Type::PreInitArray,
             17 => Type::Group,
             18 => Type::SymTabShndx,
-            other if other >= SHT_LOOS && other <= SHT_HIOS => Type::OsSpecific(other),
-            other if other >= SHT_LOPROC && other <= SHT_HIPROC => {
-                match elf.elf_header().e_machine() {
-                    elf_header::Machine::ARM => Type::ProcessorSpecific(
-                        ProcessorSpecificType::ARMType(ARMType::from(other)),
-                    ),
-                    _ => Type::ProcessorSpecific(ProcessorSpecificType::Other(other)),
-                }
-            }
-            other if other >= SHT_LOUSER && other <= SHT_HIUSER => Type::UserApplication(other),
+            SHT_LOOS..=SHT_HIOS => Type::OsSpecific(header.sh_type),
+            SHT_LOPROC..=SHT_HIPROC => match elf.elf_header().e_machine() {
+                elf_header::Machine::ARM => Type::ProcessorSpecific(
+                    ProcessorSpecificType::ARMType(ARMType::from(header.sh_type)),
+                ),
+                _ => Type::ProcessorSpecific(ProcessorSpecificType::Other(header.sh_type)),
+            },
+            SHT_LOUSER..=SHT_HIUSER => Type::UserApplication(header.sh_type),
             _ => return Err(SectionHeaderError::UnknownType),
         };
         let sh_flags = Flags::from(header.sh_flags as u64);
@@ -458,7 +456,7 @@ impl<'a> SectionHeader<'a> {
             elf,
         })
     }
-    fn new_shdr64(elf: &'a Elf, offset: usize) -> Result<Self, SectionHeaderError> {
+    fn new_shdr64(elf: &'a Elf<'a>, offset: usize) -> Result<Self, SectionHeaderError> {
         if elf.file_data.len() < offset + size_of::<Elf64Shdr>() {
             return Err(SectionHeaderError::InvalidLength);
         }
@@ -484,16 +482,14 @@ impl<'a> SectionHeader<'a> {
             16 => Type::PreInitArray,
             17 => Type::Group,
             18 => Type::SymTabShndx,
-            other if other >= SHT_LOOS && other <= SHT_HIOS => Type::OsSpecific(other),
-            other if other >= SHT_LOPROC && other <= SHT_HIPROC => {
-                match elf.elf_header().e_machine() {
-                    elf_header::Machine::ARM => Type::ProcessorSpecific(
-                        ProcessorSpecificType::ARMType(ARMType::from(other)),
-                    ),
-                    _ => Type::ProcessorSpecific(ProcessorSpecificType::Other(other)),
-                }
-            }
-            other if other >= SHT_LOUSER && other <= SHT_HIUSER => Type::UserApplication(other),
+            SHT_LOOS..=SHT_HIOS => Type::OsSpecific(header.sh_type),
+            SHT_LOPROC..=SHT_HIPROC => match elf.elf_header().e_machine() {
+                elf_header::Machine::ARM => Type::ProcessorSpecific(
+                    ProcessorSpecificType::ARMType(ARMType::from(header.sh_type)),
+                ),
+                _ => Type::ProcessorSpecific(ProcessorSpecificType::Other(header.sh_type)),
+            },
+            SHT_LOUSER..=SHT_HIUSER => Type::UserApplication(header.sh_type),
             _ => return Err(SectionHeaderError::UnknownType),
         };
         let sh_flags = Flags::from(header.sh_flags);
