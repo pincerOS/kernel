@@ -8,7 +8,7 @@ use core::{
 
 use super::{identity, section_header, types::*, Elf};
 
-const STN_UNDEF: u32 = 0;
+pub const STN_UNDEF: u32 = 0;
 
 const STB_LOOS: u8 = 10;
 const STB_HIOS: u8 = 12;

@@ -17,8 +17,6 @@ const EI_VERSION: usize = 6;
 const EI_OSABI: usize = 7;
 // ABI version
 const EI_ABIVERSION: usize = 8;
-// Start of padding bytes
-const EI_PAD: usize = 9;
 // Size of e_ident[]
 pub const EI_NIDENT: usize = 16;
 

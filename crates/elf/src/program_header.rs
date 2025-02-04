@@ -13,7 +13,7 @@ const PT_LOPROC: u32 = 0x70000000;
 const PT_HIPROC: u32 = 0x7fffffff;
 
 #[derive(Debug, Copy, Clone)]
-pub struct ProgramHeader<'a> {
+pub struct ProgramHeader {
     pub p_type: Type,
     pub p_offset: u64,
     pub p_vaddr: u64,
@@ -22,7 +22,6 @@ pub struct ProgramHeader<'a> {
     pub p_memsz: u64,
     pub p_flags: Flags,
     pub p_align: u64,
-    file_data: &'a [u8],
 }
 
 #[repr(C)]
@@ -269,7 +268,7 @@ impl Display for ProgramHeaderError {
 
 impl Error for ProgramHeaderError {}
 
-impl<'a> ProgramHeader<'a> {
+impl<'a> ProgramHeader {
     pub(crate) fn new(elf: &'a Elf, offset: usize) -> Result<Self, ProgramHeaderError> {
         match elf.identity().class {
             identity::Class::ELF32 => {
@@ -326,7 +325,6 @@ impl<'a> ProgramHeader<'a> {
             p_memsz,
             p_flags,
             p_align,
-            file_data,
         })
     }
     fn new_phdr64(
@@ -374,7 +372,6 @@ impl<'a> ProgramHeader<'a> {
             p_memsz,
             p_flags,
             p_align,
-            file_data,
         })
     }
 }

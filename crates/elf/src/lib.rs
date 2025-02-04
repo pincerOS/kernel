@@ -20,7 +20,7 @@ pub mod symbol;
 
 // /usr/include/elf.h
 
-mod types {
+pub mod types {
     // https://refspecs.linuxfoundation.org/elf/gabi4+/ch4.intro.html#data_representation
     pub type Elf32Addr = u32;
     pub type Elf32Off = u32;
@@ -164,7 +164,7 @@ impl<'a> Elf<'a> {
 
     pub fn program_headers(
         &'a self,
-    ) -> Option<impl Iterator<Item = Result<program_header::ProgramHeader<'a>, ElfError>>> {
+    ) -> Option<impl Iterator<Item = Result<program_header::ProgramHeader, ElfError>> + 'a> {
         let table_start = self.elf_header.e_phoff() as usize;
         if table_start == 0 {
             return None;
@@ -184,4 +184,3 @@ impl<'a> Elf<'a> {
         Some(iter)
     }
 }
-
