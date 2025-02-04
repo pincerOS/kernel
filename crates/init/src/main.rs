@@ -53,12 +53,12 @@ pub extern "C" fn main() {
     for phdr in phdrs {
         let phdr = phdr.unwrap();
         if matches!(phdr.p_type, elf::program_header::Type::Load) {
-            let data = &file[phdr.p_offset as usize..][..phdr.p_filesz as usize];
+            let data = elf.segment_data(&phdr).unwrap();
+            let memsize = (phdr.p_memsz as usize).next_multiple_of(4096).max(4096);
 
-            let size = (phdr.p_memsz as usize).next_multiple_of(4096).max(4096);
             // TODO: mmap
             let addr = (phdr.p_vaddr as usize) as *mut u8;
-            let mapping: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(addr, size) };
+            let mapping: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(addr, memsize) };
             mapping[..data.len()].copy_from_slice(data);
         }
     }
