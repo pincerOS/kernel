@@ -24,7 +24,8 @@ macro_rules! wrap {
     };
     ($v:ident) => { $v };
     ($v:literal) => { $v };
-    (($v:ident[$e:expr])) => { $v[$e] };
+    (($v:ident [ $e:expr ] )) => { $v[$e] };
+    (($v:ident . $f:ident )) => { $v.$f };
     (($($tt:tt)*)) => { wrap!($($tt)*) };
 }
 
@@ -48,48 +49,112 @@ fn chunks_u32_le(slice: &[u8]) -> (impl Iterator<Item = u32> + '_, &[u8]) {
 
 #[must_use]
 pub fn xxh32(seed: u32, stream: &[u8]) -> u32 {
-    let mut acc;
+    let acc;
     let remainder;
 
     if stream.len() < 16 {
-        acc = seed + PRIME32_5;
+        acc = wrap!(seed + PRIME32_5);
         remainder = stream;
     } else {
-        let mut acc1 = wrap!(seed + PRIME32_1 + PRIME32_2);
-        let mut acc2 = wrap!(seed + PRIME32_2);
-        let mut acc3 = wrap!(seed + 0);
-        let mut acc4 = wrap!(seed - PRIME32_1);
+        let mut acc_arr = XXH32Hasher::init_acc(seed);
+        remainder = XXH32Hasher::write_inner(&mut acc_arr, stream);
+        let [acc1, acc2, acc3, acc4] = acc_arr;
+        acc = wrap!((acc1 <<< 1) + (acc2 <<< 7) + (acc3 <<< 12) + (acc4 <<< 18));
+    }
 
-        let (iter, rest) = striped_chunks_u32_le(stream);
+    let len = stream.len() as u32;
+    XXH32Hasher::finalize_with(acc, len, remainder)
+}
+
+pub struct XXH32Hasher {
+    seed: u32,
+    acc: [u32; 4],
+    buf: [u8; 16],
+    buf_len: u32,
+    total_len: u64,
+}
+
+impl XXH32Hasher {
+    pub fn init(seed: u32) -> Self {
+        Self {
+            seed,
+            acc: Self::init_acc(seed),
+            buf: [0; 16],
+            buf_len: 0,
+            total_len: 0,
+        }
+    }
+
+    fn init_acc(seed: u32) -> [u32; 4] {
+        [
+            wrap!(seed + PRIME32_1 + PRIME32_2),
+            wrap!(seed + PRIME32_2),
+            wrap!(seed + 0),
+            wrap!(seed - PRIME32_1),
+        ]
+    }
+
+    fn write_inner<'a>(acc: &mut [u32; 4], buf: &'a [u8]) -> &'a [u8] {
+        let (iter, rest) = striped_chunks_u32_le(buf);
         for [lane1, lane2, lane3, lane4] in iter {
-            acc1 = wrap!(((acc1 + (lane1 * PRIME32_2)) <<< 13) * PRIME32_1);
-            acc2 = wrap!(((acc2 + (lane2 * PRIME32_2)) <<< 13) * PRIME32_1);
-            acc3 = wrap!(((acc3 + (lane3 * PRIME32_2)) <<< 13) * PRIME32_1);
-            acc4 = wrap!(((acc4 + (lane4 * PRIME32_2)) <<< 13) * PRIME32_1);
+            acc[0] = wrap!((((acc[0]) + (lane1 * PRIME32_2)) <<< 13) * PRIME32_1);
+            acc[1] = wrap!((((acc[1]) + (lane2 * PRIME32_2)) <<< 13) * PRIME32_1);
+            acc[2] = wrap!((((acc[2]) + (lane3 * PRIME32_2)) <<< 13) * PRIME32_1);
+            acc[3] = wrap!((((acc[3]) + (lane4 * PRIME32_2)) <<< 13) * PRIME32_1);
+        }
+        rest
+    }
+
+    fn finalize_with(acc: u32, len_trunc: u32, remainder: &[u8]) -> u32 {
+        let mut acc = wrap!(acc + len_trunc);
+
+        let (iter, remainder) = chunks_u32_le(remainder);
+        for lane in iter {
+            acc = wrap!(((acc + (lane * PRIME32_3)) <<< 17) * PRIME32_4);
+        }
+        for byte in remainder {
+            let lane = *byte as u32;
+            acc = wrap!(((acc + (lane * PRIME32_5)) <<< 11) * PRIME32_1);
         }
 
-        acc = wrap!((acc1 <<< 1) + (acc2 <<< 7) + (acc3 <<< 12) + (acc4 <<< 18));
-        remainder = rest;
+        acc ^= acc >> 15;
+        acc = wrap!(acc * PRIME32_2);
+        acc ^= acc >> 13;
+        acc = wrap!(acc * PRIME32_3);
+        acc ^= acc >> 16;
+
+        acc
     }
 
-    acc += stream.len() as u32;
+    pub fn write(&mut self, mut data: &[u8]) {
+        self.total_len = self.total_len.wrapping_add(data.len() as u64);
+        if self.buf_len > 0 {
+            let buf_len = self.buf_len as usize;
+            let amount = data.len().min(16 - buf_len);
+            self.buf[buf_len..buf_len + amount].copy_from_slice(&data[..amount]);
+            Self::write_inner(&mut self.acc, &self.buf);
+            self.buf_len = 0;
+            data = &data[amount..];
+        }
 
-    let (iter, remainder) = chunks_u32_le(remainder);
-    for lane in iter {
-        acc = wrap!(((acc + (lane * PRIME32_3)) <<< 17) * PRIME32_4);
+        let rest = Self::write_inner(&mut self.acc, data);
+
+        self.buf[..rest.len()].copy_from_slice(rest);
+        self.buf_len = rest.len() as u32;
     }
-    for byte in remainder {
-        let lane = *byte as u32;
-        acc = wrap!(((acc + (lane * PRIME32_5)) <<< 11) * PRIME32_1);
+
+    #[must_use]
+    pub fn finalize(self) -> u32 {
+        let [acc1, acc2, acc3, acc4] = self.acc;
+        let mut acc = wrap!((acc1 <<< 1) + (acc2 <<< 7) + (acc3 <<< 12) + (acc4 <<< 18));
+
+        if self.total_len < 16 {
+            acc = wrap!((self.seed) + PRIME32_5);
+        }
+
+        let remainder = &self.buf[..self.buf_len as usize];
+        Self::finalize_with(acc, self.total_len as u32, remainder)
     }
-
-    acc ^= acc >> 15;
-    acc = wrap!(acc * PRIME32_2);
-    acc ^= acc >> 13;
-    acc = wrap!(acc * PRIME32_3);
-    acc ^= acc >> 16;
-
-    acc
 }
 
 #[test]
