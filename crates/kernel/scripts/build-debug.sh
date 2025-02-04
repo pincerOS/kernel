@@ -2,4 +2,4 @@
 
 set -ex
 
-PROFILE="dev" source $(dirname "$0")/build.sh
+PROFILE="dev" source "$(dirname "$0")/build.sh"

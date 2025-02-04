@@ -7,7 +7,7 @@ TARGET=aarch64-unknown-none-softfloat
 PROFILE=${PROFILE-"release"}
 
 # cargo clean
-cargo rustc --profile=${PROFILE} --example=${EXAMPLE} \
+cargo rustc --profile="${PROFILE}" --example="${EXAMPLE}" \
     --target=${TARGET} -- \
     -C relocation-model=static
 
@@ -17,5 +17,5 @@ else
     BINARY=../../target/${TARGET}/${PROFILE}/examples/${EXAMPLE}
 fi
 
-cp ${BINARY} kernel.elf
-llvm-objcopy -O binary ${BINARY} kernel.bin
+cp "${BINARY}" kernel.elf
+llvm-objcopy -O binary "${BINARY}" kernel.bin

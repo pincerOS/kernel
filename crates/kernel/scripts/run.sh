@@ -4,7 +4,7 @@ set -e
 
 QEMU_TARGET_HARDWARE=${QEMU_TARGET_HARDWARE-"-M raspi4b -dtb bcm2711-rpi-4-b.dtb"}
 QEMU_DEBUG=${QEMU_DEBUG-"mmu,guest_errors"}
-QEMU_DISPLAY=${QEMU_DISPLAY-"-display none"}
+QEMU_DISPLAY=${QEMU_DISPLAY-"none"}
 DEBUG_ARGS=${DEBUG_ARGS-"-s"}
 
 # DEBUG_ARGS="-s -S"  (wait until connected)
@@ -13,7 +13,7 @@ DEBUG_ARGS=${DEBUG_ARGS-"-s"}
 
 # QEMU_DEBUG="mmu,guest_errors,int"  (also log interrupts)
 
-# QEMU_DISPLAY=""  (show the framebuffer)
+# QEMU_DISPLAY="default"  (show the framebuffer)
 
 if test -z "$QEMU_DEBUG"; then
     QEMU_DEBUG_PFX=""
@@ -38,7 +38,7 @@ qemu-system-aarch64 \
     ${QEMU_TARGET_HARDWARE} \
     -kernel kernel.bin \
     -serial stdio \
-    ${UART_PIPE} \
-    ${QEMU_DISPLAY} \
-    ${QEMU_DEBUG_PFX} ${QEMU_DEBUG} \
+    -serial "${SERIAL_ALT}" \
+    -display "${QEMU_DISPLAY}" \
+    "${QEMU_DEBUG_PFX}" "${QEMU_DEBUG}" \
     ${DEBUG_ARGS}
