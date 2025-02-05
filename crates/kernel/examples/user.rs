@@ -6,10 +6,12 @@ extern crate kernel;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use alloc::collections::btree_map::BTreeMap;
 use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::num::NonZeroU32;
 use core::ptr::copy_nonoverlapping;
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use kernel::*;
 
@@ -94,8 +96,15 @@ unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
     ctx
 }
 
-// TODO: tracking ownership of objects
-struct ObjectDescriptor(core::num::NonZeroU32);
+static CHANNELS: SpinLock<BTreeMap<u32, Vec<Option<Object>>>> = 
+    SpinLock::new(BTreeMap::new());
+
+// TODO: employ hashing and concat with host in order to make them unique
+static NEXT_CHANNEL_ID: AtomicU32 = AtomicU32::new(1);
+struct ObjectDescriptor {
+    id: u32,
+    chained: Option<Box<ObjectDescriptor>>,
+}
 
 struct Message {
     tag: u64,
@@ -108,23 +117,42 @@ enum Object {
     Receiver(ringbuffer::Receiver<16, Message>),
 }
 
-// TODO: this is a hack, move it to a per-task list & remap in messages
-static OBJECTS: SpinLock<Vec<Option<Object>>> = SpinLock::new(Vec::new());
+// TODO: make dealloc_obj/take method instead of doing it twice. generalize it as well
+// make method for ownership transfer
 
-fn alloc_obj(obj: Object) -> ObjectDescriptor {
-    let mut list = OBJECTS.lock();
-    let idx = list.len();
+fn alloc_obj(task_id: u32, obj: Object) -> ObjectDescriptor {
+    let mut map = CHANNELS.lock();
+    let list = map.entry(task_id).or_insert_with(Vec::new);
+
+    // get the next channel id
+    let chan_id = NEXT_CHANNEL_ID.fetch_add(1, Ordering::Relaxed);
     list.push(Some(obj));
-    ObjectDescriptor(core::num::NonZeroU32::new(idx as u32).unwrap())
+
+    // ask alex about this lol im stupid ;-;
+    return ObjectDescriptor { id: chan_id, chained: None };
+                                
 }
 
 unsafe fn sys_channel(ctx: &mut Context) -> *mut Context {
-    let (tx, rx) = ringbuffer::channel();
-    let tx = alloc_obj(Object::Sender(tx));
-    let rx = alloc_obj(Object::Receiver(rx));
+    let (_, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
 
-    ctx.regs[0] = tx.0.get() as usize;
-    ctx.regs[1] = rx.0.get() as usize;
+    let task_id = match thread {
+        Some(t) => t.id,
+        None => {
+            ctx.regs[0] = (-1isize) as usize;
+            return ctx;
+        }
+    };
+
+    let (tx, rx) = ringbuffer::channel();
+    let tx = alloc_obj(task_id, Object::Sender(tx));
+    let rx = alloc_obj(task_id, Object::Receiver(rx));
+
+    tx.chained = Option::new(Box::new(rx));
+    rx.chained = Option::new(Box::new(tx));
+
+    ctx.regs[0] = tx.id.get() as usize;
+    ctx.regs[1] = rx.id.get() as usize;
 
     ctx
 }
@@ -135,40 +163,67 @@ struct UserMessage {
     objects: [u32; 4],
 }
 
+// bank for holding unused channel descriptors
+
+unsafe fn sys_transact(ctx: &mut Context) -> *mut Context {
+    let desc = ctx.regs[0];
+    let slip = ctx.regs[1];
+    let flags = ctx.regs[2];
+
+    // if flag == deposit
+    // return token
+    // if flag == withdrawl
+    // return fd
+}
+
 unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
     let desc = ctx.regs[0];
     let msg_ptr = ctx.regs[1];
     let buf_ptr = ctx.regs[2];
     let buf_len = ctx.regs[3];
 
-    let Some(desc) = NonZeroU32::new(desc as u32) else {
+    let Some(_desc) = NonZeroU32::new(desc as u32) else {
         ctx.regs[0] = (-1isize) as usize;
         return ctx;
     };
-    let sender = OBJECTS
-        .lock()
-        .get_mut(desc.get() as usize)
-        .and_then(|d| match d.take() {
-            Some(Object::Sender(sender)) => Some(sender),
-            obj => {
-                *d = obj;
-                None
-            }
-        });
-    let Some(mut sender) = sender else {
+
+    let (_, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
+
+    let task_id = match thread {
+        Some(t) => t.id,
+        None => {
+            ctx.regs[0] = (-1isize) as usize;
+            return ctx;
+        }
+    };
+
+    let mut objects = CHANNELS.lock();
+    let Some(descriptors) = objects.get_mut(&task_id) else {
+        ctx.regs[0] = (-1isize) as usize;
+        return ctx;
+    };
+
+    // Find a sender object in the vector
+    let Some(slot) = descriptors.iter_mut().find(|d| matches!(d, Some(Object::Sender(_)))) else {
+        ctx.regs[0] = (-1isize) as usize;
+        return ctx;
+    };
+
+    // Extract the sender from the Option<Object> and make it mutable
+    let Object::Sender(mut sender) = slot.take().unwrap() else {
         ctx.regs[0] = (-1isize) as usize;
         return ctx;
     };
 
     let msg_ptr = msg_ptr as *const UserMessage;
-    assert!(msg_ptr.is_aligned()); // TODO: check user access validity
+    assert!(msg_ptr.is_aligned());
     let user_message = unsafe { core::ptr::read(msg_ptr) };
 
     // TODO: validate ownership of objects
-    let objects = user_message
-        .objects
-        .map(NonZeroU32::new)
-        .map(|d| d.map(ObjectDescriptor));
+    // let objects = user_message
+    //     .objects
+    //     .map(NonZeroU32::new)
+    //     .map(|d| d.map(ObjectDescriptor));
 
     let data;
     if buf_ptr == 0 {
@@ -205,28 +260,44 @@ unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
     let buf_ptr = ctx.regs[2];
     let buf_cap = ctx.regs[3];
 
-    let Some(desc) = NonZeroU32::new(desc as u32) else {
-        ctx.regs[0] = (-1isize) as usize;
-        return ctx;
-    };
-    let receiver = OBJECTS
-        .lock()
-        .get_mut(desc.get() as usize)
-        .and_then(|d| match d.take() {
-            Some(Object::Receiver(receiver)) => Some(receiver),
-            obj => {
-                *d = obj;
-                None
-            }
-        });
-    let Some(mut receiver) = receiver else {
+    let Some(_desc) = NonZeroU32::new(desc as u32) else {
         ctx.regs[0] = (-1isize) as usize;
         return ctx;
     };
 
+    let (_, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
+
+    let task_id = match thread {
+        Some(t) => t.id,
+        None => {
+            ctx.regs[0] = (-1isize) as usize;
+            return ctx;
+        }
+    };
+
+    let mut objects = CHANNELS.lock();
+    let Some(descriptors) = objects.get_mut(&task_id) else {
+        ctx.regs[0] = (-1isize) as usize;
+        return ctx;
+    };
+
+    // Find a receiver object in the vector
+    let Some(slot) = descriptors.iter_mut().find(|d| matches!(d, Some(Object::Receiver(_)))) else {
+        ctx.regs[0] = (-1isize) as usize;
+        return ctx;
+    };
+
+    // Extract the receiver from the Option<Object>
+    let Object::Receiver(mut receiver) = slot.take().unwrap() else {
+        ctx.regs[0] = (-1isize) as usize;
+        return ctx;
+    };
+
+    // Attempt to receive a message
     let message = match receiver.try_recv() {
         Some(m) => m,
         None => {
+            *slot = Some(Object::Receiver(receiver)); // Put it back before returning
             ctx.regs[0] = (-2isize) as usize;
             return ctx;
         }
@@ -265,8 +336,6 @@ static INIT_CODE: &[u8] = kernel::util::include_bytes_align!(u32, "../../init/in
 #[no_mangle]
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
-
-    OBJECTS.lock().push(None);
 
     unsafe {
         exceptions::register_syscall_handler(1, sys_shutdown);

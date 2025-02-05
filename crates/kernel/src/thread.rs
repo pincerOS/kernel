@@ -1,8 +1,12 @@
 use alloc::boxed::Box;
 use core::ptr::NonNull;
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::context::{context_switch, Context, SwitchAction, CORES};
 use crate::event::{Event, SCHEDULER};
+
+// TODO: literally anything else other than this :skull:
+static NEXT_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
 pub fn yield_() {
     context_switch(SwitchAction::Yield);
@@ -14,6 +18,7 @@ pub fn stop() -> ! {
 }
 
 pub struct Thread {
+    pub id: u32,
     pub last_context: NonNull<Context>,
     pub stack: NonNull<[u128]>,
     // Stored on the thread's stack
@@ -64,7 +69,10 @@ impl Thread {
             spsr: 0b0000, // Run in EL0
         };
 
+        let id = NEXT_THREAD_ID.fetch_add(1, Ordering::Relaxed);
+
         let mut thread = Box::new(Thread {
+            id,
             stack: (&mut [] as &mut [u128]).into(),
             last_context: NonNull::dangling(),
             func: None,
@@ -102,7 +110,10 @@ impl Thread {
             core::ptr::write(context.as_ptr(), data);
         }
 
+        let id = NEXT_THREAD_ID.fetch_add(1, Ordering::Relaxed);
+
         Box::new(Thread {
+            id,
             stack,
             last_context: context,
             func,
