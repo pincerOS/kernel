@@ -158,20 +158,79 @@ fn try_read_stdin(buf: &mut [u8]) -> isize {
     res
 }
 
+struct LineReader {
+    buf: [u8; 4096],
+    cursor: usize,
+    processed: usize,
+    cur_base: usize,
+}
+impl LineReader {
+    fn shift(&mut self) {
+        if self.cur_base != 0 {
+            self.buf[..self.cursor].copy_within(self.cur_base.., 0);
+            self.cursor -= self.cur_base;
+            self.processed -= self.cur_base;
+            self.cur_base = 0;
+        }
+    }
+}
+
+fn readline(reader: &mut LineReader) -> Result<&[u8], isize> {
+    reader.shift();
+    loop {
+        while reader.processed < reader.cursor {
+            let i = reader.processed;
+            reader.processed += 1;
+            match reader.buf[i] {
+                b'\r' => {
+                    let base = reader.cur_base;
+                    reader.cur_base = i + 1;
+                    return Ok(&reader.buf[base..i]);
+                }
+                b'\x7f' => print!("^?"),
+                c if c.is_ascii_control() => print!("^{}", (c + 64) as char),
+                c => print!("{}", c as char),
+            }
+        }
+
+        match try_read_stdin(&mut reader.buf[reader.cursor..]) {
+            -2 => continue,
+            err @ (..=-1) => return Err(err),
+            read @ 0.. => reader.cursor += read as usize,
+        }
+    }
+}
+
 fn main(chan: runtime::ChannelDesc) {
     println!("Starting 🐚");
 
-    let mut buf = [0; 4096];
+    let mut reader = LineReader {
+        buf: [0; 4096],
+        cursor: 0,
+        processed: 0,
+        cur_base: 0,
+    };
     loop {
-        match try_read_stdin(&mut buf) {
-            -2 => print!("."),
-            err @ (isize::MIN ..= -1) => {
+        print!("$ ");
+        let line = match readline(&mut reader) {
+            Ok(line) => line,
+            Err(err) => {
                 println!("Error: {err}");
-            },
-            data => {
-                println!("input: {:?}", unsafe { core::str::from_utf8_unchecked(&buf[..data as usize]) });
+                break;
             }
+        };
+        println!();
+        let line = unsafe {
+            core::str::from_utf8_unchecked(&line)
+        };
+        if line.trim().is_empty() {
+            continue;
         }
+        let mut split = line.split_ascii_whitespace();
+        let cmd = split.next().unwrap_or(line);
+        println!("cmd: {}, line: {}", cmd, line);
+
+
     }
 
     unsafe { runtime::exit() };
