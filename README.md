@@ -28,11 +28,11 @@
                                                                                                                                                       
 
                                                                                                                                                       -->
-## About The Project 🦀
+# About The Project 🦀
 
 PincerOS is a bare-metal microkernel-based multi-core operating system written from the ground up in Rust targeting the Raspberry Pi 4b. The project aims to be a distributed, scalable, and secure operating system for general-purpose use. We aim to support a wide range of applications such as networked video games, distributed computing, and more.
 
-### Features ✨
+## Features ✨
 
 - Microkernel Architecture
 - Multi-core Support
@@ -44,7 +44,7 @@ PincerOS is a bare-metal microkernel-based multi-core operating system written f
 - Networking
 - Security
 
-### Architecture 📐
+## Architecture 📐
 PincerOS follows a microkernel architecture with the following key components:
 
 - Kernel Core: Handles basic system operations, syscalls, scheduling, and IPC
@@ -53,10 +53,10 @@ PincerOS follows a microkernel architecture with the following key components:
 - Network Stack: Provides networking capabilities
 - Security Module: Handles access control and system security
 
-## Installation 📦
+# Installation 📦
 Currently, the project can be tested on QEMU version 9.0 or higher. If your package manager doesn't have it, you will have to build QEMU from source.
 
-### Dependencies
+## Dependencies
 - Rust toolchain (https://www.rust-lang.org/tools/install)
 - QEMU >= 9.0 (https://www.qemu.org/download/)
 - llvm (https://llvm.org/docs/GettingStarted.html):
@@ -65,7 +65,7 @@ Currently, the project can be tested on QEMU version 9.0 or higher. If your pack
 `brew install binutils`
 `sudo ln -s $(which gobjcopy) /usr/local/bin/llvm-objcopy`
 
-### Setup
+## Setup
 1. Install Rust target:
 `rustup target add aarch64-unknown-none-softfloat`
 2. Clone the repository:
@@ -78,7 +78,7 @@ We also provide scripts for debugging and running with ui:
 `build-debug.sh`, `debug-ui.sh`, `run-rpi3b.sh`, `run-ui.sh`.
 
 
-## Development Status 🚧
+# Development Status 🚧
 
 - [x] Basic kernel functionality
 - [x] Multi-core support
@@ -90,7 +90,7 @@ We also provide scripts for debugging and running with ui:
 - [ ] Distributed computing support
 
 
-## Credits 🎓
+# Credits 🎓
 This project is a collaboration between students at the University of Texas at Austin. 🤘
 
 - Aaron Lo
@@ -105,7 +105,7 @@ This project is a collaboration between students at the University of Texas at A
 - Sasha Huang
 - Slava Andrianov
 
-## License 📝
+# License 📝
 
 This project is licensed under the MIT License.
 
