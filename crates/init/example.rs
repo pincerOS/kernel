@@ -55,7 +55,12 @@ exit
     pub struct Stdout;
     impl core::fmt::Write for Stdout {
         fn write_str(&mut self, s: &str) -> core::fmt::Result {
-            unsafe { print(s.as_ptr(), s.len()) };
+            let msg = Message {
+                tag: 0,
+                objects: [0; 4],
+            };
+            let chan = ChannelDesc(1);
+            unsafe { send(chan, &msg, s.as_ptr(), s.len()) };
             Ok(())
         }
     }
@@ -94,17 +99,59 @@ exit
         };
     }
 
+    #[repr(C)]
+    #[derive(Debug, Copy, Clone)]
+    pub struct ChannelDesc(pub u32);
+
+    #[repr(C)]
+    #[derive(Debug)]
+    pub struct Message {
+        pub tag: u64,
+        pub objects: [u32; 4],
+    }
+
+    #[repr(C)]
+    struct Channels(usize, usize);
+
     syscall!(1 => pub fn shutdown());
-    syscall!(2 => pub fn hello_world());
     syscall!(3 => pub fn yield_());
-    syscall!(4 => pub fn print(buf: *const u8, len: usize));
-    syscall!(5 => pub fn spawn(pc: usize, sp: usize));
+    syscall!(5 => pub fn spawn(pc: usize, sp: usize, flags: usize));
     syscall!(6 => pub fn exit());
+
+    syscall!(7 => fn _channel() -> Channels);
+    pub unsafe fn channel() -> (ChannelDesc, ChannelDesc) {
+        let res = unsafe { _channel() };
+        (ChannelDesc(res.0 as u32), ChannelDesc(res.1 as u32))
+    }
+
+    syscall!(8 => pub fn send(desc: ChannelDesc, msg: &Message, buf: *const u8, buf_len: usize) -> isize);
+    syscall!(9 => pub fn recv(desc: ChannelDesc, msg: &mut Message, buf: *mut u8, buf_cap: usize) -> isize);
+}
+
+fn try_read_stdin(buf: &mut [u8]) -> isize {
+    let mut msg = runtime::Message {
+        tag: 0,
+        objects: [0; 4],
+    };
+    let chan = runtime::ChannelDesc(1);
+    let res = unsafe { runtime::recv(chan, &mut msg, buf.as_mut_ptr(), buf.len()) };
+    res
 }
 
 fn main() {
-    for i in 0..10 {
-        println!("Running in usermode! {}", i);
+    println!("Starting 🐚");
+
+    let mut buf = [0; 4096];
+    loop {
+        match try_read_stdin(&mut buf) {
+            -2 => (),
+            err @ (isize::MIN ..= -1) => {
+                println!("Error: {err}");
+            },
+            data => {
+                println!("input: {:?}", unsafe { core::str::from_utf8_unchecked(&buf[..data as usize]) });
+            }
+        }
     }
 
     unsafe { runtime::exit() };

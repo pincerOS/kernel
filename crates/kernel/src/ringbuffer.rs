@@ -4,6 +4,8 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use alloc::sync::Arc;
 
+use crate::sync::{CondVar, SpinLock};
+
 pub struct RingBuffer<const N: usize, T> {
     // TODO: put head and tail in separate cache lines?
     head: AtomicU32,
@@ -99,6 +101,8 @@ impl<const N: usize, T> RingBuffer<N, T> {
 pub fn channel<const N: usize, T>() -> (Sender<N, T>, Receiver<N, T>) {
     let inner = Arc::new(ChannelInner {
         buf: RingBuffer::new(),
+        len: SpinLock::new(0),
+        cond: CondVar::new(),
     });
     let inner2 = Arc::clone(&inner);
     (Sender { inner: inner2 }, Receiver { inner })
@@ -109,6 +113,8 @@ unsafe impl<const N: usize, T: Send> Sync for ChannelInner<N, T> {}
 
 struct ChannelInner<const N: usize, T> {
     buf: RingBuffer<N, T>,
+    len: SpinLock<usize>,
+    cond: CondVar,
 }
 
 pub struct Sender<const N: usize, T> {
@@ -121,12 +127,73 @@ pub struct Receiver<const N: usize, T> {
 
 impl<const N: usize, T> Sender<N, T> {
     pub fn try_send(&mut self, event: T) -> Result<(), T> {
-        unsafe { self.inner.buf.try_send(event) }
+        let res = unsafe { self.inner.buf.try_send(event) };
+        if res.is_ok() {
+            let mut guard = self.inner.len.lock();
+            let old_len = *guard;
+            *guard += 1;
+            drop(guard);
+            if old_len == 0 {
+                self.inner.cond.notify_one();
+            }
+        }
+        res
+    }
+
+    pub async fn send_async(&mut self, event: T) {
+        let mut guard = self.inner.len.lock();
+        guard = self
+            .inner
+            .cond
+            .wait_while_async(guard, |len| *len == (N - 1))
+            .await;
+
+        let res = unsafe { self.inner.buf.try_send(event) };
+        assert!(res.is_ok());
+
+        let old_len = *guard;
+        *guard += 1;
+        drop(guard);
+
+        if old_len == 0 {
+            self.inner.cond.notify_one();
+        }
     }
 }
 
 impl<const N: usize, T> Receiver<N, T> {
     pub fn try_recv(&mut self) -> Option<T> {
-        unsafe { self.inner.buf.try_recv() }
+        let res = unsafe { self.inner.buf.try_recv() };
+        if res.is_some() {
+            let mut guard = self.inner.len.lock();
+            let old_len = *guard;
+            *guard -= 1;
+            drop(guard);
+            if old_len == N - 1 {
+                self.inner.cond.notify_one();
+            }
+        }
+        res
+    }
+
+    pub async fn recv_async(&mut self) -> T {
+        let mut guard = self.inner.len.lock();
+        guard = self
+            .inner
+            .cond
+            .wait_while_async(guard, |len| *len == 0)
+            .await;
+
+        let res = unsafe { self.inner.buf.try_recv() };
+        let res = res.unwrap();
+
+        let old_len = *guard;
+        *guard -= 1;
+        drop(guard);
+        if old_len == N - 1 {
+            self.inner.cond.notify_one();
+        }
+
+        res
     }
 }

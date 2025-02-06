@@ -113,3 +113,23 @@ pub fn task_id_from_waker(waker: &Waker) -> Option<TaskId> {
         None
     }
 }
+
+pub fn yield_future() -> impl Future<Output = ()> {
+    struct YieldFuture(bool);
+    impl Future for YieldFuture {
+        type Output = ();
+        fn poll(
+            mut self: core::pin::Pin<&mut Self>,
+            ctx: &mut core::task::Context<'_>,
+        ) -> core::task::Poll<Self::Output> {
+            if !self.0 {
+                self.0 = true;
+                ctx.waker().wake_by_ref();
+                core::task::Poll::Pending
+            } else {
+                core::task::Poll::Ready(())
+            }
+        }
+    }
+    YieldFuture(false)
+}

@@ -9,7 +9,7 @@ static ELF_FILE: &[u8] = include_bytes_align!(u32, "../example.elf.lz4");
 #[no_mangle]
 pub extern "C" fn main() {
     let file = ELF_FILE;
-    let mut buf = [0; 15656];
+    let mut buf = [0; 0x8000];
     let file = lz4::decode_into(file, &mut buf).unwrap();
 
     let elf = elf::Elf::new(file).unwrap();
@@ -32,22 +32,22 @@ pub extern "C" fn main() {
     let new_sp = 0x80_0000;
     unsafe { syscall::spawn(entry as usize, new_sp, 0) };
 
-    for i in 0..10 {
-        println!("Running in usermode! {}", i);
-    }
+    // for i in 0..10 {
+    //     println!("Running in usermode! {}", i);
+    // }
 
-    let (send, recv) = unsafe { syscall::channel() };
-    println!("send {:?}, recv {:?}", send, recv);
+    // let (send, recv) = unsafe { syscall::channel() };
+    // println!("send {:?}, recv {:?}", send, recv);
 
-    let msg = syscall::Message { tag: 0, objects: [0; 4] };
-    let buf = b"Hello world!";
-    let a = unsafe { syscall::send(send, &msg, buf.as_ptr(), buf.len()) };
-    println!("send -> {a}");
+    // let msg = syscall::Message { tag: 0, objects: [0; 4] };
+    // let buf = b"Hello world!";
+    // let a = unsafe { syscall::send(send, &msg, buf.as_ptr(), buf.len()) };
+    // println!("send -> {a}");
 
-    let mut msg = syscall::Message { tag: 0, objects: [0; 4] };
-    let mut buf = [0; 4096];
-    let a = unsafe { syscall::recv(recv, &mut msg, buf.as_mut_ptr(), buf.len()) };
-    println!("recv -> {a} ({msg:?}, {:?}", buf.get(..a as usize));
+    // let mut msg = syscall::Message { tag: 0, objects: [0; 4] };
+    // let mut buf = [0; 4096];
+    // let a = unsafe { syscall::recv(recv, &mut msg, buf.as_mut_ptr(), buf.len()) };
+    // println!("recv -> {a} ({msg:?}, {:?}", buf.get(..a as usize));
 
     unsafe { syscall::exit() };
     unreachable!();

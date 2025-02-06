@@ -21,7 +21,12 @@ halt:
 pub struct Stdout;
 impl core::fmt::Write for Stdout {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        unsafe { super::syscall::print(s.as_ptr(), s.len()) };
+        let msg = crate::syscall::Message {
+            tag: 0,
+            objects: [0; 4],
+        };
+        let chan = crate::syscall::ChannelDesc(1);
+        unsafe { crate::syscall::send(chan, &msg, s.as_ptr(), s.len()) };
         Ok(())
     }
 }

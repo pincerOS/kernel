@@ -19,10 +19,6 @@ use sync::SpinLock;
 unsafe fn sys_shutdown(_ctx: &mut Context) -> *mut Context {
     shutdown();
 }
-unsafe fn sys_hello(ctx: &mut Context) -> *mut Context {
-    println!("Hello world syscall");
-    ctx
-}
 unsafe fn sys_yield(ctx: &mut Context) -> *mut Context {
     let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
     let mut thread = thread.expect("usermode syscall without active thread");
@@ -30,17 +26,6 @@ unsafe fn sys_yield(ctx: &mut Context) -> *mut Context {
 
     let action = DescheduleAction::Yield;
     unsafe { deschedule_thread(core_sp, thread, action) }
-}
-unsafe fn sys_print(ctx: &mut Context) -> *mut Context {
-    let ptr = ctx.regs[0];
-    let len = ctx.regs[1];
-    // TODO: soundness (check user permissions for the range)
-    let data = unsafe { core::slice::from_raw_parts(ptr as *const u8, len) };
-    let mut stdout = device::uart::UART.get().lock();
-    for c in data {
-        stdout.writec(*c);
-    }
-    ctx
 }
 unsafe fn sys_exit(ctx: &mut Context) -> *mut Context {
     let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
@@ -104,8 +89,10 @@ struct Message {
 }
 
 enum Object {
-    Sender(ringbuffer::Sender<16, Message>),
-    Receiver(ringbuffer::Receiver<16, Message>),
+    Channel {
+        send: ringbuffer::Sender<16, Message>,
+        recv: ringbuffer::Receiver<16, Message>,
+    },
 }
 
 // TODO: this is a hack, move it to a per-task list & remap in messages
@@ -119,12 +106,19 @@ fn alloc_obj(obj: Object) -> ObjectDescriptor {
 }
 
 unsafe fn sys_channel(ctx: &mut Context) -> *mut Context {
-    let (tx, rx) = ringbuffer::channel();
-    let tx = alloc_obj(Object::Sender(tx));
-    let rx = alloc_obj(Object::Receiver(rx));
+    let (a_tx, b_rx) = ringbuffer::channel();
+    let (b_tx, a_rx) = ringbuffer::channel();
+    let a_chan = alloc_obj(Object::Channel {
+        send: a_tx,
+        recv: a_rx,
+    });
+    let b_chan = alloc_obj(Object::Channel {
+        send: b_tx,
+        recv: b_rx,
+    });
 
-    ctx.regs[0] = tx.0.get() as usize;
-    ctx.regs[1] = rx.0.get() as usize;
+    ctx.regs[0] = a_chan.0.get() as usize;
+    ctx.regs[1] = b_chan.0.get() as usize;
 
     ctx
 }
@@ -149,13 +143,13 @@ unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
         .lock()
         .get_mut(desc.get() as usize)
         .and_then(|d| match d.take() {
-            Some(Object::Sender(sender)) => Some(sender),
+            Some(Object::Channel { send, recv }) => Some((send, recv)),
             obj => {
                 *d = obj;
                 None
             }
         });
-    let Some(mut sender) = sender else {
+    let Some((mut send, recv)) = sender else {
         ctx.regs[0] = (-1isize) as usize;
         return ctx;
     };
@@ -184,7 +178,7 @@ unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
         data = Some(kbuf.assume_init());
     }
 
-    let res = sender.try_send(Message {
+    let res = send.try_send(Message {
         tag: user_message.tag,
         objects,
         data,
@@ -195,6 +189,8 @@ unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
     } else {
         ctx.regs[0] = (-1isize) as usize;
     }
+
+    OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
 
     ctx
 }
@@ -213,18 +209,23 @@ unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
         .lock()
         .get_mut(desc.get() as usize)
         .and_then(|d| match d.take() {
-            Some(Object::Receiver(receiver)) => Some(receiver),
+            Some(Object::Channel { send, recv }) => Some((send, recv)),
             obj => {
                 *d = obj;
                 None
             }
         });
-    let Some(mut receiver) = receiver else {
+
+    let Some((send, mut recv)) = receiver else {
         ctx.regs[0] = (-1isize) as usize;
         return ctx;
     };
 
-    let message = match receiver.try_recv() {
+    let message = recv.try_recv();
+
+    OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
+
+    let message = match message {
         Some(m) => m,
         None => {
             ctx.regs[0] = (-2isize) as usize;
@@ -268,11 +269,59 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
 
     OBJECTS.lock().push(None);
 
+    let (stdio, mut stdin_tx, mut stdout_rx) = {
+        let (stdin_tx, stdin_rx) = ringbuffer::channel();
+        let (stdout_tx, stdout_rx) = ringbuffer::channel();
+        let stdio_chan = alloc_obj(Object::Channel {
+            send: stdout_tx,
+            recv: stdin_rx,
+        });
+        (stdio_chan, stdin_tx, stdout_rx)
+    };
+
+    task::spawn_async(async move {
+        let mut buf = [0; 256];
+        let mut buf_len = 0;
+        loop {
+            {
+                let uart = device::uart::UART.get();
+                let mut guard = uart.lock();
+                while let Some(c) = guard.try_getc() {
+                    buf[buf_len] = c;
+                    buf_len += 1;
+                    if buf_len >= 256 {
+                        break;
+                    }
+                }
+            }
+            if buf_len > 0 {
+                let msg = Message {
+                    tag: 0,
+                    objects: [const { None }; 4],
+                    data: Some(buf[..buf_len].into()),
+                };
+                stdin_tx.send_async(msg).await;
+                buf_len = 0;
+            }
+            task::yield_future().await;
+        }
+    });
+    task::spawn_async(async move {
+        loop {
+            let input = stdout_rx.recv_async().await;
+            if let Some(data) = input.data {
+                let uart = device::uart::UART.get();
+                let mut stdout = uart.lock();
+                for c in data {
+                    stdout.writec(c);
+                }
+            }
+        }
+    });
+
     unsafe {
         exceptions::register_syscall_handler(1, sys_shutdown);
-        exceptions::register_syscall_handler(2, sys_hello);
         exceptions::register_syscall_handler(3, sys_yield);
-        exceptions::register_syscall_handler(4, sys_print);
         exceptions::register_syscall_handler(5, sys_spawn);
         exceptions::register_syscall_handler(6, sys_exit);
         exceptions::register_syscall_handler(7, sys_channel);
