@@ -128,23 +128,32 @@ exit
         (ChannelDesc(res.0 as u32), ChannelDesc(res.1 as u32))
     }
 
-    syscall!(8 => pub fn _send(desc: ChannelDesc, msg: &Message, buf: *const u8, buf_len: usize) -> isize);
-    syscall!(9 => pub fn _recv(desc: ChannelDesc, msg: &mut Message, buf: *mut u8, buf_cap: usize) -> isize);
-    syscall!(10 => pub fn _send_block(desc: ChannelDesc, msg: &Message, buf: *const u8, buf_len: usize) -> isize);
-    syscall!(11 => pub fn _recv_block(desc: ChannelDesc, msg: &mut Message, buf: *mut u8, buf_cap: usize) -> isize);
+    const FLAG_NO_BLOCK: usize = 1 << 0;
+
+    syscall!(8 => pub fn _send(desc: ChannelDesc, msg: &Message, buf: *const u8, buf_len: usize, flags: usize) -> isize);
+    syscall!(9 => pub fn _recv(desc: ChannelDesc, msg: &mut Message, buf: *mut u8, buf_cap: usize, flags: usize) -> isize);
 
     pub unsafe fn send(desc: ChannelDesc, msg: &Message, buf: &[u8]) -> isize {
-        unsafe { _send(desc, msg, buf.as_ptr(), buf.len()) }
+        unsafe { _send(desc, msg, buf.as_ptr(), buf.len(), FLAG_NO_BLOCK) }
     }
     pub unsafe fn send_block(desc: ChannelDesc, msg: &Message, buf: &[u8]) -> isize {
-        unsafe { _send_block(desc, msg, buf.as_ptr(), buf.len()) }
+        unsafe { _send(desc, msg, buf.as_ptr(), buf.len(), 0) }
     }
     pub unsafe fn recv(desc: ChannelDesc, msg: &mut Message, buf: &mut [u8]) -> isize {
-        unsafe { _recv(desc, msg, buf.as_mut_ptr(), buf.len()) }
+        unsafe { _recv(desc, msg, buf.as_mut_ptr(), buf.len(), FLAG_NO_BLOCK) }
     }
     pub unsafe fn recv_block(desc: ChannelDesc, msg: &mut Message, buf: &mut [u8]) -> isize {
-        unsafe { _recv_block(desc, msg, buf.as_mut_ptr(), buf.len()) }
+        unsafe { _recv(desc, msg, buf.as_mut_ptr(), buf.len(), 0) }
     }
+}
+
+fn recv_wrap(chan: runtime::ChannelDesc, buf: &mut [u8]) -> (runtime::Message, isize) {
+    let mut msg = runtime::Message {
+        tag: 0,
+        objects: [0; 4],
+    };
+    let res = unsafe { runtime::recv_block(chan, &mut msg, buf) };
+    (msg, res)
 }
 
 fn try_read_stdin(buf: &mut [u8]) -> isize {
@@ -200,8 +209,56 @@ fn readline(reader: &mut LineReader) -> Result<&[u8], isize> {
     }
 }
 
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct ReadAt {
+    file_id: u32,
+    amount: u32,
+    offset: u64,
+}
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct Open {
+    path_len: u32,
+}
+
 fn main(chan: runtime::ChannelDesc) {
     println!("Starting 🐚");
+
+    let status = unsafe { runtime::send_block(chan, &runtime::Message {
+        tag: u64::from_be_bytes(*b"CONNREQ-"),
+        objects: [0; 4],
+    }, b"FILES---") };
+
+    let (msg, _) = recv_wrap(chan, &mut []);
+    let filesystem = runtime::ChannelDesc(msg.objects[0]);
+
+    let status = unsafe { runtime::send_block(filesystem, &runtime::Message {
+        tag: u64::from_be_bytes(*b"OPEN----"),
+        objects: [0; 4],
+    }, "\x08\x00\x00\x00test.txt".as_bytes()) };
+
+    let mut file_id = [0u8; 4];
+    let (msg, _) = recv_wrap(filesystem, &mut file_id);
+    assert_eq!(msg.tag, u64::from_be_bytes(*b"OPENSUCC"));
+    let file_id = u32::from_le_bytes(file_id);
+
+    let read = ReadAt {
+        file_id,
+        amount: 4096,
+        offset: 0,
+    };
+    let status = unsafe { runtime::send_block(filesystem, &runtime::Message {
+        tag: u64::from_be_bytes(*b"READAT--"),
+        objects: [0; 4],
+    }, unsafe { core::slice::from_raw_parts(&read as *const _ as *const u8, size_of::<ReadAt>()) }) };
+
+    let mut data = [0u8; 4096];
+    let (msg, len) = recv_wrap(filesystem, &mut data);
+    assert_eq!(msg.tag, u64::from_be_bytes(*b"DATA----"));
+    let file_content = &data[..len as usize];
+
+    println!("File content:\n{}", core::str::from_utf8(file_content).unwrap());
 
     let mut reader = LineReader {
         buf: [0; 4096],
@@ -228,8 +285,6 @@ fn main(chan: runtime::ChannelDesc) {
         let mut split = line.split_ascii_whitespace();
         let cmd = split.next().unwrap_or(line);
         println!("cmd: {}, line: {}", cmd, line);
-
-
     }
 
     unsafe { runtime::exit() };

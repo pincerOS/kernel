@@ -36,20 +36,20 @@ pub unsafe fn channel() -> (ChannelDesc, ChannelDesc) {
     (ChannelDesc(res.0 as u32), ChannelDesc(res.1 as u32))
 }
 
-syscall!(8 => pub fn _send(desc: ChannelDesc, msg: &Message, buf: *const u8, buf_len: usize) -> isize);
-syscall!(9 => pub fn _recv(desc: ChannelDesc, msg: &mut Message, buf: *mut u8, buf_cap: usize) -> isize);
-syscall!(10 => pub fn _send_block(desc: ChannelDesc, msg: &Message, buf: *const u8, buf_len: usize) -> isize);
-syscall!(11 => pub fn _recv_block(desc: ChannelDesc, msg: &mut Message, buf: *mut u8, buf_cap: usize) -> isize);
+const FLAG_NO_BLOCK: usize = 1 << 0;
+
+syscall!(8 => pub fn _send(desc: ChannelDesc, msg: &Message, buf: *const u8, buf_len: usize, flags: usize) -> isize);
+syscall!(9 => pub fn _recv(desc: ChannelDesc, msg: &mut Message, buf: *mut u8, buf_cap: usize, flags: usize) -> isize);
 
 pub unsafe fn send(desc: ChannelDesc, msg: &Message, buf: &[u8]) -> isize {
-    unsafe { _send(desc, msg, buf.as_ptr(), buf.len()) }
+    unsafe { _send(desc, msg, buf.as_ptr(), buf.len(), FLAG_NO_BLOCK) }
 }
 pub unsafe fn send_block(desc: ChannelDesc, msg: &Message, buf: &[u8]) -> isize {
-    unsafe { _send_block(desc, msg, buf.as_ptr(), buf.len()) }
+    unsafe { _send(desc, msg, buf.as_ptr(), buf.len(), 0) }
 }
 pub unsafe fn recv(desc: ChannelDesc, msg: &mut Message, buf: &mut [u8]) -> isize {
-    unsafe { _recv(desc, msg, buf.as_mut_ptr(), buf.len()) }
+    unsafe { _recv(desc, msg, buf.as_mut_ptr(), buf.len(), FLAG_NO_BLOCK) }
 }
 pub unsafe fn recv_block(desc: ChannelDesc, msg: &mut Message, buf: &mut [u8]) -> isize {
-    unsafe { _recv_block(desc, msg, buf.as_mut_ptr(), buf.len()) }
+    unsafe { _recv(desc, msg, buf.as_mut_ptr(), buf.len(), 0) }
 }

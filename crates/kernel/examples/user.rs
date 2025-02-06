@@ -131,138 +131,6 @@ struct UserMessage {
     objects: [u32; 4],
 }
 
-unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
-    let desc = ctx.regs[0];
-    let msg_ptr = ctx.regs[1];
-    let buf_ptr = ctx.regs[2];
-    let buf_len = ctx.regs[3];
-
-    let Some(desc) = NonZeroU32::new(desc as u32) else {
-        ctx.regs[0] = (-1isize) as usize;
-        return ctx;
-    };
-    let sender = OBJECTS
-        .lock()
-        .get_mut(desc.get() as usize)
-        .and_then(|d| match d.take() {
-            Some(Object::Channel { send, recv }) => Some((send, recv)),
-            obj => {
-                *d = obj;
-                None
-            }
-        });
-    let Some((mut send, recv)) = sender else {
-        ctx.regs[0] = (-1isize) as usize;
-        return ctx;
-    };
-
-    let msg_ptr = msg_ptr as *const UserMessage;
-    assert!(msg_ptr.is_aligned()); // TODO: check user access validity
-    let user_message = unsafe { core::ptr::read(msg_ptr) };
-
-    // TODO: validate ownership of objects
-    let objects = user_message
-        .objects
-        .map(NonZeroU32::new)
-        .map(|d| d.map(ObjectDescriptor));
-
-    let data;
-    if buf_ptr == 0 {
-        data = None;
-    } else {
-        // TODO: validate memory region
-        let buf_ptr = buf_ptr as *const u8;
-        let mut kbuf = Box::new_uninit_slice(buf_len);
-        let kbuf_ptr = kbuf.as_mut_ptr() as *mut u8;
-        unsafe {
-            core::ptr::copy_nonoverlapping(buf_ptr, kbuf_ptr, buf_len);
-        }
-        data = Some(kbuf.assume_init());
-    }
-
-    let res = send.try_send(Message {
-        tag: user_message.tag,
-        objects,
-        data,
-    });
-
-    if res.is_ok() {
-        ctx.regs[0] = 0 as usize;
-    } else {
-        ctx.regs[0] = (-1isize) as usize;
-    }
-
-    OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
-
-    ctx
-}
-
-unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
-    let desc = ctx.regs[0];
-    let msg_ptr = ctx.regs[1];
-    let buf_ptr = ctx.regs[2];
-    let buf_cap = ctx.regs[3];
-
-    let Some(desc) = NonZeroU32::new(desc as u32) else {
-        ctx.regs[0] = (-1isize) as usize;
-        return ctx;
-    };
-    let receiver = OBJECTS
-        .lock()
-        .get_mut(desc.get() as usize)
-        .and_then(|d| match d.take() {
-            Some(Object::Channel { send, recv }) => Some((send, recv)),
-            obj => {
-                *d = obj;
-                None
-            }
-        });
-
-    let Some((send, mut recv)) = receiver else {
-        ctx.regs[0] = (-1isize) as usize;
-        return ctx;
-    };
-
-    let message = recv.try_recv();
-
-    OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
-
-    let message = match message {
-        Some(m) => m,
-        None => {
-            ctx.regs[0] = (-2isize) as usize;
-            return ctx;
-        }
-    };
-
-    let user_message = UserMessage {
-        tag: message.tag,
-        objects: message.objects.map(|s| s.map(|o| o.0.get()).unwrap_or(0)),
-    };
-
-    // TODO: track ownership of objects
-
-    let mut data_len = 0;
-    if let Some(data) = message.data {
-        // TODO: validate memory region
-        let buf_ptr = buf_ptr as *mut u8;
-        let kbuf_ptr = data.as_ptr();
-        let actual_len = data.len().min(buf_cap); // TODO: ??? truncate ???
-        unsafe {
-            core::ptr::copy_nonoverlapping(kbuf_ptr, buf_ptr, actual_len);
-        }
-        data_len = data.len();
-    }
-
-    let msg_ptr = msg_ptr as *mut UserMessage;
-    assert!(msg_ptr.is_aligned()); // TODO: check user access validity
-    unsafe { core::ptr::write(msg_ptr, user_message) };
-
-    ctx.regs[0] = data_len;
-
-    ctx
-}
-
 fn run_async_handler<const N: usize, F>(ctx: &mut Context, future: F) -> *mut Context
 where
     F: core::future::Future<Output = [usize; N]> + Send + Sync + 'static,
@@ -342,11 +210,18 @@ where
     }
 }
 
-unsafe fn sys_send_block(ctx: &mut Context) -> *mut Context {
+bitflags::bitflags! {
+    struct SendRecvFlags: u32 {
+        const NO_BLOCK = 1 << 0;
+    }
+}
+
+unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
     let desc = ctx.regs[0];
     let msg_ptr = ctx.regs[1];
     let buf_ptr = ctx.regs[2];
     let buf_len = ctx.regs[3];
+    let flags = SendRecvFlags::from_bits_truncate(ctx.regs[4] as u32);
 
     run_async_handler(ctx, async move {
         let Some(desc) = NonZeroU32::new(desc as u32) else {
@@ -363,6 +238,8 @@ unsafe fn sys_send_block(ctx: &mut Context) -> *mut Context {
                 }
             });
         let Some((mut send, recv)) = sender else {
+            // TODO: proper approach to mpsc channels?
+            println!("Skipping message, channel in-use or non-existant!");
             return [(-1isize) as usize];
         };
 
@@ -392,24 +269,40 @@ unsafe fn sys_send_block(ctx: &mut Context) -> *mut Context {
             data = Some(kbuf.assume_init());
         }
 
-        send.send_async(Message {
-            tag: user_message.tag,
-            objects,
-            data,
-        })
-        .await;
+        let res;
+        if flags.contains(SendRecvFlags::NO_BLOCK) {
+            let r = send.try_send(Message {
+                tag: user_message.tag,
+                objects,
+                data,
+            });
+            if r.is_err() {
+                res = [-2isize as usize];
+            } else {
+                res = [0 as usize];
+            }
+        } else {
+            send.send_async(Message {
+                tag: user_message.tag,
+                objects,
+                data,
+            })
+            .await;
+            res = [0 as usize];
+        }
 
         OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
 
-        [0 as usize]
+        res
     })
 }
 
-unsafe fn sys_recv_block(ctx: &mut Context) -> *mut Context {
+unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
     let desc = ctx.regs[0];
     let msg_ptr = ctx.regs[1];
     let buf_ptr = ctx.regs[2];
     let buf_cap = ctx.regs[3];
+    let flags = SendRecvFlags::from_bits_truncate(ctx.regs[4] as u32);
 
     let user_ttbr0: usize;
     unsafe { asm!("mrs {0}, TTBR0_EL1", out(reg) user_ttbr0) };
@@ -430,12 +323,23 @@ unsafe fn sys_recv_block(ctx: &mut Context) -> *mut Context {
             });
 
         let Some((send, mut recv)) = receiver else {
+            // TODO: proper approach to mpsc channels?
+            println!("Skipping message, channel in-use or non-existant!");
             return [(-1isize) as usize];
         };
 
-        let message = recv.recv_async().await;
+        let message;
+        if flags.contains(SendRecvFlags::NO_BLOCK) {
+            message = recv.try_recv();
+        } else {
+            message = Some(recv.recv_async().await);
+        }
 
         OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
+
+        let Some(message) = message else {
+            return [-2isize as usize];
+        };
 
         let user_message = UserMessage {
             tag: message.tag,
@@ -540,8 +444,6 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         exceptions::register_syscall_handler(7, sys_channel);
         exceptions::register_syscall_handler(8, sys_send);
         exceptions::register_syscall_handler(9, sys_recv);
-        exceptions::register_syscall_handler(10, sys_send_block);
-        exceptions::register_syscall_handler(11, sys_recv_block);
     }
 
     unsafe { crate::arch::memory::init_physical_alloc() };
