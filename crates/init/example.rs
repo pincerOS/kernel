@@ -46,8 +46,9 @@ exit
     /*"; };
 
     #[no_mangle]
-    extern "C" fn _start() -> ! {
-        crate::main();
+    extern "C" fn _start(x0: usize) -> ! {
+        let channel = ChannelDesc(x0 as u32);
+        crate::main(channel);
         unsafe { exit() };
         loop {}
     }
@@ -60,7 +61,7 @@ exit
                 objects: [0; 4],
             };
             let chan = ChannelDesc(1);
-            unsafe { send(chan, &msg, s.as_ptr(), s.len()) };
+            unsafe { send_block(chan, &msg, s.as_bytes()) };
             Ok(())
         }
     }
@@ -82,10 +83,14 @@ exit
     #[cfg(not(test))]
     #[panic_handler]
     fn panic_handler(info: &core::panic::PanicInfo) -> ! {
-        println!("Panic: {}", info.message());
+        if let Some(loc) = info.location() {
+            println!("Panic at {}:{}:{}; {}", loc.file(), loc.line(), loc.column(), info.message());
+        } else {
+            println!("Panic; {}", info.message());
+        }
         loop {}
     }
-
+    
     macro_rules! syscall {
         ($num:literal => $vis:vis fn $ident:ident ( $($arg:ident : $ty:ty),* $(,)? ) $( -> $ret:ty )?) => {
             core::arch::global_asm!(
@@ -115,18 +120,32 @@ exit
 
     syscall!(1 => pub fn shutdown());
     syscall!(3 => pub fn yield_());
-    syscall!(5 => pub fn spawn(pc: usize, sp: usize, flags: usize));
+    syscall!(5 => pub fn spawn(pc: usize, sp: usize, x0: usize, flags: usize));
     syscall!(6 => pub fn exit());
-
+    
     syscall!(7 => fn _channel() -> Channels);
     pub unsafe fn channel() -> (ChannelDesc, ChannelDesc) {
         let res = unsafe { _channel() };
         (ChannelDesc(res.0 as u32), ChannelDesc(res.1 as u32))
     }
 
-    syscall!(8 => pub fn send(desc: ChannelDesc, msg: &Message, buf: *const u8, buf_len: usize) -> isize);
-    syscall!(9 => pub fn recv(desc: ChannelDesc, msg: &mut Message, buf: *mut u8, buf_cap: usize) -> isize);
-    syscall!(10 => pub fn recv_block(desc: ChannelDesc, msg: &mut Message, buf: *mut u8, buf_cap: usize) -> isize);
+    syscall!(8 => pub fn _send(desc: ChannelDesc, msg: &Message, buf: *const u8, buf_len: usize) -> isize);
+    syscall!(9 => pub fn _recv(desc: ChannelDesc, msg: &mut Message, buf: *mut u8, buf_cap: usize) -> isize);
+    syscall!(10 => pub fn _send_block(desc: ChannelDesc, msg: &Message, buf: *const u8, buf_len: usize) -> isize);
+    syscall!(11 => pub fn _recv_block(desc: ChannelDesc, msg: &mut Message, buf: *mut u8, buf_cap: usize) -> isize);
+
+    pub unsafe fn send(desc: ChannelDesc, msg: &Message, buf: &[u8]) -> isize {
+        unsafe { _send(desc, msg, buf.as_ptr(), buf.len()) }
+    }
+    pub unsafe fn send_block(desc: ChannelDesc, msg: &Message, buf: &[u8]) -> isize {
+        unsafe { _send_block(desc, msg, buf.as_ptr(), buf.len()) }
+    }
+    pub unsafe fn recv(desc: ChannelDesc, msg: &mut Message, buf: &mut [u8]) -> isize {
+        unsafe { _recv(desc, msg, buf.as_mut_ptr(), buf.len()) }
+    }
+    pub unsafe fn recv_block(desc: ChannelDesc, msg: &mut Message, buf: &mut [u8]) -> isize {
+        unsafe { _recv_block(desc, msg, buf.as_mut_ptr(), buf.len()) }
+    }
 }
 
 fn try_read_stdin(buf: &mut [u8]) -> isize {
@@ -135,11 +154,11 @@ fn try_read_stdin(buf: &mut [u8]) -> isize {
         objects: [0; 4],
     };
     let chan = runtime::ChannelDesc(1);
-    let res = unsafe { runtime::recv_block(chan, &mut msg, buf.as_mut_ptr(), buf.len()) };
+    let res = unsafe { runtime::recv_block(chan, &mut msg, buf) };
     res
 }
 
-fn main() {
+fn main(chan: runtime::ChannelDesc) {
     println!("Starting 🐚");
 
     let mut buf = [0; 4096];

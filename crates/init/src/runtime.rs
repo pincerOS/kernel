@@ -26,7 +26,7 @@ impl core::fmt::Write for Stdout {
             objects: [0; 4],
         };
         let chan = crate::syscall::ChannelDesc(1);
-        unsafe { crate::syscall::send(chan, &msg, s.as_ptr(), s.len()) };
+        unsafe { crate::syscall::send_block(chan, &msg, s.as_bytes()) };
         Ok(())
     }
 }
@@ -48,6 +48,10 @@ macro_rules! println {
 #[cfg(not(test))]
 #[panic_handler]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
-    println!("Panic: {}", info.message());
+    if let Some(loc) = info.location() {
+        println!("Panic at {}:{}:{}; {}", loc.file(), loc.line(), loc.column(), info.message());
+    } else {
+        println!("Panic; {}", info.message());
+    }
     loop {}
 }

@@ -28,9 +28,10 @@ pub extern "C" fn main() {
         }
     }
 
+    let (local, remote) = unsafe { syscall::channel() };
+
     let entry = elf.elf_header().e_entry();
     let new_sp = 0x80_0000;
-    unsafe { syscall::spawn(entry as usize, new_sp, 0) };
 
     // for i in 0..10 {
     //     println!("Running in usermode! {}", i);
@@ -48,6 +49,7 @@ pub extern "C" fn main() {
     // let mut buf = [0; 4096];
     // let a = unsafe { syscall::recv(recv, &mut msg, buf.as_mut_ptr(), buf.len()) };
     // println!("recv -> {a} ({msg:?}, {:?}", buf.get(..a as usize));
+    unsafe { syscall::spawn(entry as usize, new_sp, remote.0 as usize, 0) };
 
     unsafe { syscall::exit() };
     unreachable!();

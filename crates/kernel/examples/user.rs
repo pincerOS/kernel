@@ -38,7 +38,8 @@ unsafe fn sys_exit(ctx: &mut Context) -> *mut Context {
 unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
     let user_entry = ctx.regs[0];
     let user_sp = ctx.regs[1];
-    let flags = ctx.regs[2];
+    let user_x0 = ctx.regs[2];
+    let flags = ctx.regs[3];
 
     let cur_page_dir = CORES.with_current(|core| {
         let thread = core.thread.take().unwrap();
@@ -73,7 +74,8 @@ unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
         page_dir = cur_page_dir;
     }
 
-    let user_thread = unsafe { thread::Thread::new_user(user_sp, user_entry, page_dir) };
+    let mut user_thread = unsafe { thread::Thread::new_user(user_sp, user_entry, page_dir) };
+    user_thread.context.as_mut().unwrap().regs[0] = user_x0;
     event::SCHEDULER.add_task(event::Event::ScheduleThread(user_thread));
 
     ctx
@@ -340,6 +342,69 @@ where
     }
 }
 
+unsafe fn sys_send_block(ctx: &mut Context) -> *mut Context {
+    let desc = ctx.regs[0];
+    let msg_ptr = ctx.regs[1];
+    let buf_ptr = ctx.regs[2];
+    let buf_len = ctx.regs[3];
+
+    run_async_handler(ctx, async move {
+        let Some(desc) = NonZeroU32::new(desc as u32) else {
+            return [(-1isize) as usize];
+        };
+        let sender = OBJECTS
+            .lock()
+            .get_mut(desc.get() as usize)
+            .and_then(|d| match d.take() {
+                Some(Object::Channel { send, recv }) => Some((send, recv)),
+                obj => {
+                    *d = obj;
+                    None
+                }
+            });
+        let Some((mut send, recv)) = sender else {
+            return [(-1isize) as usize];
+        };
+
+        // user virtual memory is still enabled, haven't yielded yet
+
+        let msg_ptr = msg_ptr as *const UserMessage;
+        assert!(msg_ptr.is_aligned()); // TODO: check user access validity
+        let user_message = unsafe { core::ptr::read(msg_ptr) };
+
+        // TODO: validate ownership of objects
+        let objects = user_message
+            .objects
+            .map(NonZeroU32::new)
+            .map(|d| d.map(ObjectDescriptor));
+
+        let data;
+        if buf_ptr == 0 {
+            data = None;
+        } else {
+            // TODO: validate memory region
+            let buf_ptr = buf_ptr as *const u8;
+            let mut kbuf = Box::new_uninit_slice(buf_len);
+            let kbuf_ptr = kbuf.as_mut_ptr() as *mut u8;
+            unsafe {
+                core::ptr::copy_nonoverlapping(buf_ptr, kbuf_ptr, buf_len);
+            }
+            data = Some(kbuf.assume_init());
+        }
+
+        send.send_async(Message {
+            tag: user_message.tag,
+            objects,
+            data,
+        })
+        .await;
+
+        OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
+
+        [0 as usize]
+    })
+}
+
 unsafe fn sys_recv_block(ctx: &mut Context) -> *mut Context {
     let desc = ctx.regs[0];
     let msg_ptr = ctx.regs[1];
@@ -417,7 +482,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
 
     OBJECTS.lock().push(None);
 
-    let (stdio, mut stdin_tx, mut stdout_rx) = {
+    let (_stdio, mut stdin_tx, mut stdout_rx) = {
         let (stdin_tx, stdin_rx) = ringbuffer::channel();
         let (stdout_tx, stdout_rx) = ringbuffer::channel();
         let stdio_chan = alloc_obj(Object::Channel {
@@ -475,7 +540,8 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         exceptions::register_syscall_handler(7, sys_channel);
         exceptions::register_syscall_handler(8, sys_send);
         exceptions::register_syscall_handler(9, sys_recv);
-        exceptions::register_syscall_handler(10, sys_recv_block);
+        exceptions::register_syscall_handler(10, sys_send_block);
+        exceptions::register_syscall_handler(11, sys_recv_block);
     }
 
     unsafe { crate::arch::memory::init_physical_alloc() };
