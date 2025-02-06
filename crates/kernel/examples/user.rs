@@ -25,7 +25,7 @@ unsafe fn sys_yield(ctx: &mut Context) -> *mut Context {
     unsafe { thread.save_context(ctx.into()) };
 
     let action = DescheduleAction::Yield;
-    unsafe { deschedule_thread(core_sp, thread, action) }
+    unsafe { deschedule_thread(core_sp, Some(thread), action) }
 }
 unsafe fn sys_exit(ctx: &mut Context) -> *mut Context {
     let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
@@ -33,7 +33,7 @@ unsafe fn sys_exit(ctx: &mut Context) -> *mut Context {
     unsafe { thread.save_context(ctx.into()) };
 
     let action = DescheduleAction::FreeThread;
-    unsafe { deschedule_thread(core_sp, thread, action) }
+    unsafe { deschedule_thread(core_sp, Some(thread), action) }
 }
 unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
     let user_entry = ctx.regs[0];
@@ -261,6 +261,154 @@ unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
     ctx
 }
 
+fn run_async_handler<const N: usize, F>(ctx: &mut Context, future: F) -> *mut Context
+where
+    F: core::future::Future<Output = [usize; N]> + Send + Sync + 'static,
+{
+    struct WrapperData<const N: usize> {
+        arr: Option<[usize; N]>,
+        should_schedule: Option<Box<thread::Thread>>,
+    }
+    struct FutureWrapper<const N: usize, F> {
+        inner: F,
+        data: WrapperData<N>,
+    }
+    impl<const N: usize, F> FutureWrapper<N, F> {
+        fn get_data(self: core::pin::Pin<&mut Self>) -> &mut WrapperData<N> {
+            unsafe { &mut self.get_unchecked_mut().data }
+        }
+    }
+    impl<const N: usize, F> core::future::Future for FutureWrapper<N, F>
+    where
+        F: core::future::Future<Output = [usize; N]>,
+    {
+        type Output = ();
+        fn poll(
+            self: core::pin::Pin<&mut Self>,
+            ctx: &mut core::task::Context<'_>,
+        ) -> core::task::Poll<Self::Output> {
+            let this = unsafe { core::pin::Pin::into_inner_unchecked(self) };
+            let inner = unsafe { core::pin::Pin::new_unchecked(&mut this.inner) };
+            let arr = core::task::ready!(inner.poll(ctx));
+            if let Some(mut thread) = this.data.should_schedule.take() {
+                let ctx = thread.context.as_mut().unwrap();
+                ctx.regs[..N].copy_from_slice(&arr);
+                event::SCHEDULER.add_task(event::Event::ScheduleThread(thread));
+            } else {
+                this.data.arr = Some(arr);
+            }
+            ().into()
+        }
+    }
+
+    let mut future = Box::pin(FutureWrapper {
+        inner: future,
+        data: WrapperData {
+            arr: None,
+            should_schedule: None,
+        },
+    });
+    let task_id = task::TASKS.alloc_task_slot();
+
+    let waker = task::create_waker(task_id);
+    let mut context = core::task::Context::from_waker(&waker);
+
+    match core::future::Future::poll(future.as_mut(), &mut context) {
+        core::task::Poll::Ready(()) => {
+            task::TASKS.remove_task(task_id);
+            let arr = future.as_mut().get_data().arr.take().unwrap();
+
+            ctx.regs[..N].copy_from_slice(&arr);
+            return ctx;
+        }
+        core::task::Poll::Pending => {
+            let (core_sp, thread) =
+                CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
+            let mut thread = thread.expect("usermode syscall without active thread");
+            unsafe { thread.save_context(ctx.into()) };
+
+            let data = future.as_mut().get_data();
+            data.should_schedule = Some(thread);
+
+            let woken = task::TASKS.return_task(task_id, task::Task::new(future));
+            if woken {
+                event::SCHEDULER.add_task(event::Event::AsyncTask(task_id));
+            }
+
+            unsafe { deschedule_thread(core_sp, None, DescheduleAction::FreeThread) };
+        }
+    }
+}
+
+unsafe fn sys_recv_block(ctx: &mut Context) -> *mut Context {
+    let desc = ctx.regs[0];
+    let msg_ptr = ctx.regs[1];
+    let buf_ptr = ctx.regs[2];
+    let buf_cap = ctx.regs[3];
+
+    let user_ttbr0: usize;
+    unsafe { asm!("mrs {0}, TTBR0_EL1", out(reg) user_ttbr0) };
+
+    run_async_handler(ctx, async move {
+        let Some(desc) = NonZeroU32::new(desc as u32) else {
+            return [(-1isize) as usize];
+        };
+        let receiver = OBJECTS
+            .lock()
+            .get_mut(desc.get() as usize)
+            .and_then(|d| match d.take() {
+                Some(Object::Channel { send, recv }) => Some((send, recv)),
+                obj => {
+                    *d = obj;
+                    None
+                }
+            });
+
+        let Some((send, mut recv)) = receiver else {
+            return [(-1isize) as usize];
+        };
+
+        let message = recv.recv_async().await;
+
+        OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
+
+        let user_message = UserMessage {
+            tag: message.tag,
+            objects: message.objects.map(|s| s.map(|o| o.0.get()).unwrap_or(0)),
+        };
+
+        // TODO: track ownership of objects
+
+        // Re-enable user virtual memory; it could have been
+        // disabled / switched, if recv yielded and ran a different
+        // user thread.
+        let cur_ttbr0: usize;
+        unsafe { asm!("mrs {0}, TTBR0_EL1", out(reg) cur_ttbr0) };
+        if cur_ttbr0 != user_ttbr0 {
+            // Enable the user-mode address space in this thread
+            unsafe { asm!("msr TTBR0_EL1, {0}", "isb", in(reg) user_ttbr0) };
+        }
+
+        let mut data_len = 0;
+        if let Some(data) = message.data {
+            // TODO: validate memory region
+            let buf_ptr = buf_ptr as *mut u8;
+            let kbuf_ptr = data.as_ptr();
+            let actual_len = data.len().min(buf_cap); // TODO: ??? truncate ???
+            unsafe {
+                core::ptr::copy_nonoverlapping(kbuf_ptr, buf_ptr, actual_len);
+            }
+            data_len = data.len();
+        }
+
+        let msg_ptr = msg_ptr as *mut UserMessage;
+        assert!(msg_ptr.is_aligned()); // TODO: check user access validity
+        unsafe { core::ptr::write(msg_ptr, user_message) };
+
+        [data_len]
+    })
+}
+
 static INIT_CODE: &[u8] = kernel::util::include_bytes_align!(u32, "../../init/init.bin");
 
 #[no_mangle]
@@ -327,6 +475,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         exceptions::register_syscall_handler(7, sys_channel);
         exceptions::register_syscall_handler(8, sys_send);
         exceptions::register_syscall_handler(9, sys_recv);
+        exceptions::register_syscall_handler(10, sys_recv_block);
     }
 
     unsafe { crate::arch::memory::init_physical_alloc() };

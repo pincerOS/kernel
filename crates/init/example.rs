@@ -126,6 +126,7 @@ exit
 
     syscall!(8 => pub fn send(desc: ChannelDesc, msg: &Message, buf: *const u8, buf_len: usize) -> isize);
     syscall!(9 => pub fn recv(desc: ChannelDesc, msg: &mut Message, buf: *mut u8, buf_cap: usize) -> isize);
+    syscall!(10 => pub fn recv_block(desc: ChannelDesc, msg: &mut Message, buf: *mut u8, buf_cap: usize) -> isize);
 }
 
 fn try_read_stdin(buf: &mut [u8]) -> isize {
@@ -134,7 +135,7 @@ fn try_read_stdin(buf: &mut [u8]) -> isize {
         objects: [0; 4],
     };
     let chan = runtime::ChannelDesc(1);
-    let res = unsafe { runtime::recv(chan, &mut msg, buf.as_mut_ptr(), buf.len()) };
+    let res = unsafe { runtime::recv_block(chan, &mut msg, buf.as_mut_ptr(), buf.len()) };
     res
 }
 
@@ -144,7 +145,7 @@ fn main() {
     let mut buf = [0; 4096];
     loop {
         match try_read_stdin(&mut buf) {
-            -2 => (),
+            -2 => print!("."),
             err @ (isize::MIN ..= -1) => {
                 println!("Error: {err}");
             },

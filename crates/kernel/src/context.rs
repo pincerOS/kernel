@@ -223,7 +223,11 @@ pub enum DescheduleAction {
 
 #[allow(improper_ctypes)]
 extern "C" {
-    pub fn deschedule_thread(core_sp: usize, thread: Box<Thread>, action: DescheduleAction) -> !;
+    pub fn deschedule_thread(
+        core_sp: usize,
+        thread: Option<Box<Thread>>,
+        action: DescheduleAction,
+    ) -> !;
 }
 
 core::arch::global_asm!(
@@ -239,13 +243,15 @@ deschedule_thread:
 #[no_mangle]
 unsafe extern "C" fn deschedule_thread_inner(
     _core_sp: usize,
-    thread: Box<Thread>,
+    thread: Option<Box<Thread>>,
     action: DescheduleAction,
 ) -> ! {
     unsafe { crate::sync::enable_interrupts() };
-    match action {
-        DescheduleAction::Yield => SCHEDULER.add_task(Event::ScheduleThread(thread)),
-        DescheduleAction::FreeThread => drop(thread),
+    if let Some(thread) = thread {
+        match action {
+            DescheduleAction::Yield => SCHEDULER.add_task(Event::ScheduleThread(thread)),
+            DescheduleAction::FreeThread => drop(thread),
+        }
     }
     unsafe { run_event_loop() }
 }

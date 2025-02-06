@@ -296,7 +296,7 @@ unsafe extern "C" fn exception_handler_user(
                     CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
                 let mut thread = thread.expect("usermode syscall without active thread");
                 unsafe { thread.save_context(ctx.into()) };
-                unsafe { deschedule_thread(core_sp, thread, DescheduleAction::FreeThread) }
+                unsafe { deschedule_thread(core_sp, Some(thread), DescheduleAction::FreeThread) }
             }
         }
         _ => {

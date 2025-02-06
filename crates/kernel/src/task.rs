@@ -22,6 +22,9 @@ pub struct Task {
 }
 
 impl Task {
+    pub fn new(future: Pin<Box<dyn Future<Output = ()> + Send + Sync>>) -> Self {
+        Task { future }
+    }
     pub fn poll(&mut self, context: &mut Context) -> Poll<()> {
         self.future.as_mut().poll(context)
     }
@@ -50,6 +53,15 @@ impl TaskList {
         let id = self.count.fetch_add(1, Ordering::Relaxed);
         let id = TaskId(id);
         self.tasks.lock().insert(id, TaskState::Ready(task));
+        id
+    }
+
+    pub fn alloc_task_slot(&self) -> TaskId {
+        let id = self.count.fetch_add(1, Ordering::Relaxed);
+        let id = TaskId(id);
+        self.tasks
+            .lock()
+            .insert(id, TaskState::Running { woken: 0 });
         id
     }
 

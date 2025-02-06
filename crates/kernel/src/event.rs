@@ -62,7 +62,7 @@ pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
 
     if let Some(mut thread) = thread {
         unsafe { thread.save_context(ctx.into()) };
-        unsafe { deschedule_thread(core_sp, thread, DescheduleAction::Yield) };
+        unsafe { deschedule_thread(core_sp, Some(thread), DescheduleAction::Yield) };
     } else {
         ctx
     }

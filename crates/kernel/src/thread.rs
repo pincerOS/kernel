@@ -30,6 +30,7 @@ pub struct UserRegs {
 }
 
 unsafe impl Send for Thread {}
+unsafe impl Sync for Thread {}
 
 impl Thread {
     unsafe fn from_fn<F>(stack: NonNull<[u128]>, func: F) -> Box<Self>
