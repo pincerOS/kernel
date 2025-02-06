@@ -11,13 +11,13 @@
     </p>
 </p>
 <p align="center">
-  <a href="#about-the-project">About The Project</a> •
-  <a href="#features">Features</a> •
-  <a href="#architecture">Architecture</a> •
-  <a href="#installation">Installation</a> •
-  <a href="#development-status">Development Status</a> •
-  <a href="#credits">Credits</a> •
-  <a href="#license">License</a>
+  <a href="#about-the-project-">About The Project</a> •
+  <a href="#features-">Features</a> •
+  <a href="#architecture-">Architecture</a> •
+  <a href="#installation-">Installation</a> •
+  <a href="#development-status-">Development Status</a> •
+  <a href="#credits-">Credits</a> •
+  <a href="#license-">License</a>
 </p>  
 
 <!--
