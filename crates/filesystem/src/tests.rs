@@ -123,6 +123,60 @@ fn read_write_example_1() {
 }
 
 #[test]
+fn append_alot_test() {
+    let mut ext2 =
+        create_ext2_fs("../../test/example_1.dir", 1024, "rw.img", false);
+
+    let verify_requests = vec![
+        VerifyRequest {
+            file_path: b"folder/asdf.txt",
+            data: b"HiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHi",
+            expect_data: Some(b"HiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHiHi"),
+            write_mode: WriteMode::Append,
+            create_dirs_if_nonexistent: false
+        }
+    ];
+
+    write_and_verify_test(&mut ext2, &verify_requests);
+}
+
+#[test]
+fn file_overwrite_test() {
+    let mut ext2 =
+        create_ext2_fs("../../test/example_1.dir", 1024, "rw_file_creation.img", false);
+
+    let verify_requests = vec![
+        VerifyRequest {
+            file_path: b"folder/asdf.txt",
+            data: b"Bye",
+            expect_data: Some(b"Bye"),
+            write_mode: WriteMode::Write,
+            create_dirs_if_nonexistent: false
+        }
+    ];
+
+    write_and_verify_test(&mut ext2, &verify_requests);
+}
+
+#[test]
+fn file_overwrite_moreblocks_test() {
+    let mut ext2 =
+        create_ext2_fs("../../test/example_1.dir", 1024, "rw_file_creation.img", false);
+
+    let verify_requests = vec![
+        VerifyRequest {
+            file_path: b"folder/asdf.txt",
+            data: b"Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_",
+            expect_data: Some(b"Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_Bye_"),
+            write_mode: WriteMode::Write,
+            create_dirs_if_nonexistent: false
+        }
+    ];
+
+    write_and_verify_test(&mut ext2, &verify_requests);
+}
+
+#[test]
 fn file_creation_test() {
     let mut ext2 =
         create_ext2_fs("../../test/example_1.dir", 1024, "rw_file_creation.img", false);
