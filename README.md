@@ -12,7 +12,7 @@
 </p>
 <p align="center">
   <a href="#about-the-project-">About The Project</a> •
-  <a href="#features-">Features</a> •
+  <a href="#targeted-features-">Features</a> •
   <a href="#architecture-">Architecture</a> •
   <a href="#installation-">Installation</a> •
   <a href="#development-status-">Development Status</a> •
@@ -32,13 +32,13 @@
 
 PincerOS is a bare-metal microkernel-based multi-core operating system written from the ground up in Rust targeting the Raspberry Pi 4b. The project aims to be a distributed, scalable, and secure operating system for general-purpose use. We aim to support a wide range of applications such as networked video games, distributed computing, and more.
 
-## Features ✨
+## Targeted Features ✨
 
 - Microkernel Architecture
 - Multi-core Support
 - Memory Management
 - Process Scheduling
-- Ext2 File System with Journaling
+- Custom Ext2-based File System with Journaling
 - Inter-process Communication (IPC)
 - Device Drivers
 - Networking
