@@ -2,7 +2,7 @@
 <br />
 <h1>
 <p align="center">
-  <img src="/img/logo.png" alt="Logo" width="140" height="140">
+  <img src="/img/pinceros.svg" alt="Logo" width="140" height="140">
   <br>PincerOS
 </h1>
   <p align="center">
