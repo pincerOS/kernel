@@ -38,16 +38,9 @@ where
 }
 
 static mut FILE_DATA_BUFFER: [u8; 1 << 16] = [0; 1 << 16];
+static mut FILE_DATA_BUFFER2: [u8; 1 << 16] = [0; 1 << 16];
 
-#[no_mangle]
-pub extern "C" fn main() {
-    let archive = initfs::Archive::load(ELF_FILE).unwrap();
-
-    let mut buf = [0; 0x10000];
-    let (_, file) = archive.find_file(b"example.elf").unwrap();
-    let file = archive.read_file(file, &mut buf).unwrap();
-
-    let elf = elf::Elf::new(file).unwrap();
+fn spawn_elf(elf: elf::Elf<'_>) -> syscall::ChannelDesc {
     let phdrs = elf.program_headers().unwrap();
 
     for phdr in phdrs {
@@ -68,6 +61,26 @@ pub extern "C" fn main() {
     let entry = elf.elf_header().e_entry();
     let new_sp = 0x80_0000;
     unsafe { syscall::spawn(entry as usize, new_sp, remote.0 as usize, 0) };
+
+    local
+}
+
+// static mut ARCHIVE: Option<initfs::Archive> = None;
+
+#[no_mangle]
+pub extern "C" fn main() {
+    let archive = initfs::Archive::load(ELF_FILE).unwrap();
+    let archive2 = initfs::Archive::load(ELF_FILE).unwrap();
+    // let archive = unsafe {
+    //     ARCHIVE = Some(archive);
+    //     ARCHIVE.as_ref().unwrap()
+    // };
+
+    let mut buf = [0; 0x10000];
+    let (_, file) = archive.find_file(b"example.elf").unwrap();
+    let file = archive.read_file(file, &mut buf).unwrap();
+
+    let child = spawn_elf(elf::Elf::new(file).unwrap());
 
     let (filelocal, fileremote) = unsafe { syscall::channel() };
 
@@ -95,7 +108,7 @@ pub extern "C" fn main() {
             println!("@ Running file server");
             // TODO: actually zero BSS?
             let mut data_buf = unsafe { &mut FILE_DATA_BUFFER };
-            
+
             let mut buf = [0; 4096];
             let mut msg = syscall::Message {
                 tag: 0,
@@ -162,6 +175,12 @@ pub extern "C" fn main() {
 
     let (proclocal, procremote) = unsafe { syscall::channel() };
 
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    struct Spawn {
+        file_id: u32,
+    }
+
     let stack = unsafe {
         static mut _THREAD_STACK: [u128; 1024] = [0; 1024];
         #[allow(static_mut_refs)]
@@ -175,11 +194,37 @@ pub extern "C" fn main() {
                 tag: 0,
                 objects: [0; 4],
             };
+            // TODO: actually zero BSS?
+            let data_buf = unsafe { &mut FILE_DATA_BUFFER2 };
+
             loop {
                 let len = unsafe { syscall::recv_block(proclocal, &mut msg, &mut buf) };
                 match &u64::to_be_bytes(msg.tag) {
                     b"SPAWN---" => {
-                        // TODO
+                        // TODO: pass a capability for accessing a file from the fs?
+                        // Or have opening a file create a seekable stream from the fs,
+                        // then send the stream with the spawn message?
+
+                        assert!(size_of::<Spawn>() as isize <= len);
+                        let spawn = unsafe { core::ptr::read_unaligned(&buf as *const _ as *const Spawn) };
+
+                        if let Some(file) = archive2.get_file(spawn.file_id as usize) {
+                            assert!((file.size as usize) < data_buf.len());
+                            let data = archive2.read_file(file, data_buf).unwrap();
+                            let elf = elf::Elf::new(data).unwrap();
+                            let child = spawn_elf(elf);
+                            let msg = syscall::Message {
+                                tag: u64::from_be_bytes(*b"SUCCESS-"),
+                                objects: [child.0, 0, 0, 0],
+                            };
+                            unsafe { syscall::send_block(proclocal, &msg, &[]) };
+                        } else {
+                            let msg = syscall::Message {
+                                tag: u64::from_be_bytes(*b"FAILURE-"),
+                                objects: [0, 0, 0, 0],
+                            };
+                            unsafe { syscall::send_block(proclocal, &msg, &[]) };
+                        }
                     }
                     _ => (),
                 }
@@ -197,7 +242,7 @@ pub extern "C" fn main() {
         objects: [0; 4],
     };
     loop {
-        let len = unsafe { syscall::recv_block(local, &mut msg, &mut buf) };
+        let len = unsafe { syscall::recv_block(child, &mut msg, &mut buf) };
         if msg.tag == u64::from_be_bytes(*b"CONNREQ-") {
             match &buf[..len as usize] {
                 b"FILES---" => {
@@ -205,21 +250,21 @@ pub extern "C" fn main() {
                         tag: u64::from_be_bytes(*b"CONNACPT"),
                         objects: [fileremote.0, 0, 0, 0],
                     };
-                    unsafe { syscall::send_block(local, &msg, &[]) };
+                    unsafe { syscall::send_block(child, &msg, &[]) };
                 }
                 b"PROCS---" => {
                     let msg = syscall::Message {
                         tag: u64::from_be_bytes(*b"CONNACPT"),
                         objects: [procremote.0, 0, 0, 0],
                     };
-                    unsafe { syscall::send_block(local, &msg, &[]) };
+                    unsafe { syscall::send_block(child, &msg, &[]) };
                 }
                 _ => {
                     let msg = syscall::Message {
                         tag: u64::from_be_bytes(*b"CONNDENY"),
                         objects: [0; 4],
                     };
-                    unsafe { syscall::send_block(local, &msg, &[]) };
+                    unsafe { syscall::send_block(child, &msg, &[]) };
                 }
             }
         }

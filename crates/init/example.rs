@@ -8,14 +8,52 @@ mod runtime {
     #[rustfmt::skip]
     static _COMPILE_SCRIPT: () = { r##"
 END_BASH_COMMENT
+
 set -e
 SOURCE=$(realpath "$0")
+NAME=$(basename "$SOURCE" .rs)
 RELATIVE=$(realpath --relative-to=. "$SOURCE")
-rustc --target=aarch64-unknown-none-softfloat \
-    -C opt-level=2 -C panic=abort \
-    -C strip=debuginfo \
+
+MANIFEST=$(
+cat <<END_MANIFEST
+[package]
+name = "$NAME"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "$NAME"
+path = "$SOURCE"
+
+[dependencies]
+
+[profile.standalone]
+inherits = "release"
+opt-level = 2
+panic = "abort"
+strip = "debuginfo"
+
+END_MANIFEST
+)
+
+TEMP_DIR="$(mktemp -d)"
+trap 'rm -rf -- "$TEMP_DIR"' EXIT
+MANIFEST_PATH="$TEMP_DIR/Cargo.toml"
+echo "$MANIFEST" > "$MANIFEST_PATH"
+
+TARGET_DIR=$(cargo metadata --format-version 1 --no-deps | \
+    python3 -c 'print(__import__("json").loads(input())["target_directory"])')
+
+CARGO_TARGET_DIR="$TARGET_DIR" RUSTC_BOOTSTRAP=1 cargo rustc \
+    --manifest-path="$MANIFEST_PATH" \
+    --target=aarch64-unknown-none-softfloat \
+    --profile=standalone \
+    --bin "$NAME" \
+    -- \
     -C link-arg=-T"${SOURCE}" -C link-args='-zmax-page-size=0x1000' \
-    "${SOURCE}" -o "${SOURCE%.rs}.elf"
+
+BIN_PATH="${TARGET_DIR}/aarch64-unknown-none-softfloat/standalone/${NAME}"
+cp "${BIN_PATH}" "${SOURCE%.rs}.elf"
 
 SIZE=$(stat -c %s "${SOURCE%.rs}.elf" | python3 -c \
     "(lambda f:f(f,float(input()),0))\
@@ -222,6 +260,32 @@ struct Open {
     path_len: u32,
 }
 
+fn spawn_child(files: runtime::ChannelDesc, procs: runtime::ChannelDesc, file_path: &str) -> runtime::ChannelDesc {
+    let mut buf = [0; 512];
+    buf[..4].copy_from_slice(&u32::to_le_bytes(file_path.len() as u32));
+    buf[4..][..file_path.len()].copy_from_slice(file_path.as_bytes());
+
+    let status = unsafe { runtime::send_block(files, &runtime::Message {
+        tag: u64::from_be_bytes(*b"OPEN----"),
+        objects: [0; 4],
+    }, &buf[.. 4 + file_path.len()]) };
+
+    let mut file_id = [0u8; 4];
+    let (msg, _) = recv_wrap(files, &mut file_id);
+    assert_eq!(msg.tag, u64::from_be_bytes(*b"OPENSUCC"));
+    let file_id = u32::from_le_bytes(file_id);
+
+    let status = unsafe { runtime::send_block(procs, &runtime::Message {
+        tag: u64::from_be_bytes(*b"SPAWN---"),
+        objects: [0; 4],
+    }, &u32::to_le_bytes(file_id)) };
+
+    let (msg, _) = recv_wrap(procs, &mut []);
+    assert_eq!(msg.tag, u64::from_be_bytes(*b"SUCCESS-"));
+    let child_handle = runtime::ChannelDesc(msg.objects[0]);
+    child_handle
+}
+
 fn main(chan: runtime::ChannelDesc) {
     println!("Starting 🐚");
 
@@ -259,6 +323,22 @@ fn main(chan: runtime::ChannelDesc) {
     let file_content = &data[..len as usize];
 
     println!("File content:\n{}", core::str::from_utf8(file_content).unwrap());
+
+    println!("Attempting to spawn child");
+
+    let status = unsafe { runtime::send_block(chan, &runtime::Message {
+        tag: u64::from_be_bytes(*b"CONNREQ-"),
+        objects: [0; 4],
+    }, b"PROCS---") };
+
+    let (msg, _) = recv_wrap(chan, &mut []);
+    let procs = runtime::ChannelDesc(msg.objects[0]);
+
+    let child_handle = spawn_child(filesystem, procs, "hello.elf");
+
+    let (msg, _) = recv_wrap(child_handle, &mut []);
+    println!("from child: {}", core::str::from_utf8(&msg.tag.to_be_bytes()).unwrap());
+
 
     let mut reader = LineReader {
         buf: [0; 4096],

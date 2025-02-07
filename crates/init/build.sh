@@ -10,6 +10,8 @@ mkdir -p fs
 
 ./example.rs
 cp example.elf fs/
+./hello.rs
+cp hello.elf fs/
 
 cargo run -q -p initfs --bin util \
     -- c -r fs -o fs.arc fs
