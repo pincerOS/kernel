@@ -98,17 +98,17 @@ We also provide scripts for debugging and running with ui:
 # Credits 🎓
 This project is a collaboration between students at the University of Texas at Austin. 🤘
 
-- Aaron Lo
-- Alex Meyer
-- Anthony Wang
-- Bobby Youstra
-- Caleb Eden
-- Elie Soloveichik
-- Hunter Ross
-- Joyce Lai
-- Neil Allavarpu
-- Sasha Huang
-- Slava Andrianov
+- Aaron Lo (@22aronl)
+- Alex Meyer (@ameyer1024)
+- Anthony Wang (@honyant)
+- Caleb Eden (@calebeden)
+- Hunter Ross (@hunteross)
+- @InsightGit
+- Joyce Lai (@hexatedjuice)
+- Neil Allavarpu (@NeilAllavarpu)
+- @Razboy20
+- Sasha Huang (@umbresp)
+- Slava Andrianov (@Slava-A1)
 
 # License 📝
 
