@@ -2,7 +2,7 @@
 
 set -ex
 
-BIN="init"
+BIN="user"
 TARGET=aarch64-unknown-none-softfloat
 PROFILE=${PROFILE-"release"}
 

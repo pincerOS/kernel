@@ -11,6 +11,8 @@ use core::mem::MaybeUninit;
 use core::num::NonZeroU32;
 use core::ptr::copy_nonoverlapping;
 
+use crate::object::{Message, Channel, ObjectDescriptor, Object};
+
 use kernel::*;
 
 use context::{deschedule_thread, Context, DescheduleAction, CORES};
@@ -81,48 +83,26 @@ unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
     ctx
 }
 
-// TODO: tracking ownership of objects
-struct ObjectDescriptor(core::num::NonZeroU32);
-
-struct Message {
-    tag: u64,
-    objects: [Option<ObjectDescriptor>; 4],
-    data: Option<Box<[u8]>>,
-}
-
-enum Object {
-    Channel {
-        send: ringbuffer::Sender<16, Message>,
-        recv: ringbuffer::Receiver<16, Message>,
-    },
-}
-
-// TODO: this is a hack, move it to a per-task list & remap in messages
-static OBJECTS: SpinLock<Vec<Option<Object>>> = SpinLock::new(Vec::new());
-
 fn alloc_obj(obj: Object) -> ObjectDescriptor {
-    let mut list = OBJECTS.lock();
+    let (_, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
+
+    let mut list = thread.unwrap().channel_descriptors;
+
     let idx = list.len();
     list.push(Some(obj));
-    ObjectDescriptor(core::num::NonZeroU32::new(idx as u32).unwrap())
+    return ObjectDescriptor::new(core::num::NonZeroU32::new(idx as u32).unwrap());
 }
 
 unsafe fn sys_channel(ctx: &mut Context) -> *mut Context {
     let (a_tx, b_rx) = ringbuffer::channel();
     let (b_tx, a_rx) = ringbuffer::channel();
-    let a_chan = alloc_obj(Object::Channel {
-        send: a_tx,
-        recv: a_rx,
-    });
-    let b_chan = alloc_obj(Object::Channel {
-        send: b_tx,
-        recv: b_rx,
-    });
+    let a_chan = alloc_obj(Object::Channel(Channel::new(a_tx, a_rx)));
+    let b_chan = alloc_obj(Object::Channel(Channel::new(b_tx, b_rx)));
 
-    ctx.regs[0] = a_chan.0.get() as usize;
-    ctx.regs[1] = b_chan.0.get() as usize;
+    ctx.regs[0] = a_chan.value.get() as usize;
+    ctx.regs[1] = b_chan.value.get() as usize;
 
-    ctx
+    return ctx;
 }
 
 #[repr(C)]
@@ -141,16 +121,13 @@ unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
         ctx.regs[0] = (-1isize) as usize;
         return ctx;
     };
-    let sender = OBJECTS
-        .lock()
-        .get_mut(desc.get() as usize)
-        .and_then(|d| match d.take() {
-            Some(Object::Channel { send, recv }) => Some((send, recv)),
-            obj => {
-                *d = obj;
-                None
-            }
-        });
+
+    let (_, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
+
+    let list = thread.unwrap().channel_descriptors;
+
+    let sender = list.get_mut(desc.get() as usize);
+
     let Some((mut send, recv)) = sender else {
         ctx.regs[0] = (-1isize) as usize;
         return ctx;
@@ -164,7 +141,7 @@ unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
     let objects = user_message
         .objects
         .map(NonZeroU32::new)
-        .map(|d| d.map(ObjectDescriptor));
+        .map(|d| d.map(ObjectDescriptor::new));
 
     let data;
     if buf_ptr == 0 {
@@ -192,9 +169,9 @@ unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
         ctx.regs[0] = (-1isize) as usize;
     }
 
-    OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
+    list[desc.get() as usize] = Some(Object::Channel(Channel::new(send, recv)));
 
-    ctx
+    return ctx;
 }
 
 unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
@@ -207,11 +184,20 @@ unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
         ctx.regs[0] = (-1isize) as usize;
         return ctx;
     };
-    let receiver = OBJECTS
-        .lock()
-        .get_mut(desc.get() as usize)
+
+    let (_, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
+
+    let list = match thread {
+        Some(t) => t.channel_descriptors,
+        None => {
+            ctx.regs[0] = (-1isize) as usize;
+            return ctx;
+        }
+    };
+
+    let receiver = list.get_mut(desc.get() as usize)
         .and_then(|d| match d.take() {
-            Some(Object::Channel { send, recv }) => Some((send, recv)),
+            Some(Object::Channel(Channel::new(send, recv))) => Some((send, recv)),
             obj => {
                 *d = obj;
                 None
@@ -225,7 +211,7 @@ unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
 
     let message = recv.try_recv();
 
-    OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
+    list[desc.get() as usize] = Some(Object::Channel { send, recv });
 
     let message = match message {
         Some(m) => m,
@@ -263,224 +249,11 @@ unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
     ctx
 }
 
-fn run_async_handler<const N: usize, F>(ctx: &mut Context, future: F) -> *mut Context
-where
-    F: core::future::Future<Output = [usize; N]> + Send + Sync + 'static,
-{
-    struct WrapperData<const N: usize> {
-        arr: Option<[usize; N]>,
-        should_schedule: Option<Box<thread::Thread>>,
-    }
-    struct FutureWrapper<const N: usize, F> {
-        inner: F,
-        data: WrapperData<N>,
-    }
-    impl<const N: usize, F> FutureWrapper<N, F> {
-        fn get_data(self: core::pin::Pin<&mut Self>) -> &mut WrapperData<N> {
-            unsafe { &mut self.get_unchecked_mut().data }
-        }
-    }
-    impl<const N: usize, F> core::future::Future for FutureWrapper<N, F>
-    where
-        F: core::future::Future<Output = [usize; N]>,
-    {
-        type Output = ();
-        fn poll(
-            self: core::pin::Pin<&mut Self>,
-            ctx: &mut core::task::Context<'_>,
-        ) -> core::task::Poll<Self::Output> {
-            let this = unsafe { core::pin::Pin::into_inner_unchecked(self) };
-            let inner = unsafe { core::pin::Pin::new_unchecked(&mut this.inner) };
-            let arr = core::task::ready!(inner.poll(ctx));
-            if let Some(mut thread) = this.data.should_schedule.take() {
-                let ctx = thread.context.as_mut().unwrap();
-                ctx.regs[..N].copy_from_slice(&arr);
-                event::SCHEDULER.add_task(event::Event::ScheduleThread(thread));
-            } else {
-                this.data.arr = Some(arr);
-            }
-            ().into()
-        }
-    }
-
-    let mut future = Box::pin(FutureWrapper {
-        inner: future,
-        data: WrapperData {
-            arr: None,
-            should_schedule: None,
-        },
-    });
-    let task_id = task::TASKS.alloc_task_slot();
-
-    let waker = task::create_waker(task_id);
-    let mut context = core::task::Context::from_waker(&waker);
-
-    match core::future::Future::poll(future.as_mut(), &mut context) {
-        core::task::Poll::Ready(()) => {
-            task::TASKS.remove_task(task_id);
-            let arr = future.as_mut().get_data().arr.take().unwrap();
-
-            ctx.regs[..N].copy_from_slice(&arr);
-            return ctx;
-        }
-        core::task::Poll::Pending => {
-            let (core_sp, thread) =
-                CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
-            let mut thread = thread.expect("usermode syscall without active thread");
-            unsafe { thread.save_context(ctx.into()) };
-
-            let data = future.as_mut().get_data();
-            data.should_schedule = Some(thread);
-
-            let woken = task::TASKS.return_task(task_id, task::Task::new(future));
-            if woken {
-                event::SCHEDULER.add_task(event::Event::AsyncTask(task_id));
-            }
-
-            unsafe { deschedule_thread(core_sp, None, DescheduleAction::FreeThread) };
-        }
-    }
-}
-
-unsafe fn sys_send_block(ctx: &mut Context) -> *mut Context {
-    let desc = ctx.regs[0];
-    let msg_ptr = ctx.regs[1];
-    let buf_ptr = ctx.regs[2];
-    let buf_len = ctx.regs[3];
-
-    run_async_handler(ctx, async move {
-        let Some(desc) = NonZeroU32::new(desc as u32) else {
-            return [(-1isize) as usize];
-        };
-        let sender = OBJECTS
-            .lock()
-            .get_mut(desc.get() as usize)
-            .and_then(|d| match d.take() {
-                Some(Object::Channel { send, recv }) => Some((send, recv)),
-                obj => {
-                    *d = obj;
-                    None
-                }
-            });
-        let Some((mut send, recv)) = sender else {
-            return [(-1isize) as usize];
-        };
-
-        // user virtual memory is still enabled, haven't yielded yet
-
-        let msg_ptr = msg_ptr as *const UserMessage;
-        assert!(msg_ptr.is_aligned()); // TODO: check user access validity
-        let user_message = unsafe { core::ptr::read(msg_ptr) };
-
-        // TODO: validate ownership of objects
-        let objects = user_message
-            .objects
-            .map(NonZeroU32::new)
-            .map(|d| d.map(ObjectDescriptor));
-
-        let data;
-        if buf_ptr == 0 {
-            data = None;
-        } else {
-            // TODO: validate memory region
-            let buf_ptr = buf_ptr as *const u8;
-            let mut kbuf = Box::new_uninit_slice(buf_len);
-            let kbuf_ptr = kbuf.as_mut_ptr() as *mut u8;
-            unsafe {
-                core::ptr::copy_nonoverlapping(buf_ptr, kbuf_ptr, buf_len);
-            }
-            data = Some(kbuf.assume_init());
-        }
-
-        send.send_async(Message {
-            tag: user_message.tag,
-            objects,
-            data,
-        })
-        .await;
-
-        OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
-
-        [0 as usize]
-    })
-}
-
-unsafe fn sys_recv_block(ctx: &mut Context) -> *mut Context {
-    let desc = ctx.regs[0];
-    let msg_ptr = ctx.regs[1];
-    let buf_ptr = ctx.regs[2];
-    let buf_cap = ctx.regs[3];
-
-    let user_ttbr0: usize;
-    unsafe { asm!("mrs {0}, TTBR0_EL1", out(reg) user_ttbr0) };
-
-    run_async_handler(ctx, async move {
-        let Some(desc) = NonZeroU32::new(desc as u32) else {
-            return [(-1isize) as usize];
-        };
-        let receiver = OBJECTS
-            .lock()
-            .get_mut(desc.get() as usize)
-            .and_then(|d| match d.take() {
-                Some(Object::Channel { send, recv }) => Some((send, recv)),
-                obj => {
-                    *d = obj;
-                    None
-                }
-            });
-
-        let Some((send, mut recv)) = receiver else {
-            return [(-1isize) as usize];
-        };
-
-        let message = recv.recv_async().await;
-
-        OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
-
-        let user_message = UserMessage {
-            tag: message.tag,
-            objects: message.objects.map(|s| s.map(|o| o.0.get()).unwrap_or(0)),
-        };
-
-        // TODO: track ownership of objects
-
-        // Re-enable user virtual memory; it could have been
-        // disabled / switched, if recv yielded and ran a different
-        // user thread.
-        let cur_ttbr0: usize;
-        unsafe { asm!("mrs {0}, TTBR0_EL1", out(reg) cur_ttbr0) };
-        if cur_ttbr0 != user_ttbr0 {
-            // Enable the user-mode address space in this thread
-            unsafe { asm!("msr TTBR0_EL1, {0}", "isb", in(reg) user_ttbr0) };
-        }
-
-        let mut data_len = 0;
-        if let Some(data) = message.data {
-            // TODO: validate memory region
-            let buf_ptr = buf_ptr as *mut u8;
-            let kbuf_ptr = data.as_ptr();
-            let actual_len = data.len().min(buf_cap); // TODO: ??? truncate ???
-            unsafe {
-                core::ptr::copy_nonoverlapping(kbuf_ptr, buf_ptr, actual_len);
-            }
-            data_len = data.len();
-        }
-
-        let msg_ptr = msg_ptr as *mut UserMessage;
-        assert!(msg_ptr.is_aligned()); // TODO: check user access validity
-        unsafe { core::ptr::write(msg_ptr, user_message) };
-
-        [data_len]
-    })
-}
-
 static INIT_CODE: &[u8] = kernel::util::include_bytes_align!(u32, "../../init/init.bin");
 
 #[no_mangle]
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
-
-    OBJECTS.lock().push(None);
 
     let (_stdio, mut stdin_tx, mut stdout_rx) = {
         let (stdin_tx, stdin_rx) = ringbuffer::channel();
@@ -540,8 +313,8 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         exceptions::register_syscall_handler(7, sys_channel);
         exceptions::register_syscall_handler(8, sys_send);
         exceptions::register_syscall_handler(9, sys_recv);
-        exceptions::register_syscall_handler(10, sys_send_block);
-        exceptions::register_syscall_handler(11, sys_recv_block);
+        // exceptions::register_syscall_handler(10, sys_send_block);
+        // exceptions::register_syscall_handler(11, sys_recv_block);
     }
 
     unsafe { crate::arch::memory::init_physical_alloc() };

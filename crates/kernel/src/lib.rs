@@ -19,6 +19,7 @@ pub mod scheduler;
 pub mod sync;
 pub mod task;
 pub mod thread;
+pub mod object;
 pub mod util;
 
 use device::uart;
