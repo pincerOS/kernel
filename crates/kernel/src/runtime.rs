@@ -4,6 +4,7 @@ use core::sync::atomic;
 use crate::arch::halt;
 use crate::uart;
 
+#[cfg(not(test))]
 #[panic_handler]
 fn panic_handler(info: &PanicInfo) -> ! {
     static PANICKING: atomic::AtomicBool = atomic::AtomicBool::new(false);
