@@ -1,11 +1,10 @@
-use core::panic::PanicInfo;
-use core::sync::atomic;
-
-use crate::arch::halt;
-use crate::uart;
-
+#[cfg(not(test))]
 #[panic_handler]
-fn panic_handler(info: &PanicInfo) -> ! {
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+    use crate::arch::halt;
+    use crate::uart;
+    use core::sync::atomic;
+
     static PANICKING: atomic::AtomicBool = atomic::AtomicBool::new(false);
 
     if PANICKING.swap(true, atomic::Ordering::Relaxed) {

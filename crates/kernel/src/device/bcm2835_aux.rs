@@ -45,6 +45,7 @@ impl MiniUart {
             // Clear bit 7, DLAB (baudrate register access instead of data)
             // Clear bit 6, break
             // Set bit 0, 8-bit mode
+            #[allow(clippy::eq_op)]
             this.reg(Self::AUX_MU_LCR_REG)
                 .write((0 << 7) | (0 << 6) | (1 << 0));
 

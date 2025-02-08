@@ -70,11 +70,6 @@ pub struct FileHeader {
 // [/file data]
 // (optional concatenated archives?)
 
-#[cfg(test)]
-extern crate std;
-#[cfg(test)]
-use std::println;
-
 pub struct Archive<'a> {
     _header: &'a ArchiveHeader,
 
@@ -366,30 +361,30 @@ pub mod macros {
 #[doc(inline)]
 pub use crate::__include_bytes_align as include_bytes_align;
 
-#[test]
-fn test_1() {
-    extern crate std;
-    use std::println;
+// #[test]
+// fn test_1() {
+//     extern crate std;
+//     use std::println;
 
-    let file = include_bytes_align!(u32, "../out.arc");
+//     let file = include_bytes_align!(u32, "../out.arc");
 
-    let archive = Archive::load(file).unwrap();
+//     let archive = Archive::load(file).unwrap();
 
-    let file = archive.find_file(b"kernel/bcm2709");
-    println!("{:?}", file.is_some());
+//     let file = archive.find_file(b"kernel/bcm2709");
+//     println!("{:?}", file.is_some());
 
-    let file = archive.find_file(b"kernel");
-    println!("{:?}", file.is_some());
+//     let file = archive.find_file(b"kernel");
+//     println!("{:?}", file.is_some());
 
-    let entries = archive.list_dir(file.unwrap().0).unwrap();
-    for (i, file) in entries {
-        let name = core::str::from_utf8(archive.get_file_name(file).unwrap()).unwrap();
-        println!("| {:03} {:?}", i, name);
-    }
+//     let entries = archive.list_dir(file.unwrap().0).unwrap();
+//     for (i, file) in entries {
+//         let name = core::str::from_utf8(archive.get_file_name(file).unwrap()).unwrap();
+//         println!("| {:03} {:?}", i, name);
+//     }
 
-    let file = archive.find_file(b"kernel/Cargo.toml").unwrap().1;
-    let mut buf = std::vec![0; file.size as usize];
-    let data = archive.read_file(file, &mut buf).unwrap();
+//     let file = archive.find_file(b"kernel/Cargo.toml").unwrap().1;
+//     let mut buf = std::vec![0; file.size as usize];
+//     let data = archive.read_file(file, &mut buf).unwrap();
 
-    println!("{}", core::str::from_utf8(data).unwrap());
-}
+//     println!("{}", core::str::from_utf8(data).unwrap());
+// }

@@ -51,7 +51,15 @@ pub fn send_block(desc: ChannelDesc, msg: &Message, buf: &[u8]) -> isize {
 }
 pub fn recv(desc: ChannelDesc, buf: &mut [u8]) -> Result<(isize, Message), isize> {
     let mut msg = MaybeUninit::uninit();
-    let res = unsafe { _recv(desc, msg.as_mut_ptr(), buf.as_mut_ptr(), buf.len(), FLAG_NO_BLOCK) };
+    let res = unsafe {
+        _recv(
+            desc,
+            msg.as_mut_ptr(),
+            buf.as_mut_ptr(),
+            buf.len(),
+            FLAG_NO_BLOCK,
+        )
+    };
     if res >= 0 {
         Ok((res, unsafe { msg.assume_init() }))
     } else {

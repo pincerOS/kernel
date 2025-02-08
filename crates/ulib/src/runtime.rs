@@ -10,6 +10,7 @@ extern "C" fn _start(x0: usize) -> ! {
 }
 
 #[cfg(not(test))]
+#[cfg(not(feature = "test"))]
 #[panic_handler]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     if let Some(loc) = info.location() {

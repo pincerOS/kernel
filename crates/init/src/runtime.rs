@@ -22,7 +22,13 @@ halt:
 #[panic_handler]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     if let Some(loc) = info.location() {
-        println!("Panic at {}:{}:{}; {}", loc.file(), loc.line(), loc.column(), info.message());
+        println!(
+            "Panic at {}:{}:{}; {}",
+            loc.file(),
+            loc.line(),
+            loc.column(),
+            info.message()
+        );
     } else {
         println!("Panic; {}", info.message());
     }

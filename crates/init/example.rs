@@ -126,7 +126,7 @@ fn main(chan: ChannelDesc) {
         };
         send_block(chan, &msg, line.as_bytes());
 
-        for i in 0..100 {
+        for _ in 0..100 {
             // TODO: this is a hack to prevent concurrent access to stdout...
             unsafe { ulib::sys::yield_() }
         }
