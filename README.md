@@ -38,7 +38,7 @@ PincerOS is a bare-metal microkernel-based multi-core operating system written f
 - Multi-core Support
 - Memory Management
 - Process Scheduling
-- Custom Ext2-based File System with Journaling
+- File System with Journaling Support
 - Inter-process Communication (IPC)
 - Device Drivers
 - Networking
