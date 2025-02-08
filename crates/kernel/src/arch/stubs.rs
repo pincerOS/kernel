@@ -34,7 +34,7 @@ pub mod boot {
 
     #[no_mangle]
     #[link_section = ".bss"]
-    pub static STACKS: [[u128; STACK_SIZE / 16]; 4] = [[0u128; STACK_SIZE / 16]; 4];
+    pub static mut STACKS: [[u128; STACK_SIZE / 16]; 4] = [[0u128; STACK_SIZE / 16]; 4];
 }
 
 pub mod interrupts {

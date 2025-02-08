@@ -31,7 +31,7 @@ static START_BARRIER: AtomicUsize = AtomicUsize::new(0);
 static START_WAIT: AtomicBool = AtomicBool::new(false);
 
 const FLAG_MULTICORE: bool = true;
-const FLAG_PREEMPTION: bool = true;
+const FLAG_PREEMPTION: bool = false;
 
 extern "Rust" {
     fn kernel_main(device_tree: device_tree::DeviceTree);

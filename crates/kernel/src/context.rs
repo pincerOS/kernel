@@ -31,7 +31,8 @@ impl AllCores {
     /// Safety: Must only be called once, before any other accesses.
     pub unsafe fn init(&self) {
         for i in 0..4 {
-            let stack = &crate::arch::boot::STACKS[i];
+            // TODO: UB
+            let stack = unsafe { &crate::arch::boot::STACKS[i] };
             self.0[i].core_sp.set(stack.as_ptr_range().end as usize);
         }
     }

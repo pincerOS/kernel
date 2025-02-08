@@ -61,6 +61,11 @@ pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
     let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
 
     if let Some(mut thread) = thread {
+        let stacks = &raw const crate::arch::boot::STACKS;
+        let start = stacks as usize;
+        let end = stacks.wrapping_add(1) as usize;
+        assert!(!(ctx.sp >= start && ctx.sp <= end)); // TODO
+
         unsafe { thread.save_context(ctx.into()) };
         unsafe { deschedule_thread(core_sp, Some(thread), DescheduleAction::Yield) };
     } else {

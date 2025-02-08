@@ -50,30 +50,92 @@ unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
 
     let page_dir;
     if flags == 1 {
+        println!("Creating cloned process (shared mem)");
         // shared mem
         page_dir = cur_page_dir;
     } else {
-        // fork-style
-        let (dst_data, new_page_dir) = crate::arch::memory::create_user_region();
-        let dst_data = dst_data as *mut u8;
+        println!("Creating forked process (no shared mem)");
+
+
+        {
+            let addr = 0x3006ec;
+            let val1;
+            // let val2;
+            {
+                // asm!("msr TTBR0_EL1, {0}", "isb", in(reg) new_page_dir);
+                // val1 = unsafe { core::ptr::read_volatile(addr as *const u32) };
+                asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) cur_page_dir);
+                val1 = unsafe { core::ptr::read_volatile(addr as *const u32) };
+            }
+            println!("addr? {addr:#010x}, val1: {val1:#010x}");
+        }
+
         // This is a massive hack
         let buf_size = 1 << 16;
         let mut buffer: Box<[MaybeUninit<u8>]> = Box::new_uninit_slice(buf_size);
+        let buf_ptr: *mut u8 = buffer.as_mut_ptr().cast();
 
-        let buf_ptr = buffer.as_mut_ptr().cast();
+        // fork-style
+        let (dst_data, new_page_dir) = crate::arch::memory::create_user_region();
+        let dst_data = dst_data as *mut u8;
         let src_data = 0x20_0000 as *const u8;
-        let src_size = 0x20_0000 * 15;
+        let src_size = 0x20_0000 * 7;
+
+        {
+            let addr = 0x3006ec;
+            let val1;
+            {
+                asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) new_page_dir);
+                val1 = unsafe { core::ptr::read_volatile(addr as *const u32) };
+            }
+            println!("addr! {addr:#010x}, val1: {val1:#010x}");
+        }
+
+        asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) cur_page_dir);
+
+        assert_eq!(src_data, dst_data);
+        assert_ne!(cur_page_dir, new_page_dir);
+
+        let addr = 0x3006ec;
         for i in 0..(src_size / buf_size) {
+            {
+                // let val1 = unsafe { core::ptr::read_volatile(addr as *const u32) };
+                // println!("addr? ({i}) {addr:#010x}, val1: {val1:#010x}");
+            }
+
+            // // This causes an ICE?
+            // core::ptr::write_volatile(buf_ptr.cast::<[u8; 1 << 16]>(), core::ptr::read_volatile(src_data.byte_add(i * buf_size).cast::<[u8; 1 << 16]>()));
+            // asm!("msr TTBR0_EL1, {0}", "isb", in(reg) new_page_dir);
+            // core::ptr::write_volatile(dst_data.byte_add(i * buf_size).cast::<[u8; 1 << 16]>(), core::ptr::read_volatile(buf_ptr.cast::<[u8; 1 << 16]>()));
+            // asm!("msr TTBR0_EL1, {0}", "isb", in(reg) cur_page_dir);
+
             unsafe {
                 copy_nonoverlapping(src_data.byte_add(i * buf_size), buf_ptr, buf_size);
-                asm!("msr TTBR0_EL1, {0}", "isb", in(reg) new_page_dir);
+                asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) new_page_dir);
                 copy_nonoverlapping(buf_ptr, dst_data.byte_add(i * buf_size), buf_size);
-                asm!("msr TTBR0_EL1, {0}", "isb", in(reg) cur_page_dir);
+                asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) cur_page_dir);
             }
         }
-        page_dir = cur_page_dir;
+
+        #[inline(never)]
+        fn check_user_addr(addr: usize, cur_page_dir: usize, new_page_dir: usize) {
+            let val1;
+            let val2;
+            unsafe {
+                asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) new_page_dir);
+                val1 = unsafe { core::ptr::read_volatile(addr as *mut u32) };
+                asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) cur_page_dir);
+                val2 = unsafe { core::ptr::read_volatile(addr as *mut u32) };
+            }
+            println!("addr...: {addr:#010x}, val1: {val1:#010x}, val2: {val2:#010x}");
+        }
+
+        check_user_addr(0x3006ec, cur_page_dir, new_page_dir);
+
+        page_dir = new_page_dir;
     }
 
+    println!("Creating new process with page dir {:#010}", page_dir);
     let mut user_thread = unsafe { thread::Thread::new_user(user_sp, user_entry, page_dir) };
     user_thread.context.as_mut().unwrap().regs[0] = user_x0;
     event::SCHEDULER.add_task(event::Event::ScheduleThread(user_thread));
@@ -355,7 +417,7 @@ unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
         unsafe { asm!("mrs {0}, TTBR0_EL1", out(reg) cur_ttbr0) };
         if cur_ttbr0 != user_ttbr0 {
             // Enable the user-mode address space in this thread
-            unsafe { asm!("msr TTBR0_EL1, {0}", "isb", in(reg) user_ttbr0) };
+            unsafe { asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) user_ttbr0) };
         }
 
         let mut data_len = 0;
@@ -463,7 +525,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         core.thread.set(Some(thread));
     });
     // Enable the user-mode address space in this thread
-    unsafe { asm!("msr TTBR0_EL1, {0}", "isb", in(reg) ttbr0) };
+    unsafe { asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) ttbr0) };
 
     println!("User ptr: {:p}", user_region);
     // TODO: sometimes get an insn abort here? (leads to UART deadlock)

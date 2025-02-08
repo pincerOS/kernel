@@ -52,13 +52,15 @@ fn create_user_table(phys_base: usize) -> alloc::boxed::Box<UserTranslationTable
         }; 16],
     ));
     let root_region_size = 0x20_0000; // 2 MiB
-    for (i, desc) in table.0.iter_mut().enumerate() {
-        let leaf = LeafDescriptor::new(phys_base + root_region_size * i)
+    for (i, desc) in table.0[1..8].iter_mut().enumerate() {
+        let phys_frame = phys_base + root_region_size * i;
+        let leaf = LeafDescriptor::new(phys_frame)
             // .clear_pxn()
             .union(LeafDescriptor::UNPRIVILEGED_ACCESS)
             .difference(LeafDescriptor::UXN)
             .set_global()
             .difference(LeafDescriptor::IS_PAGE_DESCRIPTOR);
+        println!("map phys {:#010x} to virt {:#010x} for user ({i})", phys_frame, root_region_size * (i + 1));
         desc.leaf = leaf;
     }
     table
@@ -66,13 +68,14 @@ fn create_user_table(phys_base: usize) -> alloc::boxed::Box<UserTranslationTable
 
 pub unsafe fn create_user_region() -> (*mut [u8], usize) {
     let virt_region_base = 0x20_0000;
-    let region_size = 0x20_0000 * 15;
+    let region_size = 0x20_0000 * 7;
 
     let phys_base = PHYSICAL_ALLOC_BASE.fetch_add(region_size, Ordering::Relaxed);
 
     let user_table = create_user_table(phys_base);
     let user_table_ptr = alloc::boxed::Box::into_raw(user_table);
     let user_table_phys = physical_addr(user_table_ptr.addr()).unwrap();
+    println!("creating user table, {:#010x}", user_table_phys);
 
     let ptr = core::ptr::with_exposed_provenance_mut::<u8>(virt_region_base);
     let slice = core::ptr::slice_from_raw_parts_mut(ptr, region_size);

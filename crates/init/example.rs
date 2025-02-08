@@ -16,9 +16,10 @@ ulib = { path = "$DIR/../ulib" }
 
 [profile.standalone]
 inherits = "release"
-opt-level = 2
+opt-level = 0
 panic = "abort"
-strip = "debuginfo"
+debug = 1
+# strip = "debuginfo"
 
 END_MANIFEST
 exit # -->"##]
@@ -72,7 +73,8 @@ fn readline(reader: &mut LineReader) -> Result<&[u8], isize> {
             }
         }
 
-        match try_read_stdin(&mut reader.buf[reader.cursor..]) {
+        let read = try_read_stdin(&mut reader.buf[reader.cursor..]);
+        match read {
             -2 => continue,
             err @ (..=-1) => return Err(err),
             read @ 0.. => reader.cursor += read as usize,
@@ -197,11 +199,11 @@ fn main(chan: ChannelDesc) {
 
     let child_handle = spawn_child(filesystem, procs, "hello.elf");
 
-    let (_, msg) = recv_block(child_handle, &mut []).unwrap();
-    println!(
-        "from child: {}",
-        core::str::from_utf8(&msg.tag.to_be_bytes()).unwrap()
-    );
+    // let (_, msg) = recv_block(child_handle, &mut []).unwrap();
+    // println!(
+    //     "from child: {}",
+    //     core::str::from_utf8(&msg.tag.to_be_bytes()).unwrap()
+    // );
 
     let mut reader = LineReader {
         buf: [0; 4096],

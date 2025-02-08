@@ -140,7 +140,9 @@ impl Thread {
         if let Some(user) = &self.user_regs {
             let ctx = unsafe { &mut *next_ctx };
 
-            unsafe { core::arch::asm!("msr TTBR0_EL1, {}", in(reg) user.ttbr0_el1) };
+            // unsafe { core::arch::asm!("msr TTBR0_EL1, {}", in(reg) user.ttbr0_el1) };
+            // TODO: proper tlb flush stuff
+            unsafe { core::arch::asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) user.ttbr0_el1) };
 
             // TODO: assert that we aren't running on SP_EL0 already...
             // (kernel threads should probably run in EL1/SP_EL0 mode)
