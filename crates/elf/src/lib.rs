@@ -40,7 +40,7 @@ pub mod types {
 #[derive(Debug)]
 pub struct Elf<'a> {
     file_data: &'a [u8],
-    elf_header: elf_header::ElfHeader<'a>,
+    elf_header: elf_header::ElfHeader,
 }
 
 #[derive(Debug)]
@@ -111,6 +111,10 @@ impl<'a> Elf<'a> {
 
     pub fn identity(&self) -> identity::ElfIdentity {
         self.elf_header.e_ident()
+    }
+
+    pub fn identity_bytes(&self) -> &'a [u8; identity::EI_NIDENT] {
+        self.file_data.first_chunk().unwrap()
     }
 
     pub fn section_headers(

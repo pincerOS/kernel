@@ -25,6 +25,7 @@ pub struct ProgramHeader {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct Elf32Phdr {
     p_type: Elf32Word,
     p_offset: Elf32Off,
@@ -37,6 +38,7 @@ struct Elf32Phdr {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct Elf64Phdr {
     p_type: Elf64Word,
     p_flags: Elf64Word,
@@ -47,6 +49,12 @@ struct Elf64Phdr {
     p_memsz: Elf64Xword,
     p_align: Elf64Xword,
 }
+
+unsafe impl bytemuck::Zeroable for Elf32Phdr {}
+unsafe impl bytemuck::AnyBitPattern for Elf32Phdr {}
+
+unsafe impl bytemuck::Zeroable for Elf64Phdr {}
+unsafe impl bytemuck::AnyBitPattern for Elf64Phdr {}
 
 #[derive(Debug, Copy, Clone)]
 pub enum GnuType {
@@ -285,11 +293,10 @@ impl<'a> ProgramHeader {
         offset: usize,
         machine: elf_header::Machine,
     ) -> Result<Self, ProgramHeaderError> {
-        if file_data.len() < offset + size_of::<Elf32Phdr>() {
-            return Err(ProgramHeaderError::InvalidLength);
-        }
-        let data = &file_data[offset..offset + size_of::<Elf32Phdr>()];
-        let header: &Elf32Phdr = unsafe { &*(data.as_ptr() as *const Elf32Phdr) };
+        let data = file_data
+            .get(offset..offset + size_of::<Elf32Phdr>())
+            .ok_or(ProgramHeaderError::InvalidLength)?;
+        let header: Elf32Phdr = bytemuck::pod_read_unaligned(data);
 
         let p_type = match header.p_type {
             0 => Type::Null,
@@ -330,11 +337,10 @@ impl<'a> ProgramHeader {
         offset: usize,
         machine: elf_header::Machine,
     ) -> Result<Self, ProgramHeaderError> {
-        if file_data.len() < offset + size_of::<Elf64Phdr>() {
-            return Err(ProgramHeaderError::InvalidLength);
-        }
-        let data = &file_data[offset..offset + size_of::<Elf64Phdr>()];
-        let header: &Elf64Phdr = unsafe { &*(data.as_ptr() as *const Elf64Phdr) };
+        let data = file_data
+            .get(offset..offset + size_of::<Elf64Phdr>())
+            .ok_or(ProgramHeaderError::InvalidLength)?;
+        let header: Elf64Phdr = bytemuck::pod_read_unaligned(data);
 
         let p_type = match header.p_type {
             0 => Type::Null,

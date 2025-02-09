@@ -38,6 +38,7 @@ pub struct SectionHeader<'a> {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct Elf32Shdr {
     sh_name: Elf32Word,
     sh_type: Elf32Word,
@@ -52,6 +53,7 @@ struct Elf32Shdr {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct Elf64Shdr {
     sh_name: Elf64Word,
     sh_type: Elf64Word,
@@ -64,6 +66,12 @@ struct Elf64Shdr {
     sh_addralign: Elf64Xword,
     sh_entsize: Elf64Xword,
 }
+
+unsafe impl bytemuck::Zeroable for Elf32Shdr {}
+unsafe impl bytemuck::AnyBitPattern for Elf32Shdr {}
+
+unsafe impl bytemuck::Zeroable for Elf64Shdr {}
+unsafe impl bytemuck::AnyBitPattern for Elf64Shdr {}
 
 #[derive(Debug, Copy, Clone)]
 pub enum Type {
@@ -398,11 +406,11 @@ impl<'a> SectionHeader<'a> {
     }
 
     fn new_shdr32(elf: &'a Elf<'a>, offset: usize) -> Result<Self, SectionHeaderError> {
-        if elf.file_data.len() < offset + size_of::<Elf32Shdr>() {
-            return Err(SectionHeaderError::InvalidLength);
-        }
-        let data = &elf.file_data[offset..offset + size_of::<Elf32Shdr>()];
-        let header: &Elf32Shdr = unsafe { &*(data.as_ptr() as *const Elf32Shdr) };
+        let bytes = &elf
+            .file_data
+            .get(offset..offset + size_of::<Elf32Shdr>())
+            .ok_or(SectionHeaderError::InvalidLength)?;
+        let header: Elf32Shdr = bytemuck::pod_read_unaligned(bytes);
 
         let sh_name = header.sh_name;
         let sh_type = match header.sh_type {
@@ -457,11 +465,11 @@ impl<'a> SectionHeader<'a> {
         })
     }
     fn new_shdr64(elf: &'a Elf<'a>, offset: usize) -> Result<Self, SectionHeaderError> {
-        if elf.file_data.len() < offset + size_of::<Elf64Shdr>() {
-            return Err(SectionHeaderError::InvalidLength);
-        }
-        let data = &elf.file_data[offset..offset + size_of::<Elf64Shdr>()];
-        let header: &Elf64Shdr = unsafe { &*(data.as_ptr() as *const Elf64Shdr) };
+        let bytes = &elf
+            .file_data
+            .get(offset..offset + size_of::<Elf64Shdr>())
+            .ok_or(SectionHeaderError::InvalidLength)?;
+        let header: Elf64Shdr = bytemuck::pod_read_unaligned(bytes);
 
         let sh_name = header.sh_name;
         let sh_type = match header.sh_type {

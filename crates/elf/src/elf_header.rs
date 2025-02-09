@@ -13,9 +13,9 @@ const ET_LOPROC: u16 = 0xff00;
 const ET_HIPROC: u16 = 0xffff;
 
 #[derive(Debug, Copy, Clone)]
-pub enum ElfHeader<'a> {
+pub enum ElfHeader {
     Elf32Header {
-        e_ident: identity::ElfIdentity<'a>,
+        e_ident: identity::ElfIdentity,
         e_type: Type,
         e_machine: Machine,
         e_version: Version,
@@ -29,10 +29,9 @@ pub enum ElfHeader<'a> {
         e_shentsize: u16,
         e_shnum: u16,
         e_shstrndx: u16,
-        data: &'a [u8],
     },
     Elf64Header {
-        e_ident: identity::ElfIdentity<'a>,
+        e_ident: identity::ElfIdentity,
         e_type: Type,
         e_machine: Machine,
         e_version: Version,
@@ -46,11 +45,11 @@ pub enum ElfHeader<'a> {
         e_shentsize: u16,
         e_shnum: u16,
         e_shstrndx: u16,
-        data: &'a [u8],
     },
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct Elf32Ehdr {
     e_ident: [u8; identity::EI_NIDENT],
     e_type: Elf32Half,
@@ -69,6 +68,7 @@ struct Elf32Ehdr {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct Elf64Ehdr {
     e_ident: [u8; identity::EI_NIDENT],
     e_type: Elf64Half,
@@ -85,6 +85,12 @@ struct Elf64Ehdr {
     e_shnum: Elf64Half,
     e_shstrndx: Elf64Half,
 }
+
+unsafe impl bytemuck::Zeroable for Elf32Ehdr {}
+unsafe impl bytemuck::AnyBitPattern for Elf32Ehdr {}
+
+unsafe impl bytemuck::Zeroable for Elf64Ehdr {}
+unsafe impl bytemuck::AnyBitPattern for Elf64Ehdr {}
 
 #[derive(Debug, Copy, Clone)]
 pub enum Type {
@@ -573,8 +579,8 @@ impl From<identity::ElfIdentityError> for ElfHeaderError {
     }
 }
 
-impl<'a> ElfHeader<'a> {
-    pub(crate) fn new(header: &'a [u8]) -> Result<Self, ElfHeaderError> {
+impl ElfHeader {
+    pub(crate) fn new(header: &[u8]) -> Result<Self, ElfHeaderError> {
         if header.len() < identity::EI_NIDENT {
             return Err(ElfHeaderError::InvalidLength);
         }
@@ -586,14 +592,11 @@ impl<'a> ElfHeader<'a> {
         }
     }
 
-    fn new_elf32(
-        data: &'a [u8],
-        e_ident: identity::ElfIdentity<'a>,
-    ) -> Result<Self, ElfHeaderError> {
-        if data.len() < size_of::<Elf32Ehdr>() {
-            return Err(ElfHeaderError::InvalidLength);
-        }
-        let header: &Elf32Ehdr = unsafe { &*(data.as_ptr() as *const Elf32Ehdr) };
+    fn new_elf32(data: &[u8], e_ident: identity::ElfIdentity) -> Result<Self, ElfHeaderError> {
+        let bytes = data
+            .get(..size_of::<Elf32Ehdr>())
+            .ok_or(ElfHeaderError::InvalidLength)?;
+        let header: Elf32Ehdr = bytemuck::pod_read_unaligned(bytes);
 
         let e_type = match header.e_type {
             0x00 => Type::None,
@@ -645,17 +648,13 @@ impl<'a> ElfHeader<'a> {
             e_shentsize,
             e_shnum,
             e_shstrndx,
-            data,
         })
     }
-    fn new_elf64(
-        data: &'a [u8],
-        e_ident: identity::ElfIdentity<'a>,
-    ) -> Result<Self, ElfHeaderError> {
-        if data.len() < size_of::<Elf64Ehdr>() {
-            return Err(ElfHeaderError::InvalidLength);
-        }
-        let header: &Elf64Ehdr = unsafe { &*(data.as_ptr() as *const Elf64Ehdr) };
+    fn new_elf64(data: &[u8], e_ident: identity::ElfIdentity) -> Result<Self, ElfHeaderError> {
+        let bytes = data
+            .get(..size_of::<Elf64Ehdr>())
+            .ok_or(ElfHeaderError::InvalidLength)?;
+        let header: Elf64Ehdr = bytemuck::pod_read_unaligned(bytes);
 
         let e_type = match header.e_type {
             0x00 => Type::None,
@@ -703,7 +702,6 @@ impl<'a> ElfHeader<'a> {
             e_shentsize,
             e_shnum,
             e_shstrndx,
-            data,
         })
     }
 

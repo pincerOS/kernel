@@ -33,6 +33,7 @@ pub struct Symbol<'a> {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct Elf32Sym {
     st_name: Elf32Word,
     st_value: Elf32Addr,
@@ -43,6 +44,7 @@ struct Elf32Sym {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct Elf64Sym {
     st_name: Elf64Word,
     st_info: u8,
@@ -51,6 +53,12 @@ struct Elf64Sym {
     st_value: Elf64Addr,
     st_size: Elf64Xword,
 }
+
+unsafe impl bytemuck::Zeroable for Elf32Sym {}
+unsafe impl bytemuck::AnyBitPattern for Elf32Sym {}
+
+unsafe impl bytemuck::Zeroable for Elf64Sym {}
+unsafe impl bytemuck::AnyBitPattern for Elf64Sym {}
 
 #[repr(transparent)]
 pub struct Info(u8);
@@ -223,11 +231,11 @@ impl<'a> Symbol<'a> {
     }
 
     fn new_32(elf: &'a Elf, offset: usize) -> Result<Self, SymbolError> {
-        if elf.file_data.len() < offset + size_of::<Elf32Sym>() {
-            return Err(SymbolError::InvalidLength);
-        }
-        let data = &elf.file_data[offset..];
-        let header: &Elf32Sym = unsafe { &*(data.as_ptr() as *const Elf32Sym) };
+        let data = elf
+            .file_data
+            .get(offset..offset + size_of::<Elf32Sym>())
+            .ok_or(SymbolError::InvalidLength)?;
+        let header: Elf32Sym = bytemuck::pod_read_unaligned(data);
 
         let st_name = header.st_name;
         let st_info = Info(header.st_info);
@@ -252,11 +260,11 @@ impl<'a> Symbol<'a> {
     }
 
     fn new_64(elf: &'a Elf, offset: usize) -> Result<Self, SymbolError> {
-        if elf.file_data.len() < offset + size_of::<Elf64Sym>() {
-            return Err(SymbolError::InvalidLength);
-        }
-        let data = &elf.file_data[offset..];
-        let header: &Elf64Sym = unsafe { &*(data.as_ptr() as *const Elf64Sym) };
+        let data = elf
+            .file_data
+            .get(offset..offset + size_of::<Elf64Sym>())
+            .ok_or(SymbolError::InvalidLength)?;
+        let header: Elf64Sym = bytemuck::pod_read_unaligned(data);
 
         let st_name = header.st_name;
         let st_info = Info(header.st_info);

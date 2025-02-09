@@ -21,13 +21,12 @@ const EI_ABIVERSION: usize = 8;
 pub const EI_NIDENT: usize = 16;
 
 #[derive(Debug, Copy, Clone)]
-pub struct ElfIdentity<'a> {
+pub struct ElfIdentity {
     pub class: Class,
     pub data: DataEncoding,
     pub version: Version,
     pub os_abi: OsAbi,
     pub abi_version: u8,
-    bytes: &'a [u8],
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -132,8 +131,8 @@ impl Display for ElfIdentityError {
     }
 }
 
-impl<'a> ElfIdentity<'a> {
-    pub(crate) fn new(data: &'a [u8]) -> Result<Self, ElfIdentityError> {
+impl ElfIdentity {
+    pub(crate) fn new(data: &[u8]) -> Result<Self, ElfIdentityError> {
         if data.len() != EI_NIDENT {
             return Err(ElfIdentityError::InvalidLength);
         }
@@ -186,11 +185,6 @@ impl<'a> ElfIdentity<'a> {
             version,
             os_abi,
             abi_version,
-            bytes: data,
         })
-    }
-
-    pub fn bytes(&self) -> &'a [u8] {
-        self.bytes
     }
 }

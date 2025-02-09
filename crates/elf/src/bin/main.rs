@@ -8,7 +8,7 @@ use elf::{section_header, Elf, ElfError};
 fn output_elf_file_header(elf: &Elf) {
     println!("ELF Header:");
     print!("  Magic:   ");
-    for byte in elf.identity().bytes() {
+    for byte in elf.identity_bytes() {
         print!("{:02x} ", byte);
     }
     println!();

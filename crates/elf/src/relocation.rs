@@ -85,12 +85,14 @@ impl<'a> Relocation<'a> {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct Elf32Rel {
     r_offset: Elf32Addr,
     r_info: Elf32Word,
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct Elf32Rela {
     r_offset: Elf32Addr,
     r_info: Elf32Word,
@@ -98,17 +100,31 @@ struct Elf32Rela {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct Elf64Rel {
     r_offset: Elf64Addr,
     r_info: Elf64Xword,
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct Elf64Rela {
     r_offset: Elf64Addr,
     r_info: Elf64Xword,
     r_addend: Elf64Sxword,
 }
+
+unsafe impl bytemuck::Zeroable for Elf32Rel {}
+unsafe impl bytemuck::AnyBitPattern for Elf32Rel {}
+
+unsafe impl bytemuck::Zeroable for Elf32Rela {}
+unsafe impl bytemuck::AnyBitPattern for Elf32Rela {}
+
+unsafe impl bytemuck::Zeroable for Elf64Rel {}
+unsafe impl bytemuck::AnyBitPattern for Elf64Rel {}
+
+unsafe impl bytemuck::Zeroable for Elf64Rela {}
+unsafe impl bytemuck::AnyBitPattern for Elf64Rela {}
 
 #[derive(Debug, Clone, Copy)]
 pub enum Info {
@@ -915,11 +931,11 @@ impl error::Error for RelocationError {}
 
 impl<'a> Relocation<'a> {
     pub(crate) fn new_rel32(elf: &'a Elf<'a>, offset: usize) -> Result<Self, RelocationError> {
-        if elf.file_data.len() < offset + size_of::<Elf32Rel>() {
-            return Err(RelocationError::InvalidLength);
-        }
-        let data = &elf.file_data[offset..offset + size_of::<Elf32Rel>()];
-        let relocation: &Elf32Rel = unsafe { &*(data.as_ptr() as *const Elf32Rel) };
+        let data = elf
+            .file_data
+            .get(offset..offset + size_of::<Elf32Rel>())
+            .ok_or(RelocationError::InvalidLength)?;
+        let relocation: Elf32Rel = bytemuck::pod_read_unaligned(data);
 
         let r_offset = relocation.r_offset as u64;
         let r_info = Info::Elf32RelocationInfo(relocation.r_info);
@@ -941,11 +957,11 @@ impl<'a> Relocation<'a> {
     }
 
     pub(crate) fn new_rel64(elf: &'a Elf<'a>, offset: usize) -> Result<Self, RelocationError> {
-        if elf.file_data.len() < offset + size_of::<Elf64Rel>() {
-            return Err(RelocationError::InvalidLength);
-        }
-        let data = &elf.file_data[offset..offset + size_of::<Elf64Rel>()];
-        let relocation: &Elf64Rel = unsafe { &*(data.as_ptr() as *const Elf64Rel) };
+        let data = elf
+            .file_data
+            .get(offset..offset + size_of::<Elf64Rel>())
+            .ok_or(RelocationError::InvalidLength)?;
+        let relocation: Elf64Rel = bytemuck::pod_read_unaligned(data);
 
         let r_offset = relocation.r_offset;
         let r_info = Info::Elf64RelocationInfo(relocation.r_info);
@@ -967,11 +983,11 @@ impl<'a> Relocation<'a> {
     }
 
     pub(crate) fn new_rela32(elf: &'a Elf<'a>, offset: usize) -> Result<Self, RelocationError> {
-        if elf.file_data.len() != size_of::<Elf32Rela>() {
-            return Err(RelocationError::InvalidLength);
-        }
-        let data = &elf.file_data[offset..offset + size_of::<Elf32Rela>()];
-        let relocation: &Elf32Rela = unsafe { &*(data.as_ptr() as *const Elf32Rela) };
+        let data = elf
+            .file_data
+            .get(offset..offset + size_of::<Elf32Rela>())
+            .ok_or(RelocationError::InvalidLength)?;
+        let relocation: Elf32Rela = bytemuck::pod_read_unaligned(data);
 
         let r_offset = relocation.r_offset as u64;
         let r_info = Info::Elf32RelocationInfo(relocation.r_info);
@@ -995,11 +1011,11 @@ impl<'a> Relocation<'a> {
     }
 
     pub(crate) fn new_rela64(elf: &'a Elf<'a>, offset: usize) -> Result<Self, RelocationError> {
-        if elf.file_data.len() < offset + size_of::<Elf64Rela>() {
-            return Err(RelocationError::InvalidLength);
-        }
-        let data = &elf.file_data[offset..offset + size_of::<Elf64Rela>()];
-        let relocation: &Elf64Rela = unsafe { &*(data.as_ptr() as *const Elf64Rela) };
+        let data = elf
+            .file_data
+            .get(offset..offset + size_of::<Elf64Rela>())
+            .ok_or(RelocationError::InvalidLength)?;
+        let relocation: Elf64Rela = bytemuck::pod_read_unaligned(data);
 
         let r_offset = relocation.r_offset;
         let r_info = Info::Elf64RelocationInfo(relocation.r_info);
