@@ -4,6 +4,7 @@ pub mod bcm2835_aux;
 pub mod bcm2836_intc;
 pub mod gic;
 pub mod mailbox;
+pub mod rng;
 pub mod system_timer;
 pub mod watchdog;
 
