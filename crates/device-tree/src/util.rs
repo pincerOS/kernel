@@ -218,9 +218,7 @@ impl<'a> MappingIterator<'a> {
 }
 
 impl<'a> Mapping<'a> {
-    pub fn iter_ranges(
-        &self,
-    ) -> Option<impl Iterator<Item = MapRangeField> + ExactSizeIterator + 'a> {
+    pub fn iter_ranges(&self) -> Option<impl ExactSizeIterator<Item = MapRangeField> + 'a> {
         let mapping = self.mapping?;
         let addr_cells = self.addr_cells as usize;
         let size_cells = self.size_cells as usize;
@@ -331,10 +329,11 @@ pub fn find_node<'a>(
         match entry? {
             StructEntry::BeginNode { name } => {
                 if path[path_idx..].starts_with(name) {
-                    if path_idx + name.len() == path.len() || name.len() == 0 && path == "/" {
+                    let name_end = path_idx + name.len();
+                    if name_end == path.len() || (name.is_empty() && path == "/") {
                         return Ok(Some(last_start));
-                    } else if path[path_idx + name.len()..].chars().next() == Some('/') {
-                        path_idx = path_idx + name.len() + 1;
+                    } else if path[name_end..].starts_with("/") {
+                        path_idx = name_end + 1;
                         depth += 1;
                         matching_parts += 1;
                         continue;
@@ -345,9 +344,8 @@ pub fn find_node<'a>(
             StructEntry::EndNode => {
                 if depth == matching_parts {
                     return Ok(None);
-                } else {
-                    depth -= 1;
                 }
+                depth -= 1;
             }
             StructEntry::Prop { .. } => (),
         }

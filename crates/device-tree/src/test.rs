@@ -25,7 +25,7 @@ fn rpi3b_tree_find() -> Result<(), &'static str> {
 
     let mut data = std::fs::read(root.join("../kernel/bcm2710-rpi-3-b-plus.dtb")).unwrap();
     data.resize(data.len().next_multiple_of(8), 0);
-    let data = bytemuck::cast_slice(&*data);
+    let data = bytemuck::cast_slice(&data);
 
     let tree = unsafe { DeviceTree::load(data.as_ptr()).unwrap() };
 
@@ -41,7 +41,7 @@ fn print_rpi3b_tree() -> Result<(), &'static str> {
 
     let mut data = std::fs::read(root.join("../kernel/bcm2710-rpi-3-b-plus.dtb")).unwrap();
     data.resize(data.len().next_multiple_of(8), 0);
-    let data = bytemuck::cast_slice(&*data);
+    let data = bytemuck::cast_slice(&data);
 
     let tree = unsafe { DeviceTree::load(data.as_ptr()).unwrap() };
     debug_device_tree(&tree, &mut WriteWrapper(std::io::stdout()))?;
@@ -55,7 +55,7 @@ fn print_rpi4b_tree() -> Result<(), &'static str> {
 
     let mut data = std::fs::read(root.join("../kernel/bcm2711-rpi-4-b.dtb")).unwrap();
     data.resize(data.len().next_multiple_of(8), 0);
-    let data = bytemuck::cast_slice(&*data);
+    let data = bytemuck::cast_slice(&data);
 
     let tree = unsafe { DeviceTree::load(data.as_ptr()).unwrap() };
     debug_device_tree(&tree, &mut WriteWrapper(std::io::stdout()))?;

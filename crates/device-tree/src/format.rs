@@ -123,7 +123,6 @@ impl<'a> DeviceTree<'a> {
         let reserved_base = reserved_map_offset / size_of::<u64>();
         let max_idx = data.len().saturating_sub(reserved_base.saturating_mul(2));
         let count = (0..max_idx)
-            .into_iter()
             .find(|i| {
                 let base = reserved_base + i * 2;
                 let addr = data[base];
@@ -141,14 +140,14 @@ impl<'a> DeviceTree<'a> {
         Ok(DeviceTree {
             header,
             data,
+            reserved_regions,
             strings_block,
             struct_block,
-            reserved_regions,
         })
     }
 
-    pub fn header(&self) -> &fdt_header {
-        &self.header
+    pub fn header(&self) -> &'a fdt_header {
+        self.header
     }
     pub fn raw_data(&self) -> &'a [u64] {
         self.data
@@ -165,8 +164,8 @@ impl<'a> DeviceTree<'a> {
 
     /// Spec notes:
     /// - Does not validate the specific ordering of nodes within the structure
-    ///   list (by the spec, BEGIN_NODE must not be immediately followed by
-    ///   END_NODE)
+    ///   list (by the spec, `BEGIN_NODE` must not be immediately followed by
+    ///   `END_NODE`)
     /// - Does not limit property names to 31 characters as required by the spec,
     ///   because the rpi3b dtb violates this
     /// - Allows empty node names, as the root node name is empty
@@ -176,6 +175,14 @@ impl<'a> DeviceTree<'a> {
             struct_slice: self.struct_block,
             strings_block: self.strings_block,
         }
+    }
+}
+
+impl<'a> IntoIterator for &DeviceTree<'a> {
+    type Item = Result<StructEntry<'a>, &'static str>;
+    type IntoIter = DeviceTreeIterator<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
