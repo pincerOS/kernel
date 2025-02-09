@@ -218,12 +218,12 @@ fn big_file_create_test() {
         create_ext2_fs("../../test/example_1.dir", 1024, "rw_big_file_creation.img", false);
     let mut bee_movie_bytes: Vec<u8> = Vec::new();
 
-    File::open("../../test/files_to_add/bee_movie.txt").unwrap().read_to_end(
+    File::open("../../test/files_to_add/largeimage.png").unwrap().read_to_end(
                 &mut bee_movie_bytes).unwrap();
 
     let verify_requests = vec![
         VerifyRequest {
-            file_path: b"beemovie.txt",
+            file_path: b"largeimage.png",
             data: &*bee_movie_bytes,
             expect_data: None,
             write_mode: WriteMode::CreateWrite,
@@ -242,11 +242,11 @@ fn dir_tree_test() {
     let mut bee_movie_bytes: Vec<u8> = Vec::new();
     let mut wmata_image_bytes: Vec<u8> = Vec::new();
 
-    File::open("../../test/files_to_add/image.png").unwrap().read_to_end(
+    File::open("../../test/files_to_add/image.jpg").unwrap().read_to_end(
         &mut bart_image_bytes).unwrap();
     File::open("../../test/files_to_add/bee_movie.txt").unwrap().read_to_end(
         &mut bee_movie_bytes).unwrap();
-    File::open("../../test/files_to_add/wmata.png").unwrap().read_to_end(
+    File::open("../../test/files_to_add/largeimage.png").unwrap().read_to_end(
         &mut wmata_image_bytes).unwrap();
 
     let verify_requests = vec![
@@ -265,7 +265,7 @@ fn dir_tree_test() {
             create_dirs_if_nonexistent: false // directories should already exist at this point
         },
         VerifyRequest {
-            file_path: b"a/b/c/wmata.png",
+            file_path: b"a/b/c/image.jpg",
             data: &*wmata_image_bytes,
             expect_data: None,
             write_mode: WriteMode::CreateWrite,
