@@ -1523,8 +1523,42 @@ impl INodeWrapper
     }
 
     // overwrite over file, with the new file size being the size of new_data
-    pub fn overwrite_file<D: BlockDevice>(&self, ext2: &mut Ext2<D>, new_data: &[u8],
+    pub fn overwrite_file<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>, new_data: &[u8],
                                           all_bytes_or_fail: bool) -> Result<usize, Ext2Error> {
-        todo!();
+        // TODO(Sasha): Handle partial writes, properly report bytes written
+        let allocated_block_count = self.block_allocated_count(ext2);
+        let mut deferred_writes: DeferredWriteMap = BTreeMap::new();
+        let mut bytes_written: u64 = 0;
+        if allocated_block_count == Self::div_up(new_data.len(), BLOCK_SIZE) {
+            // easy case
+            for i in 0..allocated_block_count {
+                let cur_block = self.get_inode_block_num(i, ext2) as usize;
+                let current_byte_slice: &[u8] = &new_data[i*BLOCK_SIZE..std::cmp::min((i+1)*BLOCK_SIZE, new_data.len())];
+                ext2.add_write_to_deferred_writes_map(&mut deferred_writes, cur_block, 0,
+                    current_byte_slice, None)?;
+                bytes_written += (std::cmp::min((i+1)*BLOCK_SIZE, new_data.len()) - i*BLOCK_SIZE) as u64;
+            }
+            self.update_size(bytes_written);
+            self.get_deferred_write_inode(ext2, &mut deferred_writes)?;
+            ext2.write_back_deferred_writes(deferred_writes)?;
+        } else if allocated_block_count < Self::div_up(new_data.len(), BLOCK_SIZE) {
+            // allocate more
+            for i in 0..allocated_block_count {
+                let cur_block = self.get_inode_block_num(i, ext2) as usize;
+                let current_byte_slice: &[u8] = &new_data[i*BLOCK_SIZE..(i+1)*BLOCK_SIZE];
+                ext2.add_write_to_deferred_writes_map(&mut deferred_writes, cur_block, 0,
+                    current_byte_slice, None)?;
+                bytes_written += ((i+1)*BLOCK_SIZE - i*BLOCK_SIZE) as u64;
+            }
+            self.update_size(bytes_written);
+            self.get_deferred_write_inode(ext2, &mut deferred_writes)?;
+            ext2.write_back_deferred_writes(deferred_writes)?;
+            let new_slice: &[u8] = &new_data[allocated_block_count*BLOCK_SIZE..new_data.len()];
+            bytes_written += self.append_file(ext2, new_slice, all_bytes_or_fail)? as u64;
+        } else {
+            // TODO(Sasha): come back to this when deletion is implemented
+            todo!();
+        }
+        Ok(new_data.len())
     }
 }
