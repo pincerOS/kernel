@@ -27,7 +27,7 @@ pub struct ElfIdentity<'a> {
     pub version: Version,
     pub os_abi: OsAbi,
     pub abi_version: u8,
-    _data: &'a [u8],
+    bytes: &'a [u8],
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -186,11 +186,11 @@ impl<'a> ElfIdentity<'a> {
             version,
             os_abi,
             abi_version,
-            _data: data,
+            bytes: data,
         })
     }
 
     pub fn bytes(&self) -> &'a [u8] {
-        self._data
+        self.bytes
     }
 }

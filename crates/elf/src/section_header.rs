@@ -15,12 +15,12 @@ pub const SHN_COMMON: u16 = 0xfff2;
 pub const SHN_XINDEX: u16 = 0xffff;
 pub const SHN_HIRESERVE: u16 = 0xffff;
 
-pub const SHT_LOOS: u32 = 0x60000000;
-pub const SHT_HIOS: u32 = 0x6fffffff;
-pub const SHT_LOPROC: u32 = 0x70000000;
-pub const SHT_HIPROC: u32 = 0x7fffffff;
-pub const SHT_LOUSER: u32 = 0x80000000;
-pub const SHT_HIUSER: u32 = 0xffffffff;
+pub const SHT_LOOS: u32 = 0x6000_0000;
+pub const SHT_HIOS: u32 = 0x6fff_ffff;
+pub const SHT_LOPROC: u32 = 0x7000_0000;
+pub const SHT_HIPROC: u32 = 0x7fff_ffff;
+pub const SHT_LOUSER: u32 = 0x8000_0000;
+pub const SHT_HIUSER: u32 = 0xffff_ffff;
 
 #[derive(Debug, Copy, Clone)]
 pub struct SectionHeader<'a> {
@@ -185,8 +185,8 @@ impl Flags {
     const OS_NONCONFORMING: u64 = 0x100;
     const GROUP: u64 = 0x200;
     const TLS: u64 = 0x400;
-    const MASKOS: u64 = 0x0ff00000;
-    const MASKPROC: u64 = 0xf0000000;
+    const MASKOS: u64 = 0x0ff0_0000;
+    const MASKPROC: u64 = 0xf000_0000;
 
     pub fn write(&self) -> bool {
         self.0 & Self::WRITE != 0

@@ -126,7 +126,7 @@ impl Info {
     pub fn r_type(&self) -> u32 {
         match self {
             Self::Elf32RelocationInfo(i) => i & 0xff,
-            Self::Elf64RelocationInfo(i) => (i & 0xffffffff) as u32,
+            Self::Elf64RelocationInfo(i) => (i & 0xffff_ffff) as u32,
         }
     }
 

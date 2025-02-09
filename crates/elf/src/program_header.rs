@@ -7,10 +7,10 @@ use core::{
 
 use super::{elf_header, identity, types::*, Elf};
 
-const PT_LOOS: u32 = 0x60000000;
-const PT_HIOS: u32 = 0x6fffffff;
-const PT_LOPROC: u32 = 0x70000000;
-const PT_HIPROC: u32 = 0x7fffffff;
+const PT_LOOS: u32 = 0x6000_0000;
+const PT_HIOS: u32 = 0x6fff_ffff;
+const PT_LOPROC: u32 = 0x7000_0000;
+const PT_HIPROC: u32 = 0x7fff_ffff;
 
 #[derive(Debug, Copy, Clone)]
 pub struct ProgramHeader {
@@ -100,13 +100,13 @@ impl Display for OsSpecificType {
 impl From<u32> for OsSpecificType {
     fn from(value: u32) -> Self {
         match value {
-            0x6474e550 => OsSpecificType::GNU(GnuType::EhFrame),
-            0x6474e551 => OsSpecificType::GNU(GnuType::Stack),
-            0x6474e552 => OsSpecificType::GNU(GnuType::Relro),
-            0x6474e553 => OsSpecificType::GNU(GnuType::Property),
-            0x6474e554 => OsSpecificType::GNU(GnuType::SFrame),
-            0x6ffffffa => OsSpecificType::Sun(SunType::Bss),
-            0x6ffffffb => OsSpecificType::Sun(SunType::Stack),
+            0x6474_e550 => OsSpecificType::GNU(GnuType::EhFrame),
+            0x6474_e551 => OsSpecificType::GNU(GnuType::Stack),
+            0x6474_e552 => OsSpecificType::GNU(GnuType::Relro),
+            0x6474_e553 => OsSpecificType::GNU(GnuType::Property),
+            0x6474_e554 => OsSpecificType::GNU(GnuType::SFrame),
+            0x6fff_fffa => OsSpecificType::Sun(SunType::Bss),
+            0x6fff_fffb => OsSpecificType::Sun(SunType::Stack),
             other => OsSpecificType::Unknown(other),
         }
     }
@@ -204,8 +204,8 @@ impl Flags {
     const PF_X: u64 = 0x1;
     const PF_W: u64 = 0x2;
     const PF_R: u64 = 0x4;
-    const PF_MASKOS: u64 = 0x0ff00000;
-    const PF_MASKPROC: u64 = 0xf0000000;
+    const PF_MASKOS: u64 = 0x0ff0_0000;
+    const PF_MASKPROC: u64 = 0xf000_0000;
 
     pub fn execute(&self) -> bool {
         self.0 & Self::PF_X != 0

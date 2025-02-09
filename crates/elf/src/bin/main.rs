@@ -1,6 +1,7 @@
 use std::fs;
 
-use elf::{section_header, Elf};
+use elf::section_header::SectionHeaderError;
+use elf::{section_header, Elf, ElfError};
 
 // Readelf-like tool to output the parsed elf structs
 
@@ -85,15 +86,15 @@ fn output_elf_file_header(elf: &Elf) {
     );
 }
 
-fn output_section_headers(elf: &Elf) -> Result<(), elf::ElfError> {
+fn output_section_headers(elf: &Elf) -> Result<(), ElfError> {
     let section_string_table = match elf
         .section_headers()?
         .nth(elf.elf_header().e_shstrndx() as usize)
     {
         Some(section_header) => section_header?,
         None => {
-            return Err(elf::ElfError::SectionHeaderError(
-                section_header::SectionHeaderError::InvalidIndex,
+            return Err(ElfError::SectionHeaderError(
+                SectionHeaderError::InvalidIndex,
             ))
         }
     };
@@ -156,13 +157,10 @@ fn output_section_headers(elf: &Elf) -> Result<(), elf::ElfError> {
     Ok(())
 }
 
-fn output_program_headers(elf: &Elf) -> Result<(), elf::ElfError> {
-    let program_headers = match elf.program_headers() {
-        Some(program_headers) => program_headers,
-        None => {
-            println!("There are no program headers in this file.");
-            return Ok(());
-        }
+fn output_program_headers(elf: &Elf) -> Result<(), ElfError> {
+    let Some(program_headers) = elf.program_headers() else {
+        println!("There are no program headers in this file.");
+        return Ok(());
     };
 
     let is_32_bit = matches!(elf.identity().class, elf::identity::Class::ELF32);
@@ -204,36 +202,25 @@ fn output_program_headers(elf: &Elf) -> Result<(), elf::ElfError> {
     Ok(())
 }
 
-fn output_relocations(elf: &Elf) -> Result<(), elf::ElfError> {
-    let section_string_table = match elf
+fn output_relocations(elf: &Elf) -> Result<(), ElfError> {
+    let section_string_table = elf
         .section_headers()?
         .nth(elf.elf_header().e_shstrndx() as usize)
-    {
-        Some(section_header) => section_header?,
-        None => {
-            return Err(elf::ElfError::SectionHeaderError(
-                section_header::SectionHeaderError::InvalidIndex,
-            ))
-        }
-    };
-    let symtab = match elf.symtab_header()? {
-        Some(symtab) => symtab,
-        None => {
-            return Err(elf::ElfError::SectionHeaderError(
-                section_header::SectionHeaderError::InvalidIndex,
-            ))
-        }
-    };
+        .ok_or(ElfError::SectionHeaderError(
+            SectionHeaderError::InvalidIndex,
+        ))??;
+
+    let symtab = elf.symtab_header()?.ok_or(ElfError::SectionHeaderError(
+        SectionHeaderError::InvalidIndex,
+    ))?;
+
     let section_headers = elf.section_headers()?.collect::<Result<Vec<_>, _>>()?;
     let mut found_relocations = false;
     for header in &section_headers {
         match header.sh_type {
             section_header::Type::Rel | section_header::Type::Rela => {
                 let name = header.name(&section_string_table).unwrap_or("");
-                let relocations: Vec<_> = match header.get_relocations()?.collect() {
-                    Ok(relocations) => relocations,
-                    Err(e) => return Err(e.into()),
-                };
+                let relocations = header.get_relocations()?.collect::<Result<Vec<_>, _>>()?;
                 println!(
                     "Relocation section '{}' at offset 0x{:x} contains {} {}:",
                     name,
@@ -271,33 +258,24 @@ fn output_relocations(elf: &Elf) -> Result<(), elf::ElfError> {
     Ok(())
 }
 
-fn output_symbols<'a>(elf: &'a Elf<'a>) -> Result<(), elf::ElfError> {
+fn output_symbols<'a>(elf: &'a Elf<'a>) -> Result<(), ElfError> {
     let symbol_table_header = match elf.symtab_header()? {
         Some(symbol_table_header) => symbol_table_header,
         None => return Ok(()),
     };
     let section_headers = elf.section_headers()?.collect::<Result<Vec<_>, _>>()?;
-    let mut symbols = Vec::new();
-    let symbols_iter = symbol_table_header.get_symbols()?;
-    for symbol in symbols_iter {
-        match symbol {
-            Ok(symbol) => symbols.push(symbol),
-            Err(e) => return Err(e.into()),
-        }
-    }
+
+    let symbols = symbol_table_header
+        .get_symbols()?
+        .collect::<Result<Vec<_>, _>>()?;
 
     let symbol_string_table = section_headers[symbol_table_header.sh_link as usize];
-    let section_string_table = match elf
+    let section_string_table = elf
         .section_headers()?
         .nth(elf.elf_header().e_shstrndx() as usize)
-    {
-        Some(section_header) => section_header?,
-        None => {
-            return Err(elf::ElfError::SectionHeaderError(
-                section_header::SectionHeaderError::InvalidIndex,
-            ))
-        }
-    };
+        .ok_or(ElfError::SectionHeaderError(
+            SectionHeaderError::InvalidIndex,
+        ))??;
 
     let symbol_table_name = symbol_table_header
         .name(&section_string_table)
@@ -355,7 +333,7 @@ fn output_symbols<'a>(elf: &'a Elf<'a>) -> Result<(), elf::ElfError> {
     Ok(())
 }
 
-fn display_elf_file<'a>(elf: &'a Elf) -> Result<(), Box<dyn std::error::Error + 'a>> {
+fn display_elf_file<'a>(elf: &'a Elf) -> Result<(), Box<dyn core::error::Error + 'a>> {
     output_elf_file_header(elf);
     println!();
     output_section_headers(elf)?;
@@ -386,7 +364,7 @@ fn main() {
         }
     };
     match display_elf_file(&elf) {
-        Ok(_) => {}
+        Ok(()) => (),
         Err(e) => {
             eprintln!("Error: {}", e);
             std::process::exit(1);

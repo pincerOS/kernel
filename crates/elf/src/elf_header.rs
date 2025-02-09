@@ -417,7 +417,7 @@ impl ARMFlags {
     const EF_ARM_VFP_FLOAT: u32 = 0x400;
     const EF_ARM_ABI_FLOAT_HARD: u32 = 0x400;
     const EF_ARM_MAVERICK_FLOAT: u32 = 0x800;
-    const EF_ARM_EABIMASK: u32 = 0xFF000000;
+    const EF_ARM_EABIMASK: u32 = 0xFF00_0000;
 
     pub fn relexec(&self) -> bool {
         self.0 & Self::EF_ARM_RELEXEC != 0
