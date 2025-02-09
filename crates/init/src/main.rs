@@ -82,6 +82,7 @@ pub extern "C" fn main() {
 pub mod macros {
     #[repr(C)]
     pub struct AlignedAs<Align, Bytes: ?Sized> {
+        #[allow(clippy::pub_underscore_fields)]
         pub _align: [Align; 0],
         pub bytes: Bytes,
     }
