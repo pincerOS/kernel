@@ -1,10 +1,11 @@
 // https://github.com/lz4/lz4/blob/dev/doc/lz4_Frame_format.md
 
 use crate::block::{decode_block, Lz4BlockError};
-use crate::xxh::xxh32;
+use crate::xxh::{xxh32, XXH32Hasher};
 
 const LZ4_MAGIC: [u8; 4] = [0x04, 0x22, 0x4D, 0x18];
 
+#[derive(Copy, Clone, PartialEq)]
 pub enum ValidateMode {
     Checksums,
     None,
@@ -32,12 +33,14 @@ impl FrameOptions {
     }
 }
 
+#[derive(Copy, Clone, PartialEq)]
 pub enum ContentSize {
     None,
     Detect,
     Known(u64),
 }
 
+#[derive(Copy, Clone, PartialEq)]
 pub enum MaxBlockSize {
     Size64KiB,
     Size256KiB,
@@ -83,7 +86,6 @@ impl FrameHeader {
                 | ((opt.block_checksum as u8) << 4)
                 | ((has_content_size as u8) << 3)
                 | ((opt.content_checksum as u8) << 2)
-                | (0 << 1)
                 | (has_dict as u8),
             bd: (block_size_idx << 4),
             content_size: match opt.content_size {
@@ -150,20 +152,20 @@ pub enum Lz4Error {
     InvalidBlock(Lz4BlockError),
 }
 
-fn read_le_u32(input: &[u8]) -> Option<(u32, &[u8])> {
+pub(crate) fn read_le_u32(input: &[u8]) -> Option<(u32, &[u8])> {
     let (val, input) = input.split_first_chunk()?;
     Some((u32::from_le_bytes(*val), input))
 }
-fn read_le_u64(input: &[u8]) -> Option<(u64, &[u8])> {
+pub(crate) fn read_le_u64(input: &[u8]) -> Option<(u64, &[u8])> {
     let (val, input) = input.split_first_chunk()?;
     Some((u64::from_le_bytes(*val), input))
 }
-fn write_le_u32(out: &mut [u8], value: u32) -> Option<&mut [u8]> {
+pub(crate) fn write_le_u32(out: &mut [u8], value: u32) -> Option<&mut [u8]> {
     let (val, out) = out.split_first_chunk_mut::<4>()?;
     val.copy_from_slice(&u32::to_le_bytes(value));
     Some(out)
 }
-fn write_le_u64(out: &mut [u8], value: u64) -> Option<&mut [u8]> {
+pub(crate) fn write_le_u64(out: &mut [u8], value: u64) -> Option<&mut [u8]> {
     let (val, out) = out.split_first_chunk_mut::<8>()?;
     val.copy_from_slice(&u64::to_le_bytes(value));
     Some(out)
@@ -296,10 +298,16 @@ pub fn decode_frames(
     Ok(cur_idx)
 }
 
-pub fn write_header(data: &mut [u8], header: &FrameHeader) -> Result<usize, ()> {
+#[derive(Debug)]
+pub enum CompressError {
+    BufferTooSmall,
+    InvalidHeader,
+}
+
+pub fn write_header(data: &mut [u8], header: &FrameHeader) -> Result<usize, CompressError> {
     let size = 7 + (header.flag_content_size() as usize * 8) + (header.flag_dict_id() as usize * 4);
     if data.len() < size {
-        return Err(());
+        return Err(CompressError::BufferTooSmall);
     }
     let mut out = &mut *data;
     out[..4].copy_from_slice(&header.magic);
@@ -312,7 +320,7 @@ pub fn write_header(data: &mut [u8], header: &FrameHeader) -> Result<usize, ()> 
         out = write_le_u64(out, size).unwrap();
     }
     if header.flag_dict_id() {
-        let id = header.dict_id.ok_or(())?;
+        let id = header.dict_id.ok_or(CompressError::InvalidHeader)?;
         out = write_le_u32(out, id).unwrap();
     }
     let _ = out;
@@ -329,37 +337,44 @@ pub fn encode_frames(
     mut input: &[u8],
     output: &mut [u8],
     mut cur_idx: usize,
-) -> Result<usize, ()> {
+) -> Result<usize, CompressError> {
+    use crate::compress::{compress_block, MatchTable};
+
     let block_checksum = header.block_checksum;
     let content_checksum = header.content_checksum;
-    let mut hasher = crate::xxh::XXH32Hasher::init(0);
+    let mut hasher = XXH32Hasher::init(0);
+
+    // TODO: move this to the heap, to avoid overflowing the stack
+    let mut table_slot = core::mem::MaybeUninit::uninit();
+    let table = MatchTable::new_in_place(&mut table_slot);
 
     while !input.is_empty() {
         // block header (to fill in later)
         let header_idx = cur_idx;
-        write_le_u32(&mut output[header_idx..], 0x0000_0000).ok_or(())?;
+        write_le_u32(&mut output[header_idx..], 0x0000_0000)
+            .ok_or(CompressError::BufferTooSmall)?;
         cur_idx += 4;
 
         let block_size = header.max_block_size.size();
         let input_part = &input[..block_size.min(input.len())];
-        let output_range = output[cur_idx..].get_mut(..input_part.len()).ok_or(())?;
-        let size = crate::compress::compress_block(input_part, output_range);
+        let output_range = output[cur_idx..]
+            .get_mut(..input_part.len())
+            .ok_or(CompressError::BufferTooSmall)?;
+
+        let size = compress_block(input_part, output_range, table);
 
         let header;
-        match size {
-            Some(size) => {
-                header = size as u32;
-                cur_idx += size;
-            }
-            None => {
-                // Not enough space to compress; store uncompressed
-                header = input_part.len() as u32 | (1 << 31);
-                output_range.copy_from_slice(input_part);
-                cur_idx += input_part.len();
-            }
+        if let Some(size) = size {
+            header = size as u32;
+            cur_idx += size;
+        } else {
+            // Not enough space to compress; store uncompressed
+            header = input_part.len() as u32 | (1 << 31);
+            output_range.copy_from_slice(input_part);
+            cur_idx += input_part.len();
         }
 
-        write_le_u32(&mut output[header_idx..], header).ok_or(())?;
+        write_le_u32(&mut output[header_idx..], header).ok_or(CompressError::BufferTooSmall)?;
 
         input = &input[input_part.len()..];
 
@@ -369,18 +384,18 @@ pub fn encode_frames(
 
         if block_checksum {
             let checksum = xxh32(0, &output[header_idx + 4..cur_idx]);
-            write_le_u32(&mut output[cur_idx..], checksum).ok_or(())?;
+            write_le_u32(&mut output[cur_idx..], checksum).ok_or(CompressError::BufferTooSmall)?;
             cur_idx += 4;
         }
     }
 
     // end marker
-    write_le_u32(&mut output[cur_idx..], 0x0000_0000).ok_or(())?;
+    write_le_u32(&mut output[cur_idx..], 0x0000_0000).ok_or(CompressError::BufferTooSmall)?;
     cur_idx += 4;
 
     if header.content_checksum {
         let checksum = hasher.finalize();
-        write_le_u32(&mut output[cur_idx..], checksum).ok_or(())?;
+        write_le_u32(&mut output[cur_idx..], checksum).ok_or(CompressError::BufferTooSmall)?;
         cur_idx += 4;
     }
 

@@ -23,7 +23,7 @@ pub fn compress_into<'a>(
     frame: &frame::FrameOptions,
     data: &'_ [u8],
     buf: &'a mut [u8],
-) -> Result<&'a [u8], ()> {
+) -> Result<&'a [u8], frame::CompressError> {
     let header = frame::FrameHeader::new(frame);
     let off = frame::write_header(buf, &header)?;
     let off = frame::encode_frames(frame, data, buf, off)?;

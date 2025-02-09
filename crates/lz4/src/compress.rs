@@ -1,33 +1,47 @@
-const TABLE_SIZE: usize = 4096;
+use core::mem::{offset_of, MaybeUninit};
 
-struct MatchTable {
+const TABLE_SIZE: usize = 4096;
+const TABLE_FILL: u32 = 0xFFFF_FFFF;
+
+pub struct MatchTable {
     table: [(u32, u32); TABLE_SIZE],
 }
 
 fn hash(pat: u32) -> usize {
-    ((pat.wrapping_mul(0xB7D5C82D) >> 16) % TABLE_SIZE as u32) as usize
+    (pat.wrapping_mul(0xB7D5_C82D) >> 16) as usize % TABLE_SIZE
 }
 
 impl MatchTable {
-    fn new() -> Self {
-        MatchTable {
-            table: [(0, 0xFFFFFFFF); TABLE_SIZE],
+    pub fn new_in_place(this: &mut MaybeUninit<Self>) -> &mut Self {
+        unsafe {
+            let inner_table = this
+                .as_mut_ptr()
+                .byte_add(offset_of!(MatchTable, table))
+                .cast::<[(u32, u32); TABLE_SIZE]>();
+            core::ptr::write_bytes(inner_table, 0xFF, 1);
+            this.assume_init_mut()
         }
     }
     fn get(&self, pattern: u32) -> Option<u32> {
         let (pat, base) = self.table[hash(pattern)];
-        (pat == pattern && base != 0xFFFFFFFF).then_some(base)
+        (pat == pattern && base != TABLE_FILL).then_some(base)
     }
     fn insert(&mut self, pattern: u32, base: u32) {
         self.table[hash(pattern)] = (pattern, base);
     }
+    fn clear(&mut self) {
+        for (_, base) in &mut self.table {
+            *base = TABLE_FILL;
+        }
+    }
 }
 
-pub fn compress_block(input: &[u8], output: &mut [u8]) -> Option<usize> {
+pub fn compress_block(input: &[u8], output: &mut [u8], table: &mut MatchTable) -> Option<usize> {
     let mut idx = 0;
     let mut last_idx = 0;
     let mut cursor = 0;
-    let mut table = MatchTable::new();
+
+    table.clear();
 
     // Potential speed-up options:
     // - change step size by miss count (lz4_flex steps by floor(misses/32) + 1)
@@ -38,7 +52,7 @@ pub fn compress_block(input: &[u8], output: &mut [u8]) -> Option<usize> {
 
     let input_end = input.len().saturating_sub(12);
     while idx < input_end {
-        let pat = u32::from_le_bytes(input[idx..][..4].try_into().unwrap());
+        let pat = u32::from_le_bytes(*input[idx..].split_first_chunk().unwrap().0);
         let found = table.get(pat);
         table.insert(pat, idx as u32);
 
@@ -147,7 +161,8 @@ fn emit_end_block(output: &mut [u8], literal: &[u8]) -> Option<usize> {
         return None;
     }
 
-    let token = ((literal_len.min(15) << 4) | 0) as u8;
+    let match_len = 0;
+    let token = ((literal_len.min(15) << 4) | match_len) as u8;
     output[start] = token;
 
     if literal_len >= 15 {
@@ -160,39 +175,53 @@ fn emit_end_block(output: &mut [u8], literal: &[u8]) -> Option<usize> {
     Some(end)
 }
 
-#[test]
-fn test_compress_ratio() {
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
     extern crate std;
-    let data = include_bytes!("../Cargo.toml");
-    let mut output = std::vec![0; data.len()];
 
-    let len = compress_block(data, &mut output).unwrap();
-    let slice = &output[..len];
+    use alloc::{boxed::Box, vec};
+    use std::println;
 
-    std::println!("Input len: {}, output len: {}", data.len(), len);
+    use super::{compress_block, MatchTable};
 
-    let mut decompressed = std::vec![0; data.len()];
-    let decomp_len = crate::block::decode_block(slice, &mut decompressed, 0).unwrap();
-    let decomp_slice = &decompressed[..decomp_len];
+    #[test]
+    fn test_compress_ratio() {
+        let data = include_bytes!("../Cargo.toml");
+        let mut output = vec![0; data.len()];
 
-    assert!(data == decomp_slice);
-}
+        let mut table = Box::new_uninit();
+        let table = MatchTable::new_in_place(&mut table);
+        let len = compress_block(data, &mut output, table).unwrap();
+        let slice = &output[..len];
 
-#[test]
-fn test_compress2() {
-    extern crate std;
-    let mut output = std::vec![0; 1 << 12];
-    let data = [1, 0, 0, 1, 0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2];
+        println!("Input len: {}, output len: {}", data.len(), len);
 
-    let len = compress_block(&data, &mut output).unwrap();
-    let slice = &output[..len];
+        let mut decompressed = vec![0; data.len()];
+        let decomp_len = crate::block::decode_block(slice, &mut decompressed, 0).unwrap();
+        let decomp_slice = &decompressed[..decomp_len];
 
-    std::println!("Input len: {}, output len: {}", data.len(), len);
-    std::println!("data: {:?}", slice);
+        assert!(data == decomp_slice);
+    }
 
-    let mut decompressed = std::vec![0; data.len()];
-    let decomp_len = crate::block::decode_block(slice, &mut decompressed, 0).unwrap();
-    let decomp_slice = &decompressed[..decomp_len];
+    #[test]
+    fn test_compress2() {
+        extern crate std;
+        let mut output = vec![0; 1 << 12];
+        let data = [1, 0, 0, 1, 0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2];
 
-    assert_eq!(data, decomp_slice);
+        let mut table = Box::new_uninit();
+        let table = MatchTable::new_in_place(&mut table);
+        let len = compress_block(&data, &mut output, table).unwrap();
+        let slice = &output[..len];
+
+        println!("Input len: {}, output len: {}", data.len(), len);
+        println!("data: {:?}", slice);
+
+        let mut decompressed = vec![0; data.len()];
+        let decomp_len = crate::block::decode_block(slice, &mut decompressed, 0).unwrap();
+        let decomp_slice = &decompressed[..decomp_len];
+
+        assert_eq!(data, decomp_slice);
+    }
 }
