@@ -125,7 +125,7 @@ fn read_write_example_1() {
 #[test]
 fn append_alot_test() {
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, "rw.img", false);
+        create_ext2_fs("../../test/example_1.dir", 1024, "append-alot.img", false);
 
     let verify_requests = vec![
         VerifyRequest {
@@ -143,7 +143,7 @@ fn append_alot_test() {
 #[test]
 fn file_overwrite_test() {
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, "rw_file_creation.img", false);
+        create_ext2_fs("../../test/example_1.dir", 1024, "rw_file_overwrite.img", false);
 
     let verify_requests = vec![
         VerifyRequest {
@@ -161,7 +161,7 @@ fn file_overwrite_test() {
 #[test]
 fn file_overwrite_moreblocks_test() {
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, "rw_file_creation.img", false);
+        create_ext2_fs("../../test/example_1.dir", 1024, "rw_file_overwritie_moreblocks.img", false);
 
     let verify_requests = vec![
         VerifyRequest {
