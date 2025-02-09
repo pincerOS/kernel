@@ -3,6 +3,7 @@ pub mod uart;
 pub mod bcm2835_aux;
 pub mod bcm2836_intc;
 pub mod gic;
+pub mod gpio;
 pub mod mailbox;
 pub mod rng;
 pub mod system_timer;
@@ -92,6 +93,8 @@ pub static WATCHDOG: UnsafeInit<SpinLock<watchdog::bcm2835_wdt_driver>> =
 type InitTask = Box<dyn Fn() + Send + Sync>;
 pub static PER_CORE_INIT: UnsafeInit<Vec<InitTask>> = unsafe { UnsafeInit::uninit() };
 
+pub static GPIO: UnsafeInit<SpinLock<gpio::bcm2711_gpio_driver>> = unsafe { UnsafeInit::uninit() };
+
 pub fn init_devices(tree: &DeviceTree<'_>) {
     let mut init_fns: Vec<InitTask> = Vec::new();
 
@@ -174,6 +177,20 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         unsafe { system_timer::initialize_system_timer(timer_base) };
         let time = system_timer::get_time();
         println!("| timer initialized, time: {time}");
+    }
+
+    {
+        let gpio = discover_compatible(tree, b"brcm,bcm2711-gpio")
+            .unwrap()
+            .next()
+            .unwrap();
+        let (gpio_addr, _) = find_device_addr(gpio).unwrap().unwrap();
+        let gpio_base = unsafe { map_device(gpio_addr) }.as_ptr();
+        println!("| GPIO controller addr: {:#010x}", gpio_addr as usize);
+        println!("| GPIO controller base: {:#010x}", gpio_base as usize);
+        let gpio = unsafe { gpio::bcm2711_gpio_driver::init_with_defaults(gpio_base, true) };
+        unsafe { GPIO.init(SpinLock::new(gpio)) };
+        println!("| initialized GPIO");
     }
 
     // Set up the interrupt controllers to preempt on the arm generic
