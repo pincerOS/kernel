@@ -607,7 +607,7 @@ where
         let mut current_node: Rc<RefCell<INodeWrapper>> = node;
 
         for (index, file_dir) in path_split_vec.iter().enumerate() {
-            let mut current_node_option: Option<Rc<RefCell<INodeWrapper>>> = 
+            let mut current_node_option: Option<Rc<RefCell<INodeWrapper>>> =
                 self.find(&current_node.borrow(), file_dir);
 
             if current_node_option.is_none() {

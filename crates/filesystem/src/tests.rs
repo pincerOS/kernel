@@ -159,7 +159,7 @@ fn directory_creation_test() {
 }
 
 #[test]
-fn big_file_creation_test() {
+fn big_file_create_test() {
     let mut ext2 =
         create_ext2_fs("../../test/example_1.dir", 1024, "rw_big_file_creation.img", false);
     let mut bee_movie_bytes: Vec<u8> = Vec::new();
