@@ -315,7 +315,7 @@ impl Gic400Driver {
     pub fn set_interrupt_priority_mask(&self, priority: u8) -> u32 {
         let old_pmr = unsafe { self.reg_read_cpui(GICC_PMR) };
         unsafe { self.reg_write_cpui(GICC_PMR, priority as u32) };
-        return old_pmr;
+        old_pmr
     }
 
     /// takes in the old priority mask and sets it back
@@ -409,7 +409,7 @@ impl Gic400Driver {
         //read the ICFGR register for the interrupt
         let icfgr = unsafe { self.reg_read_dist(GICD_ICFGR + (irq / 16) * 4) };
         let shift = (irq % 16) * 2;
-        return (icfgr & (1 << shift)) != 0;
+        (icfgr & (1 << shift)) != 0
     }
 
     /// Clears the pending state of the corresponding peripheral interrupt
@@ -438,18 +438,18 @@ impl Gic400Driver {
     pub fn check_irq_enabled(&self, irq: usize) -> bool {
         //read the ISENABLER register for the interrupt
         let isenabler = unsafe { self.reg_read_dist(GICD_ICENABLER + (irq / 32) * 4) };
-        return (isenabler & (1 << (irq % 32))) != 0;
+        (isenabler & (1 << (irq % 32))) != 0
     }
 
     /// Checks if interrupt is active
     pub fn check_irq_active(&self, irq: usize) -> bool {
         //read the ISACTIVER register for the interrupt
         let isactiver = unsafe { self.reg_read_dist(GICD_ISACTIVER + (irq / 32) * 4) };
-        return (isactiver & (1 << (irq % 32))) != 0;
+        (isactiver & (1 << (irq % 32))) != 0
     }
 
     pub fn get_gicd_type(&self) -> u32 {
-        return unsafe { self.reg_read_dist(GICD_TYPER) };
+        unsafe { self.reg_read_dist(GICD_TYPER) }
     }
 
     fn dist_config(&self) {
@@ -473,7 +473,7 @@ impl Gic400Driver {
     }
 
     fn check_cpu_identification(&self) -> u32 {
-        return unsafe { self.reg_read_cpui(GICC_IIDR) };
+        unsafe { self.reg_read_cpui(GICC_IIDR) }
     }
 
     fn cpu_config(&self) {

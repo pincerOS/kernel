@@ -25,6 +25,7 @@ impl BlockingLockInner {
 }
 
 impl LockImpl for BlockingLockInner {
+    #[allow(clippy::declare_interior_mutable_const)]
     const DEFAULT: Self = Self::new();
     fn lock(&self) {
         self.lock()

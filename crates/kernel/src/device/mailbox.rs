@@ -101,6 +101,9 @@ unsafe impl PropertyRequest for PropSetPowerState {
     }
 }
 
+#[derive(Debug)]
+pub struct MailboxError;
+
 impl VideoCoreMailbox {
     const MBOX_READ: usize = 0x00;
     const MBOX_POLL: usize = 0x10;
@@ -122,7 +125,11 @@ impl VideoCoreMailbox {
         Self { base }
     }
 
-    pub unsafe fn mailbox_call(&mut self, channel: u8, buffer: &mut [u128]) -> Result<(), ()> {
+    pub unsafe fn mailbox_call(
+        &mut self,
+        channel: u8,
+        buffer: &mut [u128],
+    ) -> Result<(), MailboxError> {
         let status_reg = Volatile(self.base.wrapping_byte_add(Self::MBOX_STATUS));
         let read_reg = Volatile(self.base.wrapping_byte_add(Self::MBOX_READ));
         let write_reg = Volatile(self.base.wrapping_byte_add(Self::MBOX_WRITE));
@@ -185,7 +192,7 @@ impl VideoCoreMailbox {
         buffer: &'a mut [u128],
         tag: u32,
         request_data: &[u32],
-    ) -> Result<(u32, &'a [u8]), ()> {
+    ) -> Result<(u32, &'a [u8]), MailboxError> {
         // TODO: "Response may include unsolicited tags."
 
         let words: &mut [u32] = bytemuck::cast_slice_mut::<_, u32>(&mut *buffer);
@@ -221,7 +228,7 @@ impl VideoCoreMailbox {
         let response_code = words[4];
 
         if response_code != 0x80000000 {
-            return Err(());
+            return Err(MailboxError);
         }
 
         let response_data: &[u8] = &bytemuck::cast_slice(&words[5..])[..response_size as usize];
@@ -230,13 +237,13 @@ impl VideoCoreMailbox {
         // (ie. try requesing the commandline with a small buffer?)
         if response_size > data_words * size_of::<u32>() as u32 {
             // retry?  response was truncated
-            return Err(());
+            return Err(MailboxError);
         }
 
         Ok((response, response_data))
     }
 
-    pub unsafe fn get_property<T>(&mut self, request: T) -> Result<T::Output, ()>
+    pub unsafe fn get_property<T>(&mut self, request: T) -> Result<T::Output, MailboxError>
     where
         T: PropertyRequest,
     {
@@ -415,7 +422,7 @@ impl Surface {
         self.framerate
     }
     pub fn buffer(&mut self) -> &mut [u32] {
-        bytemuck::cast_slice_mut(&mut *self.alternate)
+        bytemuck::cast_slice_mut(&mut self.alternate)
     }
     #[inline(never)]
     pub fn present(&mut self) {

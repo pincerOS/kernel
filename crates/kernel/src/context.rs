@@ -21,6 +21,7 @@ pub struct AllCores([CoreInfo; 4]);
 
 impl AllCores {
     const fn new() -> Self {
+        #[allow(clippy::declare_interior_mutable_const)]
         const INIT: CoreInfo = CoreInfo {
             thread: Cell::new(None),
             core_sp: Cell::new(0),
@@ -208,6 +209,7 @@ unsafe extern "C" fn context_switch_inner(
                 // These objects borrow from the calling thread, so they
                 // must not be used once the thread is on the (unlocked)
                 // queue.
+                #[allow(clippy::drop_non_drop)]
                 drop(action);
             }
         }

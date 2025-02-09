@@ -136,7 +136,7 @@ extern "C" {
 }
 
 pub unsafe fn override_irq_handler(handler: ExceptionHandler) {
-    let addr = handler as u64;
+    let addr = handler as usize;
 
     let encode_bl = |caller_addr: u64| {
         let diff = addr as i64 - caller_addr as i64;
@@ -248,8 +248,8 @@ unsafe extern "C" fn exception_handler_example(
             println!("Got syscall with number: {arg:#x}");
             match arg {
                 1 => {
-                    ctx.regs[0] = ctx.regs[0] * ctx.regs[1];
-                    return ctx;
+                    ctx.regs[0] *= ctx.regs[1];
+                    ctx
                 }
                 2 => {
                     println!("Got syscall #2!  Shutting down");
@@ -277,7 +277,10 @@ unsafe extern "C" fn exception_handler_unhandled(
 }
 
 type SyscallHandler = unsafe fn(ctx: &mut Context) -> *mut Context;
+
+#[allow(clippy::declare_interior_mutable_const)]
 const NULL_HANDLER: AtomicUsize = AtomicUsize::new(0);
+
 static SYSCALL_HANDLERS: [AtomicUsize; 256] = [NULL_HANDLER; 256];
 
 pub unsafe fn register_syscall_handler(num: usize, handler: SyscallHandler) {
@@ -289,7 +292,7 @@ pub fn get_syscall_handler(num: usize) -> Option<SyscallHandler> {
     if num == 0 {
         None
     } else {
-        Some(unsafe { core::mem::transmute(num) })
+        Some(unsafe { core::mem::transmute::<usize, SyscallHandler>(num) })
     }
 }
 

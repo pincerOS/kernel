@@ -21,7 +21,7 @@ pub fn get_time() -> u64 {
 }
 
 pub unsafe fn initialize_system_timer(base: *mut ()) {
-    unsafe { SYSTEM_TIMER.init(Bcm2835SysTmr::new(base as *mut ())) };
+    unsafe { SYSTEM_TIMER.init(Bcm2835SysTmr::new(base)) };
     if super::gic::GIC.is_initialized() {
         // TODO: support local timer on rpi3b interrupt controller
         let gic = super::gic::GIC.get();

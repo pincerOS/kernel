@@ -85,9 +85,9 @@ struct WaitFuture<'a, 'b, T> {
     guard: Option<SpinLockGuard<'a, T>>,
 }
 
-unsafe impl<'a, 'b, T: Send> Send for WaitFuture<'a, 'b, T> {}
+unsafe impl<T: Send> Send for WaitFuture<'_, '_, T> {}
 
-impl<'a, 'b, T> Future for WaitFuture<'a, 'b, T> {
+impl<T> Future for WaitFuture<'_, '_, T> {
     type Output = ();
     fn poll(
         mut self: core::pin::Pin<&mut Self>,

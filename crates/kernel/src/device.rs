@@ -28,7 +28,7 @@ pub fn discover_compatible<'a, 'b>(
         target: &'b [u8],
     }
 
-    impl<'a, 'b> Iterator for DiscoverIter<'a, 'b> {
+    impl<'a> Iterator for DiscoverIter<'a, '_> {
         type Item = MappingIterator<'a>;
         fn next(&mut self) -> Option<Self::Item> {
             loop {
@@ -76,7 +76,7 @@ pub fn find_device_addr(iter: MappingIterator) -> Result<Option<(usize, usize)>,
     while let Some(Ok((name, data))) = props.next() {
         if name == "reg" {
             let addr_size = props.parse_addr_size(data)?;
-            if let Some(m) = props.map_addr_size(addr_size).ok() {
+            if let Ok(m) = props.map_addr_size(addr_size) {
                 return Ok(Some((m.addr as usize, m.size as usize)));
             }
             break;
@@ -135,7 +135,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let (gic_addr, _) = find_device_addr(gic).unwrap().unwrap();
         let gic_base = unsafe { map_device_block(gic_addr, 0x8000) }.as_ptr();
 
-        println!("| GIC-400 addr: {:#010x}", gic_addr as usize);
+        println!("| GIC-400 addr: {:#010x}", gic_addr);
         println!("| GIC-400 base: {:#010x}", gic_base as usize);
 
         let gic = unsafe { gic::Gic400Driver::init(gic_base) };
@@ -153,7 +153,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         println!("| initializing local interrupt controller");
         let (intc_addr, _) = find_device_addr(intc).unwrap().unwrap();
         let intc_base = unsafe { map_device(intc_addr) }.as_ptr();
-        println!("| INT controller addr: {:#010x}", intc_addr as usize);
+        println!("| INT controller addr: {:#010x}", intc_addr);
         println!("| INT controller base: {:#010x}", intc_base as usize);
         let intc = bcm2836_intc::bcm2836_l1_intc_driver::new(intc_base);
         unsafe { bcm2836_intc::LOCAL_INTC.init(intc) };
@@ -169,7 +169,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
             .unwrap();
         let (timer_addr, _) = find_device_addr(timer_iter).unwrap().unwrap();
         let timer_base = unsafe { map_device(timer_addr) }.as_ptr();
-        println!("| timer addr: {:#010x}", timer_addr as usize);
+        println!("| timer addr: {:#010x}", timer_addr);
         unsafe { system_timer::initialize_system_timer(timer_base) };
         let time = system_timer::get_time();
         println!("| timer initialized, time: {time}");

@@ -93,6 +93,7 @@ impl SpinLockInner {
 }
 
 impl LockImpl for SpinLockInner {
+    #[allow(clippy::declare_interior_mutable_const)]
     const DEFAULT: Self = Self::new();
     fn lock(&self) {
         self.lock()
@@ -143,6 +144,7 @@ impl InterruptSpinLockInner {
 }
 
 impl LockImpl for InterruptSpinLockInner {
+    #[allow(clippy::declare_interior_mutable_const)]
     const DEFAULT: Self = Self::new();
     fn lock(&self) {
         self.lock()

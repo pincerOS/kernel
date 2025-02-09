@@ -11,6 +11,7 @@ impl<T> PerCore<T>
 where
     T: ConstInit,
 {
+    #[allow(clippy::declare_interior_mutable_const)]
     const INIT_INNER: PerCoreInner<T> = PerCoreInner(core::cell::RefCell::new(ConstInit::INIT));
 
     pub const fn new() -> Self {

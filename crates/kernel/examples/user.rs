@@ -201,7 +201,7 @@ where
             let arr = future.as_mut().get_data().arr.take().unwrap();
 
             ctx.regs[..N].copy_from_slice(&arr);
-            return ctx;
+            ctx
         }
         core::task::Poll::Pending => {
             let (core_sp, thread) =
@@ -291,7 +291,7 @@ unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
             if r.is_err() {
                 res = [-2isize as usize];
             } else {
-                res = [0 as usize];
+                res = [0];
             }
         } else {
             send.send_async(Message {
@@ -300,7 +300,7 @@ unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
                 data,
             })
             .await;
-            res = [0 as usize];
+            res = [0];
         }
 
         OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
