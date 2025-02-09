@@ -60,6 +60,8 @@ fn write_and_verify_test(ext2: &mut Ext2<FileBlockDevice>, verify_requests: &Vec
     let root_node = ext2.get_root_inode_wrapper();
 
     for verify_request in verify_requests {
+        let file_path_str: &str = std::str::from_utf8(verify_request.file_path).unwrap();
+
         let file_node: Rc<RefCell<INodeWrapper>> =
             ext2.find_recursive(root_node.clone(), verify_request.file_path,
                                 verify_request.create_dirs_if_nonexistent,
@@ -216,15 +218,15 @@ fn directory_creation_test() {
 fn big_file_create_test() {
     let mut ext2 =
         create_ext2_fs("../../test/example_1.dir", 1024, "rw_big_file_creation.img", false);
-    let mut bee_movie_bytes: Vec<u8> = Vec::new();
+    let mut large_image_bytes: Vec<u8> = Vec::new();
 
     File::open("../../test/files_to_add/largeimage.png").unwrap().read_to_end(
-                &mut bee_movie_bytes).unwrap();
+                &mut large_image_bytes).unwrap();
 
     let verify_requests = vec![
         VerifyRequest {
             file_path: b"largeimage.png",
-            data: &*bee_movie_bytes,
+            data: &*large_image_bytes,
             expect_data: None,
             write_mode: WriteMode::CreateWrite,
             create_dirs_if_nonexistent: false

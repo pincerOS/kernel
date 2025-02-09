@@ -115,6 +115,9 @@ pub struct Ext2<Device> {
 
 type DeferredWriteMap = BTreeMap<usize, [u8; BLOCK_SIZE]>;
 
+#[repr(C, align(4))]
+struct AlignedBlock<const N:usize>(pub [u8;N]);
+
 mod DirectoryEntryConstants {
     pub const MAX_FILE_NAME_LEN: usize = 255;
 }
@@ -361,6 +364,9 @@ pub mod file_type {
     pub const EXT2_FT_SOCK: u8 = 6;
     pub const EXT2_FT_SYMLINK: u8 = 7;
 }
+
+const UNALLOCATED_BLOCK_SLOT: u32 = 0;
+const INLINE_BLOCK_BLOCK_LIMIT: usize = 13;
 
 pub struct INodeWrapper {
     inode: INode,
@@ -1120,7 +1126,7 @@ impl INodeWrapper
 
         while num_of_blocks_left > 0 {
             // TODO: write to block_group_descriptor_tables
-            let current_block_group: &BGD =
+            let mut current_block_group: &BGD =
                 &ext2.block_group_descriptor_tables[current_block_group_index];
 
             let mut free_block_count = current_block_group.bg_free_blocks_count as usize;
@@ -1128,6 +1134,8 @@ impl INodeWrapper
             while free_block_count == 0 {
                 current_block_group_index =
                     (current_block_group_index + 1) % num_of_block_groups;
+                current_block_group = &ext2.block_group_descriptor_tables[current_block_group_index];
+
                 free_block_count = current_block_group.bg_free_blocks_count as usize;
 
                 if current_block_group_index == self.get_block_group_index(ext2) {
@@ -1216,20 +1224,21 @@ impl INodeWrapper
                                                        blocks_newly_allocated: &mut usize,
                                                        new_blocks: &[usize],
                                                        deferred_write_map: &mut DeferredWriteMap) -> Result<(), Ext2Error> {
-        let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+        let mut block_buffer = AlignedBlock([0; BLOCK_SIZE]);
         let mut byte_write_pos: Option<usize> = None;
         let mut byte_write: [u8; size_of::<u32>()] = [0; size_of::<u32>()];
-        let double_indirect_block_block_limit: usize = BLOCK_SIZE / size_of::<u32>();
+        let singly_indirect_block_block_limit: usize = 
+            std::cmp::min(BLOCK_SIZE / size_of::<u32>(), new_blocks.len() - *blocks_newly_allocated);
 
-        ext2.read_logical_block_self(block_num, 1, &mut block_buffer)?;
+        ext2.read_logical_block_self(block_num, 1, &mut block_buffer.0)?;
 
         {
             let mut block_buffer_u32_slice: &mut [u32] =
-                bytemuck::cast_slice_mut::<_, u32>(&mut block_buffer);
+                bytemuck::cast_slice_mut::<_, u32>(&mut block_buffer.0);
 
             // handling the contained lists of inode blocks
-            for i in blocks_allocated_within_list..double_indirect_block_block_limit {
-                assert!(block_buffer_u32_slice[i] == 0);
+            for i in blocks_allocated_within_list..singly_indirect_block_block_limit {
+                assert_eq!(block_buffer_u32_slice[i], 0);
 
                 block_buffer_u32_slice[i] = new_blocks[*blocks_newly_allocated] as u32;
                 *num_of_blocks_allocated += 1;
@@ -1246,15 +1255,112 @@ impl INodeWrapper
             let unwrapped_write_pos: usize = byte_write_pos.unwrap();
 
             byte_write.copy_from_slice(
-                &block_buffer[unwrapped_write_pos..unwrapped_write_pos+size_of::<u32>()]);
+                &block_buffer.0[unwrapped_write_pos..unwrapped_write_pos+size_of::<u32>()]);
 
 
             ext2.add_write_to_deferred_writes_map(deferred_write_map, self.inode.i_block[13] as usize,
                                                   unwrapped_write_pos, &byte_write,
-                                                  Some(block_buffer))?;
+                                                  Some(block_buffer.0))?;
         }
 
         Ok(())
+    }
+
+    fn write_doublely_indirect_blocks_to_inode<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>,
+                                                             num_of_blocks_allocated: &mut usize,
+                                                             single_indirect_block_block_limit: usize,
+                                                             all_blocks_or_fail: bool,
+                                                             blocks_newly_allocated: &mut usize,
+                                                             new_blocks: &[usize],
+                                                             deferred_writes: &mut DeferredWriteMap) -> Result<Option<usize>, Ext2Error> {
+        let count_of_doubly_linked_blocks: usize = *num_of_blocks_allocated -
+            (INLINE_BLOCK_BLOCK_LIMIT + single_indirect_block_block_limit);
+
+        let starting_doubly_linked_block: usize =
+            count_of_doubly_linked_blocks / single_indirect_block_block_limit;
+        let ending_doubly_linked_block: usize =
+            std::cmp::min(single_indirect_block_block_limit,
+                          new_blocks.len() - *blocks_newly_allocated);
+        let mut new_blocks_needed_for_block_list_count: usize = 0;
+
+        // find all blocks needed to complete the write
+        if self.inode.i_block[14] == UNALLOCATED_BLOCK_SLOT {
+            let new_block_list_blocks_result =
+                self.find_new_blocks(ext2, 1, all_blocks_or_fail, deferred_writes);
+
+            if new_block_list_blocks_result.is_err() {
+                return Err(new_block_list_blocks_result.unwrap_err());
+            }
+
+            let new_block_list: Vec<usize> = new_block_list_blocks_result?;
+
+            if new_block_list.is_empty() {
+                self.set_block_allocated_count(ext2,
+                                               self.block_allocated_count(ext2) + *blocks_newly_allocated);
+                return Ok(Some(*blocks_newly_allocated));
+            }
+
+            self.inode.i_block[14] = new_block_list[0] as u32;
+        }
+
+        let mut block_list_buffer = AlignedBlock([0; BLOCK_SIZE]);
+
+        ext2.read_logical_block_self(self.inode.i_block[14] as usize,
+                                     1, &mut block_list_buffer.0)?;
+
+        let block_list_u32_slice: &mut [u32] =
+            bytemuck::cast_slice_mut::<u8, u32>(&mut block_list_buffer.0);
+
+        for block_num in starting_doubly_linked_block..ending_doubly_linked_block {
+            if block_list_u32_slice[block_num] == UNALLOCATED_BLOCK_SLOT {
+                new_blocks_needed_for_block_list_count += 1;
+            }
+        }
+
+        let new_block_list_blocks_result =
+            self.find_new_blocks(ext2,new_blocks_needed_for_block_list_count,
+                                 all_blocks_or_fail, deferred_writes);
+
+        if new_block_list_blocks_result.is_err() {
+            return Err(new_block_list_blocks_result.unwrap_err());
+        }
+
+        let new_block_list_blocks: Vec<usize> = new_block_list_blocks_result?;
+        let mut new_block_list_index: usize = 0;
+
+        assert!(!all_blocks_or_fail ||
+            new_block_list_blocks.len() == new_blocks_needed_for_block_list_count);
+
+        for block_num in starting_doubly_linked_block..ending_doubly_linked_block {
+            let num_of_blocks_allocated_within_list =
+                *num_of_blocks_allocated % single_indirect_block_block_limit;
+
+            if block_list_u32_slice[block_num] == UNALLOCATED_BLOCK_SLOT {
+                if new_block_list_index >= new_block_list_blocks.len() {
+                    self.set_block_allocated_count(ext2,
+                                                   self.block_allocated_count(ext2) + *blocks_newly_allocated);
+                    return Ok(Some(*blocks_newly_allocated));
+                }
+
+                block_list_u32_slice[block_num] =
+                    new_block_list_blocks[new_block_list_index] as u32;
+                new_block_list_index += 1;
+            }
+
+            self.write_indirected_block_to_inode(ext2, block_list_u32_slice[block_num] as usize,
+                                                 num_of_blocks_allocated_within_list,
+                                                 num_of_blocks_allocated,
+                                                 blocks_newly_allocated, new_blocks,
+                                                 deferred_writes)?;
+        }
+
+        if !new_block_list_blocks.is_empty() {
+            self.set_block_allocated_count(ext2,
+                                           self.block_allocated_count(ext2) + *blocks_newly_allocated);
+            return Ok(Some(*blocks_newly_allocated));
+        }
+
+        Ok(None)
     }
 
     fn write_new_blocks_to_inode<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>,
@@ -1262,31 +1368,29 @@ impl INodeWrapper
                                                  all_blocks_or_fail: bool,
                                                  deferred_writes: &mut DeferredWriteMap)
                                                  -> Result<usize, Ext2Error> {
-        const UNALLOCATED_BLOCK_SLOT: u32 = 0;
         // assumption: references to block zero means unallocated block slot
         // TODO: write inode to disk
         // TODO: write new block num to inode
         // need to handle unallocated blocks containing doubly linked inode blocks
         // and singly linked inode blocks
-        let inline_block_block_limit: usize = 12;
-        let double_indirect_block_block_limit: usize = BLOCK_SIZE / size_of::<u32>();
-        let triple_indirect_block_block_limit: usize =
-            double_indirect_block_block_limit * double_indirect_block_block_limit;
+        let single_indirect_block_block_limit: usize = BLOCK_SIZE / size_of::<u32>();
+        let double_indirect_block_block_limit: usize =
+            single_indirect_block_block_limit * single_indirect_block_block_limit;
         let mut num_of_blocks_allocated: usize = self.block_allocated_count::<D>(ext2);
 
         let mut blocks_newly_allocated: usize = 0;
 
-        if triple_indirect_block_block_limit + double_indirect_block_block_limit +
-            inline_block_block_limit < num_of_blocks_allocated {
+        if single_indirect_block_block_limit + double_indirect_block_block_limit +
+            INLINE_BLOCK_BLOCK_LIMIT < num_of_blocks_allocated {
             // we've run out of places to put blocks in the inode which means
             // we've reached the largest file size limit
             return Ok(0);
         }
 
-        if num_of_blocks_allocated < inline_block_block_limit &&
+        if num_of_blocks_allocated < INLINE_BLOCK_BLOCK_LIMIT &&
             blocks_newly_allocated < new_blocks.len()  {
-            for i in num_of_blocks_allocated..12 {
-                assert!(self.inode.i_block[i] == UNALLOCATED_BLOCK_SLOT);
+            for i in num_of_blocks_allocated..13 {
+                assert_eq!(self.inode.i_block[i], UNALLOCATED_BLOCK_SLOT);
 
                 self.inode.i_block[i] = new_blocks[blocks_newly_allocated] as u32;
                 num_of_blocks_allocated += 1;
@@ -1298,9 +1402,9 @@ impl INodeWrapper
             }
         }
 
-        if num_of_blocks_allocated < double_indirect_block_block_limit + inline_block_block_limit &&
+        if num_of_blocks_allocated < double_indirect_block_block_limit + INLINE_BLOCK_BLOCK_LIMIT &&
             blocks_newly_allocated < new_blocks.len() {
-            let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+            let mut block_buffer = AlignedBlock([0; BLOCK_SIZE]);
 
             if self.inode.i_block[13] == UNALLOCATED_BLOCK_SLOT {
                 let new_blocks_allocated: Vec<usize> =
@@ -1319,21 +1423,25 @@ impl INodeWrapper
 
             if self.inode.i_block[13] != UNALLOCATED_BLOCK_SLOT {
                 ext2.read_logical_block_self(self.inode.i_block[13] as usize,
-                                             1, &mut block_buffer)?;
+                                             1, &mut block_buffer.0)?;
 
                 let mut byte_write_pos: usize = 0;
 
                 {
                     let block_list_u32_slice: &mut [u32] =
-                        bytemuck::cast_slice_mut::<_, u32>(&mut block_buffer);
+                        bytemuck::cast_slice_mut::<u8, u32>(&mut block_buffer.0);
+                    let num_of_blocks_allocated_base: usize =
+                        num_of_blocks_allocated - INLINE_BLOCK_BLOCK_LIMIT;
 
-                    for i in num_of_blocks_allocated..(num_of_blocks_allocated + double_indirect_block_block_limit) {
-                        assert!(block_list_u32_slice[i] == UNALLOCATED_BLOCK_SLOT);
+                    for i in num_of_blocks_allocated_base..(num_of_blocks_allocated_base + single_indirect_block_block_limit) {
+                        let block_index: usize = i - num_of_blocks_allocated_base;
 
-                        block_list_u32_slice[i] = new_blocks[blocks_newly_allocated] as u32;
+                        assert_eq!(block_list_u32_slice[block_index], UNALLOCATED_BLOCK_SLOT);
+
+                        block_list_u32_slice[block_index] = new_blocks[blocks_newly_allocated] as u32;
                         num_of_blocks_allocated += 1;
                         blocks_newly_allocated += 1;
-                        byte_write_pos = i * size_of::<u32>();
+                        byte_write_pos = block_index * size_of::<u32>();
 
                         if blocks_newly_allocated == new_blocks.len() {
                             break;
@@ -1343,97 +1451,20 @@ impl INodeWrapper
 
                 ext2.add_write_to_deferred_writes_map(deferred_writes, self.inode.i_block[13] as usize,
                                                       byte_write_pos,
-                                                      &block_buffer[byte_write_pos..size_of::<u32>()],
-                                                      Some(block_buffer))?;
+                                                      &block_buffer.0[byte_write_pos..byte_write_pos + size_of::<u32>()],
+                                                      Some(block_buffer.0))?;
             }
         }
 
         if blocks_newly_allocated < new_blocks.len() {
-            let count_of_doubly_linked_blocks: usize = num_of_blocks_allocated -
-                (inline_block_block_limit + double_indirect_block_block_limit);
+            let doubley_write_result: Option<usize> =
+                self.write_doublely_indirect_blocks_to_inode(ext2, &mut num_of_blocks_allocated,
+                                                         single_indirect_block_block_limit,
+                                                         all_blocks_or_fail, &mut blocks_newly_allocated,
+                                                         new_blocks, deferred_writes)?;
 
-            let starting_doubly_linked_block: usize =
-                count_of_doubly_linked_blocks / double_indirect_block_block_limit;
-            let ending_doubly_linked_block: usize =
-                std::cmp::min(double_indirect_block_block_limit,
-                              new_blocks.len() - blocks_newly_allocated);
-            let mut new_blocks_needed_for_block_list_count: usize = 0;
-
-            // find all blocks needed to complete the write
-            if self.inode.i_block[14] == UNALLOCATED_BLOCK_SLOT {
-                let new_block_list_blocks_result =
-                    self.find_new_blocks(ext2, 1, all_blocks_or_fail, deferred_writes);
-
-                if new_block_list_blocks_result.is_err() {
-                    return Err(new_block_list_blocks_result.unwrap_err());
-                }
-
-                let new_block_list: Vec<usize> = new_block_list_blocks_result?;
-
-                if new_block_list.len() == 0 {
-                    self.set_block_allocated_count(ext2,
-                                                   self.block_allocated_count(ext2) + blocks_newly_allocated);
-                    return Ok(blocks_newly_allocated);
-                }
-
-                self.inode.i_block[14] = new_block_list[0] as u32;
-            }
-
-            let mut block_list_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
-
-            ext2.read_logical_block_self(self.inode.i_block[14] as usize,
-                                         1, &mut block_list_buffer)?;
-
-            let block_list_u32_slice: &mut [u32] =
-                bytemuck::cast_slice_mut::<_, u32>(&mut block_list_buffer);
-
-            for block_num in starting_doubly_linked_block..ending_doubly_linked_block {
-                if block_list_u32_slice[block_num] == UNALLOCATED_BLOCK_SLOT {
-                    new_blocks_needed_for_block_list_count += 1;
-                }
-            }
-
-            let new_block_list_blocks_result =
-                self.find_new_blocks(ext2,new_blocks_needed_for_block_list_count,
-                                     all_blocks_or_fail, deferred_writes);
-
-            if new_block_list_blocks_result.is_err() {
-                return Err(new_block_list_blocks_result.unwrap_err());
-            }
-            
-            let new_block_list_blocks: Vec<usize> = new_block_list_blocks_result?;
-            let mut new_block_list_index: usize = 0;
-
-            assert!(!all_blocks_or_fail || 
-                    new_block_list_blocks.len() == new_blocks_needed_for_block_list_count);
-
-            for block_num in starting_doubly_linked_block..ending_doubly_linked_block {
-                let num_of_blocks_allocated_within_list =
-                    num_of_blocks_allocated % double_indirect_block_block_limit;
-
-                if block_list_u32_slice[block_num] == UNALLOCATED_BLOCK_SLOT {
-                    if new_block_list_index >= new_block_list_blocks.len() {
-                        self.set_block_allocated_count(ext2,
-                                                       self.block_allocated_count(ext2) + blocks_newly_allocated);
-                        return Ok(blocks_newly_allocated);
-                    }
-
-                    block_list_u32_slice[block_num] =
-                        new_block_list_blocks[new_block_list_index] as u32;
-                    new_block_list_index += 1;
-                }
-
-                self.write_indirected_block_to_inode(ext2, block_list_u32_slice[block_num] as usize,
-                                                     num_of_blocks_allocated_within_list,
-                                                     &mut num_of_blocks_allocated,
-                                                     &mut blocks_newly_allocated, new_blocks,
-                                                     deferred_writes)?;
-            }
-
-            if !new_block_list_blocks.is_empty() {
-                self.set_block_allocated_count(ext2,
-                                               self.block_allocated_count(ext2) + blocks_newly_allocated);
-                return Ok(blocks_newly_allocated);
+            if doubley_write_result.is_some() {
+                return Ok(doubley_write_result.unwrap());
             }
         }
 
@@ -1477,9 +1508,12 @@ impl INodeWrapper
                 self.find_new_blocks::<D>(ext2, num_of_blocks_needed, all_bytes_or_fail,
                                           deferred_writes);
 
+            let old_new_blocks_allocated_size: usize = new_blocks_allocated.len();
+
             new_blocks_allocated.append(&mut new_blocks_allocated_result?);
 
-            let new_blocks_slice = &new_blocks_allocated[new_blocks_allocated.len() - 1..];
+            let new_blocks_slice: &[usize] =
+                &new_blocks_allocated[old_new_blocks_allocated_size..];
             
             self.write_new_blocks_to_inode(ext2, new_blocks_slice, true, deferred_writes)?;
         }
