@@ -237,7 +237,7 @@ fn big_file_create_test() {
 #[test]
 fn dir_tree_test() {
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, "rw_big_file_creation.img", false);
+        create_ext2_fs("../../test/example_1.dir", 1024, "rw_dir_tree.img", false);
     let mut bart_image_bytes: Vec<u8> = Vec::new();
     let mut bee_movie_bytes: Vec<u8> = Vec::new();
     let mut wmata_image_bytes: Vec<u8> = Vec::new();
