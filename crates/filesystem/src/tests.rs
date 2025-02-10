@@ -1,9 +1,11 @@
 use alloc::rc::Rc;
 use std::cell::RefCell;
 use crate::{linux::FileBlockDevice, INodeWrapper, Superblock};
+use std::fs;
 use std::fs::File;
 use std::{io, vec};
 use std::io::Read;
+use std::io::Write;
 use std::prelude::v1::{Box, String, ToString, Vec};
 use std::process::{Command, Output};
 use crate::{BlockDevice, Ext2};
@@ -123,6 +125,88 @@ fn read_write_example_1() {
 
     write_and_verify_test(&mut ext2, &verify_requests);
 }
+
+#[test]
+fn single_indirect_read_test() {
+    let mut f = File::create_new("../../test/example_1.dir/single.txt").unwrap();
+    let mut text_bytes = vec![0; 1024*13];
+    for i in 0..13 {
+        text_bytes[i*1024] = (i+1) as u8;
+    }
+    f.write(&text_bytes);
+
+    // block size is 1024 for now
+    let mut ext2 =
+        create_ext2_fs("../../test/example_1.dir", 1024, "indirect1.img", true);
+
+    let verify_requests = vec![
+        VerifyRequest {
+            file_path: b"single.txt",
+            data: &text_bytes,
+            expect_data: None,
+            write_mode: WriteMode::None,
+            create_dirs_if_nonexistent: false
+        }
+    ];
+    fs::remove_file("../../test/example_1.dir/single.txt");
+
+    read_and_verify_test(&mut ext2, &verify_requests);
+}
+
+#[test]
+fn double_indirect_read_test() {
+    let mut f = File::create_new("../../test/example_1.dir/double.txt").unwrap();
+    let mut text_bytes = vec![0; 1024*269];
+    for i in 0..269 {
+        text_bytes[i*1024] = (i+1) as u8;
+    }
+    f.write(&text_bytes);
+
+    // block size is 1024 for now
+    let mut ext2 =
+        create_ext2_fs("../../test/example_1.dir", 1024, "indirect2.img", true);
+
+    let verify_requests = vec![
+        VerifyRequest {
+            file_path: b"double.txt",
+            data: &text_bytes,
+            expect_data: None,
+            write_mode: WriteMode::None,
+            create_dirs_if_nonexistent: false
+        }
+    ];
+    fs::remove_file("../../test/example_1.dir/double.txt");
+
+    read_and_verify_test(&mut ext2, &verify_requests);
+}
+
+// TODO(Sasha): This test doesn't work yet and is also really slow so 
+// #[test]
+// fn triple_indirect_read_test() {
+//     let mut f = File::create_new("../../test/example_1.dir/triple.txt").unwrap();
+//     let mut text_bytes = vec![0; 1024*65805];
+//     for i in 0..65805 {
+//         text_bytes[i*1024] = (i+1) as u8;
+//     }
+//     f.write(&text_bytes);
+
+//     // block size is 1024 for now
+//     let mut ext2 =
+//         create_ext2_fs("../../test/example_1.dir", 1024, "indirect3.img", true);
+
+//     let verify_requests = vec![
+//         VerifyRequest {
+//             file_path: b"triple.txt",
+//             data: &text_bytes,
+//             expect_data: None,
+//             write_mode: WriteMode::None,
+//             create_dirs_if_nonexistent: false
+//         }
+//     ];
+//     fs::remove_file("../../test/example_1.dir/triple.txt");
+
+//     read_and_verify_test(&mut ext2, &verify_requests);
+// }
 
 #[test]
 fn append_alot_test() {
