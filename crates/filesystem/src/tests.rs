@@ -12,7 +12,7 @@ pub fn create_ext2_fs(dir_path: &str, block_size: usize, img_name: &str, ro: boo
     Command::new("mkfs.ext2")
         .args(["-q", "-b", &*block_size.to_string(), "-i",
             &*block_size.to_string(), "-d", &*dir_path, "-I",
-            "128", "-r", "0", "-t", "ext2", &*img_name, "10m"]).output().unwrap();
+            "128", "-r", "0", "-t", "ext2", &*img_name, "64m"]).output().unwrap();
 
     let file: File = File::options().read(true).write(!ro).open(img_name).unwrap();
     let disk: FileBlockDevice = FileBlockDevice::new(file);

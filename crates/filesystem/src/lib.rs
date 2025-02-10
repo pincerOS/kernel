@@ -26,6 +26,7 @@ extern crate std;
 use alloc::borrow::Cow;
 use alloc::rc::{Rc, Weak};
 use std::cell::RefCell;
+use std::cmp::PartialEq;
 use std::collections::BTreeMap;
 use std::fs::DirEntry;
 use std::prelude::v1::{String, Vec};
@@ -44,18 +45,19 @@ pub mod linux;
 pub const SECTOR_SIZE: usize = 512;
 pub const BLOCK_SIZE: usize = 1024;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum BlockDeviceError {
     Unknown,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Ext2Error {
     BlockDeviceError(BlockDeviceError),
     UnavailableINode,
     TooLongFileName,
     InvalidMode,
     FileNotFound,
+    NotEnoughDeviceSpace
 }
 
 pub trait BlockDevice {
@@ -120,6 +122,7 @@ struct AlignedBlock<const N:usize>(pub [u8;N]);
 
 mod DirectoryEntryConstants {
     pub const MAX_FILE_NAME_LEN: usize = 255;
+    pub const MIN_DIRECTORY_ENTRY_SIZE: usize = 8;
 }
 
 #[repr(C)]
@@ -133,6 +136,13 @@ struct DirectoryEntry {
 
     name_characters: [u8; 256]
 }
+
+struct DirectoryEntryWrapper {
+    entry: DirectoryEntry,
+    inode_block_num: usize,
+    offset: usize
+}
+
 // https://www.nongnu.org/ext2-doc/ext2.html
 
 #[repr(C)]
@@ -274,7 +284,7 @@ pub struct BGD {
 const _: () = assert!(size_of::<BGD>() == 32);
 
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct INode {
     i_mode: u16,
     i_uid: u16,
@@ -368,6 +378,7 @@ pub mod file_type {
 const UNALLOCATED_BLOCK_SLOT: u32 = 0;
 const INLINE_BLOCK_BLOCK_LIMIT: usize = 13;
 
+#[derive(Debug)]
 pub struct INodeWrapper {
     inode: INode,
     inode_num: u32
@@ -376,6 +387,26 @@ pub struct INodeWrapper {
 // TODO(Bobby): replace this with how we get time without std
 fn get_epoch_time() -> usize {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as usize
+}
+
+impl DirectoryEntryWrapper {
+    pub fn add_deferred_write<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>,
+                                              dir_node: &mut INodeWrapper,
+                                              deferred_writes: &mut DeferredWriteMap)
+        -> Result<(), Ext2Error> {
+        let entry_bytes: &[u8] = bytemuck::bytes_of(&self.entry);
+        
+        // we shouldn't write self.entry.entry_size because that contains padding bytes
+        // which can be larger than the maximum directory entry size without padding
+        let dir_entry_size_to_write =
+            (self.entry.name_length as usize) + DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE ;
+        let entry_slice: &[u8] = &entry_bytes[0..dir_entry_size_to_write];
+
+        let block_num = dir_node.get_inode_block_num(self.inode_block_num, ext2) as usize;
+
+        ext2.add_write_to_deferred_writes_map(deferred_writes, block_num, self.offset,
+                                              entry_slice, None)
+    }
 }
 
 impl<D> Ext2<D>
@@ -568,11 +599,14 @@ where
         self.superblock.s_inode_size as u32
     }
 
-    pub fn find(&mut self, node: &INodeWrapper, name: &[u8]) -> Option<Rc<RefCell<INodeWrapper>>> {
-        let dir_entries: Vec<DirectoryEntry> = node.get_dir_entries(self);
+    pub fn find(&mut self, node: &INodeWrapper, name: &[u8])
+            -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
+        let dir_entries: Vec<DirectoryEntryWrapper> = node.get_dir_entries(self)?;
 
         if node.is_dir() {
-            for dir_entry in dir_entries {
+            for dir_entry_wrapper in dir_entries {
+                let dir_entry = dir_entry_wrapper.entry;
+
                 if dir_entry.name_length == name.len() as u16 &&
                    &dir_entry.name_characters[0..name.len()] == name {
                     // TODO: find out how to do operator overloading in rust and convert this into
@@ -582,7 +616,7 @@ where
                             self.inode_map.get(&(dir_entry.inode_number as usize)).unwrap().upgrade();
                         
                         if inode_strong_ref.is_some() {
-                            return Some(inode_strong_ref.unwrap());
+                            return Ok(inode_strong_ref.unwrap());
                         }
                     }
                     
@@ -597,12 +631,12 @@ where
                     self.inode_map.insert(dir_entry.inode_number as usize, 
                                           Rc::downgrade(&return_value));
                     
-                    return Some(return_value);
+                    return Ok(return_value);
                 }
             }
         }
 
-        None
+        Err(Ext2Error::FileNotFound)
     }
 
     pub fn find_recursive(&mut self, node: Rc<RefCell<INodeWrapper>>, name: &[u8],
@@ -613,22 +647,25 @@ where
         let mut current_node: Rc<RefCell<INodeWrapper>> = node;
 
         for (index, file_dir) in path_split_vec.iter().enumerate() {
-            let mut current_node_option: Option<Rc<RefCell<INodeWrapper>>> =
+            let mut current_node_result: Result<Rc<RefCell<INodeWrapper>>, Ext2Error> =
                 self.find(&current_node.borrow(), file_dir);
 
-            if current_node_option.is_none() {
-                if index != path_split_vec.len() - 1 && create_dirs_if_nonexistent {
-                    current_node_option =
-                        Some(self.create_dir(&mut *current_node.borrow_mut(), *file_dir)?);
-                } else if index == path_split_vec.len() - 1 && create_file_if_nonexistent {
-                    current_node_option =
-                        Some(self.create_file(&mut *current_node.borrow_mut(), *file_dir)?);
+            if current_node_result.is_err() {
+                let ext2_error: Ext2Error = current_node_result.unwrap_err();
+                let file_not_found: bool = ext2_error == Ext2Error::FileNotFound;
+
+                if file_not_found && index != path_split_vec.len() - 1 && create_dirs_if_nonexistent {
+                    let new_node = self.create_dir(&mut *current_node.borrow_mut(), *file_dir)?;
+
+                    current_node = new_node;
+                } else if file_not_found && index == path_split_vec.len() - 1 && create_file_if_nonexistent {
+                    let new_node = self.create_file(&mut *current_node.borrow_mut(), *file_dir)?;
+
+                    current_node = new_node;
                 } else {
-                    return Err(Ext2Error::FileNotFound);
+                    return Err(ext2_error);
                 }
             }
-
-            current_node = current_node_option.unwrap();
         }
 
         Ok(current_node)
@@ -800,51 +837,102 @@ where
 
         let dir_entry_name_length: u16 =
             std::cmp::min(name.len(), DirectoryEntryConstants::MAX_FILE_NAME_LEN) as u16;
-        let mut new_directory_entry = DirectoryEntry {
-            inode_number: new_inode_wrapper.borrow().inode_num,
-            entry_size: 8 + dir_entry_name_length,
-            name_length: dir_entry_name_length,
-            name_characters: [0; 256],
+        let mut new_dir_entry_wrapper = DirectoryEntryWrapper {
+            entry: DirectoryEntry {
+                inode_number: new_inode_wrapper.borrow().inode_num,
+                entry_size: (DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE as u16) + dir_entry_name_length,
+                name_length: dir_entry_name_length,
+                name_characters: [0; 256],
+            },
+            inode_block_num: 0,
+            offset: 0
         };
-        
-        if new_directory_entry.entry_size % 4 != 0 {
-            new_directory_entry.entry_size += 4 - (new_directory_entry.entry_size % 4);
-        }
 
-        new_directory_entry.name_characters[0..(new_directory_entry.name_length as usize)].copy_from_slice(name);
+        let mut dir_entries: Vec<DirectoryEntryWrapper> = node.get_dir_entries(self)?;
 
-        let dir_entry_bytes = bytemuck::bytes_of(&new_directory_entry);
+        new_dir_entry_wrapper.entry.
+            name_characters[0..(new_dir_entry_wrapper.entry.name_length as usize)].
+            copy_from_slice(name);
+
         let current_inter_block_offset: usize = node.size() as usize % BLOCK_SIZE;
         let remaining_bytes_in_block: usize = BLOCK_SIZE - current_inter_block_offset;
         let mut dir_entry_bytes_with_padding: Vec<u8> = Vec::new();
         let mut dir_entry_padding: usize = 0;
 
-        dir_entry_bytes_with_padding.resize(new_directory_entry.entry_size as usize, 0);
-
-        // dir entries need to be at 4-byte alignment
-        if (current_inter_block_offset % 4) > 0 {
-            let four_byte_padding: usize = 4 - (current_inter_block_offset % 4);
-            dir_entry_padding += four_byte_padding;
-
-            dir_entry_bytes_with_padding.resize(dir_entry_bytes_with_padding.len() + four_byte_padding,
-                                                0);
+        // TODO(Bobby): deal with case where there is enough block space for 
+        // TODO(Bobby): dir entry but not padding
+        if new_dir_entry_wrapper.entry.entry_size % 4 != 0 {
+            new_dir_entry_wrapper.entry.entry_size +=
+                4 - (new_dir_entry_wrapper.entry.entry_size % 4);
         }
 
-        // and they need to not cross block boundaries
-        if dir_entry_bytes_with_padding.len() >= remaining_bytes_in_block {
-            dir_entry_padding += remaining_bytes_in_block;
+        let mut found_empty_dir_entry: bool = false;
 
-            dir_entry_bytes_with_padding.resize(dir_entry_bytes_with_padding.len() + remaining_bytes_in_block, 0);
+        for dir_entry_wrapper in dir_entries.iter_mut() {
+            let mut prior_dir_entry_allocated_size: usize =
+                DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE +
+                (dir_entry_wrapper.entry.name_length as usize);
+            let mut dir_entry_padding: usize = 0;
+
+            if (prior_dir_entry_allocated_size % 4) != 0 {
+                dir_entry_padding = 4 - (prior_dir_entry_allocated_size % 4);
+            }
+
+            if dir_entry_wrapper.entry.entry_size as usize >= 
+                prior_dir_entry_allocated_size + dir_entry_padding + new_dir_entry_wrapper.entry.entry_size as usize {
+                // resizing prior directory entry to allow our new directory entry
+                let prior_dir_entry_new_size = 
+                    (prior_dir_entry_allocated_size + dir_entry_padding) as u16;
+
+                new_dir_entry_wrapper.inode_block_num = dir_entry_wrapper.inode_block_num;
+                new_dir_entry_wrapper.offset = 
+                    dir_entry_wrapper.offset + (prior_dir_entry_new_size as usize);
+
+                new_dir_entry_wrapper.entry.entry_size =
+                    dir_entry_wrapper.entry.entry_size - prior_dir_entry_new_size;
+                dir_entry_wrapper.entry.entry_size = prior_dir_entry_new_size;
+
+                found_empty_dir_entry = true;
+
+                dir_entry_wrapper.add_deferred_write(self, node, &mut deferred_writes)?;
+                new_dir_entry_wrapper.add_deferred_write(self, node, &mut deferred_writes)?;
+
+                break;
+            }
         }
 
-        let actual_entry_size: usize = new_directory_entry.entry_size as usize;
-        let slice_end: usize = dir_entry_padding + actual_entry_size;
 
-        dir_entry_bytes_with_padding[dir_entry_padding..slice_end].copy_from_slice(
-            &dir_entry_bytes[0..actual_entry_size]);
+        if !found_empty_dir_entry {
+            let new_dir_entry: DirectoryEntry = new_dir_entry_wrapper.entry;
 
-        node.append_file_no_writeback(self, dir_entry_bytes_with_padding.as_slice(),
-                                      true, &mut deferred_writes)?;
+            dir_entry_bytes_with_padding.resize(new_dir_entry.entry_size as usize, 0);
+
+            // dir entries need to be at 4-byte alignment
+            if (current_inter_block_offset % 4) > 0 {
+                let four_byte_padding: usize = 4 - (current_inter_block_offset % 4);
+                dir_entry_padding += four_byte_padding;
+
+                dir_entry_bytes_with_padding.resize(dir_entry_bytes_with_padding.len() + four_byte_padding,
+                                                    0);
+            }
+
+            // and they need to not cross block boundaries
+            if dir_entry_bytes_with_padding.len() >= remaining_bytes_in_block {
+                dir_entry_padding += remaining_bytes_in_block;
+
+                dir_entry_bytes_with_padding.resize(dir_entry_bytes_with_padding.len() + remaining_bytes_in_block, 0);
+            }
+
+            let actual_entry_size: usize = new_dir_entry.entry_size as usize;
+            let slice_end: usize = dir_entry_padding + actual_entry_size;
+            let dir_entry_bytes = bytemuck::bytes_of(&new_dir_entry);
+
+            dir_entry_bytes_with_padding[dir_entry_padding..slice_end].copy_from_slice(
+                &dir_entry_bytes[0..actual_entry_size]);
+
+            node.append_file_no_writeback(self, dir_entry_bytes_with_padding.as_slice(),
+                                          true, &mut deferred_writes)?;
+        }
 
         self.write_back_deferred_writes(deferred_writes)?;
 
@@ -1057,9 +1145,9 @@ impl INodeWrapper
         Ok(String::from_utf8_lossy(bytes.as_mut_slice()).into_owned())
     }
 
-    pub fn get_dir_entries<D: BlockDevice>(&self, ext2: &mut Ext2<D>) -> Vec<DirectoryEntry> {
+    pub fn get_dir_entries<D: BlockDevice>(&self, ext2: &mut Ext2<D>) -> Result<Vec<DirectoryEntryWrapper>, Ext2Error> {
         // TODO: caching
-        let mut entries: Vec<DirectoryEntry> = Vec::new();
+        let mut entries: Vec<DirectoryEntryWrapper> = Vec::new();
         let mut entries_raw_bytes: Vec<u8> = Vec::new();
         let dir_size: usize = self.size() as usize;
 
@@ -1071,7 +1159,7 @@ impl INodeWrapper
                                  0);
 
         self.read_block(0, directory_entry_size_blocks,
-                        entries_raw_bytes.as_mut_slice(), ext2);
+                        entries_raw_bytes.as_mut_slice(), ext2)?;
 
         let mut i: usize = 0;
 
@@ -1087,22 +1175,29 @@ impl INodeWrapper
                 i += 8;
             }
 
-            entries.push(DirectoryEntry{
+            let new_directory_entry = DirectoryEntry{
                 // all part of the spec
                 inode_number: directory_entry_inode_num,
                 entry_size: directory_entry_size as u16,
                 name_length: directory_entry_name_length,
 
                 name_characters: [0; 256]
+            };
+
+            entries.push(DirectoryEntryWrapper{
+                entry: new_directory_entry,
+                inode_block_num: i / BLOCK_SIZE,
+                offset: i % BLOCK_SIZE
             });
 
-            entries.iter_mut().next_back().unwrap().
+            entries.iter_mut().next_back().unwrap().entry.
                 name_characters[0..directory_entry_name_length as usize].
                 copy_from_slice(directory_entry_name);
 
             i += directory_entry_size as usize;
         }
-        entries
+
+        Ok(entries)
     }
     
     pub fn find_new_blocks<D: BlockDevice>(&self, ext2: &mut Ext2<D>,
@@ -1139,11 +1234,11 @@ impl INodeWrapper
                 free_block_count = current_block_group.bg_free_blocks_count as usize;
 
                 if current_block_group_index == self.get_block_group_index(ext2) {
-                    assert!(free_block_count == 0);
+                    assert_eq!(free_block_count, 0);
 
                     // we looped around all the block groups, which means there are no more
                     // remaining blocks on this filesystem :(
-                    return Err(Ext2Error::BlockDeviceError(BlockDeviceError::Unknown));
+                    return Err(Ext2Error::NotEnoughDeviceSpace);
                 }
             }
 
@@ -1227,7 +1322,7 @@ impl INodeWrapper
         let mut block_buffer = AlignedBlock([0; BLOCK_SIZE]);
         let mut byte_write_pos: Option<usize> = None;
         let mut byte_write: [u8; size_of::<u32>()] = [0; size_of::<u32>()];
-        let singly_indirect_block_block_limit: usize = 
+        let singly_indirect_block_block_limit: usize =
             std::cmp::min(BLOCK_SIZE / size_of::<u32>(), new_blocks.len() - *blocks_newly_allocated);
 
         ext2.read_logical_block_self(block_num, 1, &mut block_buffer.0)?;
@@ -1272,7 +1367,7 @@ impl INodeWrapper
                                                              all_blocks_or_fail: bool,
                                                              blocks_newly_allocated: &mut usize,
                                                              new_blocks: &[usize],
-                                                             deferred_writes: &mut DeferredWriteMap) -> Result<Option<usize>, Ext2Error> {
+                                                             deferred_writes: &mut DeferredWriteMap) -> Result<(), Ext2Error> {
         let count_of_doubly_linked_blocks: usize = *num_of_blocks_allocated -
             (INLINE_BLOCK_BLOCK_LIMIT + single_indirect_block_block_limit);
 
@@ -1280,7 +1375,7 @@ impl INodeWrapper
             count_of_doubly_linked_blocks / single_indirect_block_block_limit;
         let ending_doubly_linked_block: usize =
             std::cmp::min(single_indirect_block_block_limit,
-                          new_blocks.len() - *blocks_newly_allocated);
+                          (new_blocks.len() - *blocks_newly_allocated) / single_indirect_block_block_limit);
         let mut new_blocks_needed_for_block_list_count: usize = 0;
 
         // find all blocks needed to complete the write
@@ -1297,7 +1392,7 @@ impl INodeWrapper
             if new_block_list.is_empty() {
                 self.set_block_allocated_count(ext2,
                                                self.block_allocated_count(ext2) + *blocks_newly_allocated);
-                return Ok(Some(*blocks_newly_allocated));
+                return Ok(());
             }
 
             self.inode.i_block[14] = new_block_list[0] as u32;
@@ -1308,12 +1403,14 @@ impl INodeWrapper
         ext2.read_logical_block_self(self.inode.i_block[14] as usize,
                                      1, &mut block_list_buffer.0)?;
 
-        let block_list_u32_slice: &mut [u32] =
-            bytemuck::cast_slice_mut::<u8, u32>(&mut block_list_buffer.0);
+        {
+            let block_list_u32_slice: &[u32] =
+                bytemuck::cast_slice::<u8, u32>(&mut block_list_buffer.0);
 
-        for block_num in starting_doubly_linked_block..ending_doubly_linked_block {
-            if block_list_u32_slice[block_num] == UNALLOCATED_BLOCK_SLOT {
-                new_blocks_needed_for_block_list_count += 1;
+            for block_num in starting_doubly_linked_block..ending_doubly_linked_block {
+                if block_list_u32_slice[block_num] == UNALLOCATED_BLOCK_SLOT {
+                    new_blocks_needed_for_block_list_count += 1;
+                }
             }
         }
 
@@ -1329,38 +1426,50 @@ impl INodeWrapper
         let mut new_block_list_index: usize = 0;
 
         assert!(!all_blocks_or_fail ||
-            new_block_list_blocks.len() == new_blocks_needed_for_block_list_count);
+                new_block_list_blocks.len() == new_blocks_needed_for_block_list_count);
 
         for block_num in starting_doubly_linked_block..ending_doubly_linked_block {
             let num_of_blocks_allocated_within_list =
                 *num_of_blocks_allocated % single_indirect_block_block_limit;
 
-            if block_list_u32_slice[block_num] == UNALLOCATED_BLOCK_SLOT {
+            let mut current_block_slot: u32 =
+                bytemuck::cast_slice::<u8, u32>(&mut block_list_buffer.0)[block_num];
+
+            if current_block_slot == UNALLOCATED_BLOCK_SLOT {
                 if new_block_list_index >= new_block_list_blocks.len() {
                     self.set_block_allocated_count(ext2,
                                                    self.block_allocated_count(ext2) + *blocks_newly_allocated);
-                    return Ok(Some(*blocks_newly_allocated));
+                    return Ok(());
                 }
 
-                block_list_u32_slice[block_num] =
+                bytemuck::cast_slice_mut::<u8, u32>(&mut block_list_buffer.0)[block_num] =
                     new_block_list_blocks[new_block_list_index] as u32;
                 new_block_list_index += 1;
+
+                ext2.add_write_to_deferred_writes_map(deferred_writes,
+                                              self.inode.i_block[14] as usize, block_num*size_of::<u32>(),
+                &block_list_buffer.0[block_num*size_of::<u32>()..(block_num+1)*size_of::<u32>()], None)?;
+                self.write_indirected_block_to_inode(ext2, self.inode.i_block[14] as usize,
+                                                     num_of_blocks_allocated_within_list,
+                                                     num_of_blocks_allocated,
+                                                     blocks_newly_allocated,
+                                                     new_blocks, deferred_writes)?;
             }
 
-            self.write_indirected_block_to_inode(ext2, block_list_u32_slice[block_num] as usize,
+            current_block_slot =
+                bytemuck::cast_slice::<u8, u32>(&mut block_list_buffer.0)[block_num];
+
+            self.write_indirected_block_to_inode(ext2, current_block_slot as usize,
                                                  num_of_blocks_allocated_within_list,
                                                  num_of_blocks_allocated,
-                                                 blocks_newly_allocated, new_blocks,
-                                                 deferred_writes)?;
+                                                 blocks_newly_allocated,
+                                                 new_blocks, deferred_writes)?;
         }
 
-        if !new_block_list_blocks.is_empty() {
-            self.set_block_allocated_count(ext2,
-                                           self.block_allocated_count(ext2) + *blocks_newly_allocated);
-            return Ok(Some(*blocks_newly_allocated));
-        }
+        self.set_block_allocated_count(ext2,
+                                       self.block_allocated_count(ext2) + *blocks_newly_allocated);
 
-        Ok(None)
+        Ok(())
     }
 
     fn write_new_blocks_to_inode<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>,
@@ -1428,44 +1537,41 @@ impl INodeWrapper
                 let mut byte_write_pos: usize = 0;
 
                 {
-                    let block_list_u32_slice: &mut [u32] =
-                        bytemuck::cast_slice_mut::<u8, u32>(&mut block_buffer.0);
                     let num_of_blocks_allocated_base: usize =
                         num_of_blocks_allocated - INLINE_BLOCK_BLOCK_LIMIT;
 
                     for i in num_of_blocks_allocated_base..(num_of_blocks_allocated_base + single_indirect_block_block_limit) {
                         let block_index: usize = i - num_of_blocks_allocated_base;
+                        {
+                            let block_list_u32_slice: &mut [u32] =
+                                bytemuck::cast_slice_mut::<u8, u32>(&mut block_buffer.0);
 
-                        assert_eq!(block_list_u32_slice[block_index], UNALLOCATED_BLOCK_SLOT);
+                            assert_eq!(block_list_u32_slice[block_index], UNALLOCATED_BLOCK_SLOT);
 
-                        block_list_u32_slice[block_index] = new_blocks[blocks_newly_allocated] as u32;
+                            block_list_u32_slice[block_index] = new_blocks[blocks_newly_allocated] as u32;
+                        }
                         num_of_blocks_allocated += 1;
                         blocks_newly_allocated += 1;
                         byte_write_pos = block_index * size_of::<u32>();
+
+                        ext2.add_write_to_deferred_writes_map(deferred_writes, self.inode.i_block[13] as usize,
+                                                              byte_write_pos,
+                                                              &block_buffer.0[byte_write_pos..byte_write_pos + size_of::<u32>()],
+                                                              Some(block_buffer.0))?;
 
                         if blocks_newly_allocated == new_blocks.len() {
                             break;
                         }
                     }
                 }
-
-                ext2.add_write_to_deferred_writes_map(deferred_writes, self.inode.i_block[13] as usize,
-                                                      byte_write_pos,
-                                                      &block_buffer.0[byte_write_pos..byte_write_pos + size_of::<u32>()],
-                                                      Some(block_buffer.0))?;
             }
         }
 
         if blocks_newly_allocated < new_blocks.len() {
-            let doubley_write_result: Option<usize> =
-                self.write_doublely_indirect_blocks_to_inode(ext2, &mut num_of_blocks_allocated,
+            self.write_doublely_indirect_blocks_to_inode(ext2, &mut num_of_blocks_allocated,
                                                          single_indirect_block_block_limit,
                                                          all_blocks_or_fail, &mut blocks_newly_allocated,
                                                          new_blocks, deferred_writes)?;
-
-            if doubley_write_result.is_some() {
-                return Ok(doubley_write_result.unwrap());
-            }
         }
 
         self.set_block_allocated_count(ext2,
@@ -1495,17 +1601,14 @@ impl INodeWrapper
             new_blocks_allocated.push(base_allocated_block.unwrap());
         }
 
+        let image_file_size_in_blocks: usize = Self::div_up(new_data.len(), BLOCK_SIZE);
+
+        // if we have no space left in our base block or we have insufficient enough space to only
+        // use the blocks we have, then we go looking for more blocks
         if base_allocated_block_offset == 0 ||
            (BLOCK_SIZE - base_allocated_block_offset) < new_data.len() {
-            let remaining_block_slots_left =
-                ext2.block_group_descriptor_tables[self.get_block_group_index(ext2)].bg_free_blocks_count;
-
-            let num_of_blocks_needed: usize =
-                std::cmp::min(remaining_block_slots_left as usize,
-                              Self::div_up(new_data.len(), BLOCK_SIZE));
-
             let new_blocks_allocated_result =
-                self.find_new_blocks::<D>(ext2, num_of_blocks_needed, all_bytes_or_fail,
+                self.find_new_blocks::<D>(ext2, image_file_size_in_blocks, all_bytes_or_fail,
                                           deferred_writes);
 
             let old_new_blocks_allocated_size: usize = new_blocks_allocated.len();
