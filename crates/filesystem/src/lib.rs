@@ -704,8 +704,12 @@ where
             for (inode_bitmap_byte_index, inode_bitmap_byte)
             in block_buffer.iter().enumerate() {
                 for i in 0..8 {
-                    if inode_bitmap_byte & (1 << (7 - i)) == 0 {
-                        new_inode_num += (inode_bitmap_byte_index * 8) + i;
+                    let current_relative_inode_num = (inode_bitmap_byte_index * 8) + i;
+                    let inode_reserved =
+                        current_relative_inode_num < 10 && found_block_group_index == 0;
+
+                    if inode_bitmap_byte & (1 << (7 - i)) == 0 && !inode_reserved {
+                        new_inode_num += current_relative_inode_num;
                         found_new_inode = true;
                         break;
                     }
