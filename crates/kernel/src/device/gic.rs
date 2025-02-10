@@ -34,6 +34,7 @@
 //TODO: Handling FIQs?
 
 extern crate core;
+use crate::arch::halt;
 use crate::context::Context;
 use crate::sync::SpinLockInner;
 use crate::sync::UnsafeInit;
@@ -159,13 +160,14 @@ unsafe extern "C" fn gic_irq_handler(
     _arg: u64,
 ) -> *mut Context {
     let _core = crate::arch::core_id() & 0b11;
-
+    println!("GIC IRQ handler on core {_core}");
     //Loop to handle all batched IRQs
     loop {
         //read IAR for the interrupt number
         let iar = read_gic(GIC.get().cpui_base + GICC_IAR);
         let irq = iar & 0x3ff;
-
+        println!("IRQ: {irq}");
+        halt();
         //spuriuos interrupt, ignore
         if irq > 1020 {
             break;
@@ -395,6 +397,20 @@ pub fn gic_init_other_cores() {
         crate::arch::core_id() & 0b11
     );
     init_cpu_interface();
+
+    //Enabling all ISRs to find where the IRQs are routing too
+    for i in 16..224 {
+        if i == 153 { //ignore the uart interrupt
+            continue;
+        }
+        gic_register_isr(i, irq_print as fn(&mut Context));
+    }
+}
+
+fn irq_print(_ctx: &mut Context) {
+    println!("IRQ");
+    halt();
+
 }
 
 // initialize the GIC-400 distributor (CPU DEPENDENT)
@@ -420,7 +436,7 @@ pub fn init_distributor() {
 pub fn init_cpu_interface() {
     cpu_config();
 
-    write_gic(GIC.get().cpui_base + GICC_PMR, 0xff);
+    write_gic(GIC.get().cpui_base + GICC_PMR, 0xf0);
 
     //Active Priorities register implementation
     for i in 0..4 {

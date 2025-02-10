@@ -3,7 +3,7 @@
 set -e
 
 QEMU_TARGET_HARDWARE=${QEMU_TARGET_HARDWARE-"-M raspi4b -dtb bcm2711-rpi-4-b.dtb"}
-QEMU_DEBUG=${QEMU_DEBUG-"mmu,guest_errors"}
+QEMU_DEBUG=${QEMU_DEBUG-"mmu,guest_errors,trace:bcm2835*"}
 QEMU_DISPLAY=${QEMU_DISPLAY-"none"}
 DEBUG_ARGS=${DEBUG_ARGS-"-s"}
 
