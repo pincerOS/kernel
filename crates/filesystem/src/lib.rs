@@ -665,6 +665,8 @@ where
                 } else {
                     return Err(ext2_error);
                 }
+            } else {
+                current_node = current_node_result.unwrap();
             }
         }
 
