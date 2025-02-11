@@ -33,8 +33,8 @@
 //TODO: Handling private peripheral interrupts? 16-31 (make core specific?)
 //TODO: Handling FIQs?
 
+use crate::device::system_timer;
 extern crate core;
-use crate::arch::halt;
 use crate::context::Context;
 use crate::sync::SpinLockInner;
 use crate::sync::UnsafeInit;
@@ -42,11 +42,6 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use core::arch::asm;
 use core::panic;
-
-pub fn isb() {
-    //Double check if this is correct
-    unsafe { asm!("isb", options(nostack, nomem, preserves_flags)) }
-}
 
 const SPI_COUNT: usize = 192;
 const IRQ_COUNT: usize = SPI_COUNT + 32;
@@ -122,6 +117,16 @@ pub static IRQ_SET_LOCK: SpinLockInner = SpinLockInner::new();
 pub static IRQ_AFFINITY_LOCK: SpinLockInner = SpinLockInner::new();
 pub static IRQ_PRIORITY_LOCK: SpinLockInner = SpinLockInner::new();
 
+/// Register all the IRQ handlers for the GICC here
+pub fn register_gicc_irq_handlers() {
+    system_timer::register_arm_generic_timer_irqs();
+}
+
+pub fn isb() {
+    //Double check if this is correct
+    unsafe { asm!("isb", options(nostack, nomem, preserves_flags)) }
+}
+
 /// Safety: must be called before ISR_TABLE is first used
 pub unsafe fn init_isr_table() {
     for i in 0..IRQ_COUNT {
@@ -160,14 +165,13 @@ unsafe extern "C" fn gic_irq_handler(
     _arg: u64,
 ) -> *mut Context {
     let _core = crate::arch::core_id() & 0b11;
-    println!("GIC IRQ handler on core {_core}");
     //Loop to handle all batched IRQs
     loop {
         //read IAR for the interrupt number
         let iar = read_gic(GIC.get().cpui_base + GICC_IAR);
         let irq = iar & 0x3ff;
-        println!("IRQ: {irq}");
-        halt();
+        println!("IRQ: {irq} on core {_core}");
+
         //spuriuos interrupt, ignore
         if irq > 1020 {
             break;
@@ -398,19 +402,7 @@ pub fn gic_init_other_cores() {
     );
     init_cpu_interface();
 
-    //Enabling all ISRs to find where the IRQs are routing too
-    for i in 16..224 {
-        if i == 153 { //ignore the uart interrupt
-            continue;
-        }
-        gic_register_isr(i, irq_print as fn(&mut Context));
-    }
-}
-
-fn irq_print(_ctx: &mut Context) {
-    println!("IRQ");
-    halt();
-
+    register_gicc_irq_handlers();
 }
 
 // initialize the GIC-400 distributor (CPU DEPENDENT)

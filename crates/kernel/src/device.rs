@@ -3,17 +3,15 @@ pub mod uart;
 pub mod bcm2835_aux;
 pub mod gic;
 pub mod mailbox;
+pub mod system_timer;
 pub mod timer;
 pub mod watchdog;
-pub mod system_timer;
-
-use core::ptr::{read_volatile, write_volatile};
 
 use device_tree::format::StructEntry;
 use device_tree::util::MappingIterator;
 use device_tree::DeviceTree;
 
-use crate::device::gic::{gic_init, gic_check_irq_enabled};
+use crate::device::gic::gic_init;
 use crate::memory::{map_device, map_device_block};
 use crate::sync::{InterruptSpinLock, UnsafeInit};
 use crate::SpinLock;
@@ -159,6 +157,29 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
     }
 
     {
+        // println!("| ARM Generic Timer");
+        // let activate_addr = 0xFE00b000;
+        // let activate_base = unsafe { map_device(activate_addr) }.as_ptr();
+        // println!("| ARM timer addr: {:#010x}", activate_addr);
+        // println!("| ARM timer base: {:#010x}", activate_base as usize);
+
+        // unsafe { core::ptr::write_volatile((activate_base as usize + 0x210) as *mut u32, 15)};
+
+        // unsafe { write_volatile((activate_base as usize + 0x408) as *mut u32, (1 << 5) | (1 << 7) | 1);}
+        // unsafe { write_volatile((activate_base as usize + 0x400) as *mut u32, 0x1000);}
+
+        // let val = unsafe { read_volatile((activate_base as usize + 0x400) as  *mut u32) };
+        // println!("| ARM timer cntv_ctl: {:#010x}", val);
+
+        // let val = unsafe { read_volatile((activate_base as usize + 0x408) as  *mut u32) };
+        // println!("| ARM timer cntv_ctl: {:#010x}", val);
+
+        // let val = unsafe { read_volatile((activate_base as usize + 0x404) as  *mut u32) };
+        // println!("| ARM timer cntv_ctl: {:#010x}", val);
+
+        // let val = unsafe { read_volatile((activate_base as usize + 0x410) as  *mut u32) };
+        // println!("| ARM timer cntv_ctl: {:#010x}", val);
+
         println!("| initializing timer");
         let timer_iter = discover_compatible(tree, b"brcm,bcm2835-system-timer")
             .unwrap()
@@ -167,40 +188,9 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let (timer_addr, _) = find_device_addr(timer_iter).unwrap().unwrap();
         let timer_base = unsafe { map_device(timer_addr) }.as_ptr();
         println!("| timer addr: {:#010x}", timer_addr as usize);
-        let timer = unsafe { system_timer::SystemTimer::new(timer_base) };
-        let time = timer.get_time();
+        unsafe { system_timer::initialize_system_timer(timer_base) };
+        let time = system_timer::get_time();
         println!("| timer initialized, time: {time}");
-    }
-
-    {
-        println!("| ARM Generic Timer");
-        let timer_addr = 0xFE00b000;
-        let timer_base = unsafe { map_device(timer_addr) }.as_ptr();
-        println!("| ARM timer addr: {:#010x}", timer_addr);
-
-
-        
-        unsafe { write_volatile((timer_base as usize + 0x408) as *mut u32, (1 << 5) | (1 << 7) | 1);}
-        unsafe { write_volatile((timer_base as usize + 0x400) as *mut u32, 0x1000);}
-
-        let val = unsafe { read_volatile((timer_base as usize + 0x400) as  *mut u32) };
-        println!("| ARM timer cntv_ctl: {:#010x}", val);
-
-        let val = unsafe { read_volatile((timer_base as usize + 0x408) as  *mut u32) };
-        println!("| ARM timer cntv_ctl: {:#010x}", val);
-
-        let val = unsafe { read_volatile((timer_base as usize + 0x404) as  *mut u32) };
-        println!("| ARM timer cntv_ctl: {:#010x}", val);
-
-        let val = unsafe { read_volatile((timer_base as usize + 0x410) as  *mut u32) };
-        println!("| ARM timer cntv_ctl: {:#010x}", val);
-
-
-    }
-
-    {
-        let irq_enabled = unsafe { gic_check_irq_enabled(96) };
-        println!("| IRQ 96 enabled: {irq_enabled}");
     }
 }
 
