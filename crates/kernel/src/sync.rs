@@ -3,6 +3,7 @@ pub mod blocking_lock;
 pub mod condvar;
 pub mod init;
 pub mod lock;
+pub mod per_core;
 pub mod time;
 
 pub use crate::arch::interrupts;
@@ -15,6 +16,7 @@ pub use interrupts::{disable_interrupts, enable_interrupts, restore_interrupts, 
 pub use lock::{InterruptSpinLock, InterruptSpinLockGuard, InterruptSpinLockInner};
 pub use lock::{Lock, LockGuard, LockImpl};
 pub use lock::{SpinLock, SpinLockGuard, SpinLockInner};
+pub use per_core::{ConstInit, PerCore};
 pub use time::{get_time, spin_sleep, spin_sleep_until};
 
 #[derive(Copy, Clone)]
