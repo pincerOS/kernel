@@ -10,7 +10,7 @@ use crate::uart;
 
 global_asm!(
     r"
-.macro save_context handler, arg
+.macro save_context label, handler, arg
     // TODO: is the stack pointer safe at this point?
     // Depending on the mode, this may be on either SP_EL1
     // or SP_EL0; if this was from an interrupt/exception
@@ -47,6 +47,7 @@ global_asm!(
     mov x4, \arg
     .endif
 
+save_context_br_\label:
     // Run handler with args;
     // x0 = saved context ptr
     // x1 = exception pc
@@ -66,45 +67,105 @@ __exception_vector_start:
 
 // Current exception level, SP_EL0
 .org 0x000 // synchronous exceptions
-    save_context exception_handler_unhandled, 0
+    save_context curEL_sp0_sync, exception_handler_unhandled, 0
 .org 0x080 // IRQ, vIRQ
-    save_context exception_handler_unhandled, 1
+    save_context curEL_sp0_irq, exception_handler_unhandled, 1
 .org 0x100 // FIQ, vFIQ
-    save_context exception_handler_unhandled, 2
+    save_context curEL_sp0_fiq, exception_handler_unhandled, 2
 .org 0x180 // SError, vSError
-    save_context exception_handler_unhandled, 3
+    save_context curEL_sp0_serr, exception_handler_unhandled, 3
 
 // Current exception level, SP_ELx for x > 0
 .org 0x200
-    save_context exception_handler_example, 4
+    save_context curEL_sp1_sync, exception_handler_example, 4
 .org 0x280
-    save_context gic_irq_handler, 5
+    save_context curEL_sp1_irq, exception_handler_unhandled, 5
 .org 0x300
-    save_context exception_handler_unhandled, 6
+    save_context curEL_sp1_fiq, exception_handler_unhandled, 6
 .org 0x380
-    save_context exception_handler_unhandled, 7
+    save_context curEL_sp1_serr, exception_handler_unhandled, 7
 
 // Lower exception level, Aarch64
 .org 0x400
-    save_context exception_handler_user, 8
+    save_context lowEL64_sync, exception_handler_user, 8
 .org 0x480
-    save_context gic_irq_handler, 9
+    save_context lowEL64_irq, exception_handler_unhandled, 9
 .org 0x500
-    save_context exception_handler_unhandled, 10
+    save_context lowEL64_fiq, exception_handler_unhandled, 10
 .org 0x580
-    save_context exception_handler_unhandled, 11
+    save_context lowEL64_serr, exception_handler_unhandled, 11
 
 // Lower exception level, Aarch32
 .org 0x600
-    save_context exception_handler_unhandled, 12
+    save_context lowEL32_sync, exception_handler_unhandled, 12
 .org 0x680
-    save_context exception_handler_unhandled, 13
+    save_context lowEL32_irq, exception_handler_unhandled, 13
 .org 0x700
-    save_context exception_handler_unhandled, 14
+    save_context lowEL32_fiq, exception_handler_unhandled, 14
 .org 0x780
-    save_context exception_handler_unhandled, 15
+    save_context lowEL32_serr, exception_handler_unhandled, 15
 "
 );
+
+type ExceptionHandler = unsafe extern "C" fn(
+    ctx: &mut Context,
+    elr: u64,
+    spsr: u64,
+    esr: u64,
+    arg: u64,
+) -> *mut Context;
+
+#[allow(dead_code)]
+extern "C" {
+    static mut save_context_br_curEL_sp0_sync: u32;
+    static mut save_context_br_curEL_sp0_irq: u32;
+    static mut save_context_br_curEL_sp0_fiq: u32;
+    static mut save_context_br_curEL_sp0_serr: u32;
+    static mut save_context_br_curEL_sp1_sync: u32;
+    static mut save_context_br_curEL_sp1_irq: u32;
+    static mut save_context_br_curEL_sp1_fiq: u32;
+    static mut save_context_br_curEL_sp1_serr: u32;
+    static mut save_context_br_lowEL64_sync: u32;
+    static mut save_context_br_lowEL64_irq: u32;
+    static mut save_context_br_lowEL64_fiq: u32;
+    static mut save_context_br_lowEL64_serr: u32;
+    static mut save_context_br_lowEL32_sync: u32;
+    static mut save_context_br_lowEL32_irq: u32;
+    static mut save_context_br_lowEL32_fiq: u32;
+    static mut save_context_br_lowEL32_serr: u32;
+}
+
+pub unsafe fn override_irq_handler(handler: ExceptionHandler) {
+    let addr = handler as u64;
+
+    let encode_bl = |caller_addr: u64| {
+        let diff = addr as i64 - caller_addr as i64;
+        let shifted = diff >> 2;
+        assert!(
+            (diff & 0b11 == 0) && shifted >= (-1 << 25) && shifted < (1 << 25),
+            "offset out of range: {diff}"
+        );
+        ((0b100101 << 26) | (shifted & ((1 << 26) - 1))) as u32
+    };
+    let overwrite_target = |target: *mut u32| {
+        let value = encode_bl(target as u64);
+        unsafe { core::ptr::write_volatile(target, value.to_le()) };
+        unsafe {
+            // Magic sequence to flush instruction cache?
+            core::arch::asm!(
+                "dc cvau, {0}",
+                "dsb ish",
+                "ic ivau, {0}",
+                "dsb ish",
+                "isb",
+                in(reg) target,
+            );
+        }
+    };
+
+    overwrite_target(&raw mut save_context_br_curEL_sp1_irq);
+    overwrite_target(&raw mut save_context_br_lowEL64_irq);
+}
 
 // Docs: Armv8-A ARM - D23.2.41 ESR_EL2, Exception Syndrome Register (EL2)
 static EXCEPTION_CLASS: [&str; 64] = {

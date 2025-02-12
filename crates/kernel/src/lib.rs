@@ -32,7 +32,6 @@ static START_WAIT: AtomicBool = AtomicBool::new(false);
 static INIT_WAIT: AtomicBool = AtomicBool::new(false);
 
 const FLAG_MULTICORE: bool = true;
-const FLAG_PREEMPTION: bool = true;
 
 extern "Rust" {
     fn kernel_main(device_tree: device_tree::DeviceTree);
@@ -66,14 +65,6 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     }
     INIT_WAIT.store(true, Ordering::SeqCst);
 
-    if FLAG_PREEMPTION && device::IRQ_CONTROLLER.is_initialized() {
-        println!("| enabling preemption on all cores");
-        let preemption_time_ns = 500_000;
-        let mut irq = device::IRQ_CONTROLLER.get().lock();
-        for core in 0..4 {
-            irq.start_timer(core, preemption_time_ns);
-        }
-    }
     device::init_devices_per_core();
 
     println!("| creating initial thread");

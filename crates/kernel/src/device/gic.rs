@@ -106,10 +106,6 @@ const GICC_NSAPR0: usize = 0x00E0; // Non-Secure Active Priority Register (0x0E0
 const GICC_IIDR: usize = 0x00FC; // CPU Interface Identification Register (0x0FC)
 const GICC_DIR: usize = 0x1000; // Deactivate Interrupt Register (0x1000)
 
-/// Register all the IRQ handlers for the GICC here
-pub fn register_gicc_irq_handlers() {
-    super::system_timer::register_arm_generic_timer_irqs();
-}
 pub static GIC: UnsafeInit<Gic400Driver> = unsafe { UnsafeInit::uninit() };
 
 fn isb() {
@@ -124,7 +120,7 @@ pub fn irq_not_handled(_ctx: &mut Context) {
 /// Handles the interrupt and asks handler to handle it
 /// Level-triggered interrupts must be cleared by associaetd irq handler or else it will be called again
 #[no_mangle]
-unsafe extern "C" fn gic_irq_handler(
+pub unsafe extern "C" fn gic_irq_handler(
     ctx: &mut Context,
     _elr: u64,
     _spsr: u64,

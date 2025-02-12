@@ -12,30 +12,9 @@ use crate::sync::{ConstInit, PerCore, UnsafeInit, Volatile};
 use core::arch::asm;
 use core::panic;
 
-static SYSTEM_TIMER: UnsafeInit<Bcm2835SysTmr> = unsafe { UnsafeInit::uninit() };
+pub static SYSTEM_TIMER: UnsafeInit<Bcm2835SysTmr> = unsafe { UnsafeInit::uninit() };
 
 pub static ARM_GENERIC_TIMERS: PerCore<ArmGenericTimer> = PerCore::new();
-
-/// Run on each core
-pub fn register_arm_generic_timer_irqs() {
-    let gic = super::gic::GIC.get();
-    gic.register_isr(30, arm_generic_timer_irq_handler);
-
-    //Initialize the timer
-    ARM_GENERIC_TIMERS.with_current(|timer| {
-        timer.intialize_timer();
-        timer.set_timer(0x50000000);
-    });
-}
-
-fn arm_generic_timer_irq_handler(_ctx: &mut Context) {
-    //Reset the timer to ping again
-    ARM_GENERIC_TIMERS.with_current(|timer| {
-        timer.reset_timer();
-    });
-
-    //Do things
-}
 
 pub fn get_time() -> u64 {
     SYSTEM_TIMER.get().get_time()
@@ -43,12 +22,15 @@ pub fn get_time() -> u64 {
 
 pub unsafe fn initialize_system_timer(base: *mut ()) {
     unsafe { SYSTEM_TIMER.init(Bcm2835SysTmr::new(base as *mut ())) };
-    register_system_timer_irqs();
+    if super::gic::GIC.is_initialized() {
+        // TODO: support local timer on rpi3b interrupt controller
+        let gic = super::gic::GIC.get();
+        register_system_timer_irqs(gic);
+    }
 }
 
-fn register_system_timer_irqs() {
+fn register_system_timer_irqs(gic: &super::gic::Gic400Driver) {
     //Correct timer IRQ handlers for the Bcm2835_SystemTimer (Non functional in QEMU)
-    let gic = super::gic::GIC.get();
     gic.register_isr(96, system_timer_irq_handler);
     gic.register_isr(97, system_timer_irq_handler);
     gic.register_isr(98, system_timer_irq_handler);

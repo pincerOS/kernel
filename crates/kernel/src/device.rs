@@ -14,7 +14,7 @@ use device_tree::util::MappingIterator;
 use device_tree::DeviceTree;
 
 use crate::memory::{map_device, map_device_block};
-use crate::sync::{InterruptSpinLock, UnsafeInit};
+use crate::sync::UnsafeInit;
 use crate::SpinLock;
 
 // TODO: a non-O(n²) approach to device discovery and registration
@@ -88,7 +88,7 @@ pub fn find_device_addr(iter: MappingIterator) -> Result<Option<(usize, usize)>,
 pub static WATCHDOG: UnsafeInit<SpinLock<watchdog::bcm2835_wdt_driver>> =
     unsafe { UnsafeInit::uninit() };
 
-pub static IRQ_CONTROLLER: UnsafeInit<InterruptSpinLock<timer::bcm2836_l1_intc_driver>> =
+pub static IRQ_CONTROLLER: UnsafeInit<timer::bcm2836_l1_intc_driver> =
     unsafe { UnsafeInit::uninit() };
 
 type InitTask = Box<dyn Fn() + Send + Sync>;
@@ -144,6 +144,8 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let gic = unsafe { gic::Gic400Driver::init(gic_base) };
         unsafe { gic::GIC.init(gic) };
 
+        unsafe { crate::exceptions::override_irq_handler(gic::gic_irq_handler) }
+
         init_fns.push(Box::new(|| {
             gic::GIC.get().init_per_core();
         }));
@@ -157,34 +159,12 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         println!("| INT controller addr: {:#010x}", intc_addr as usize);
         println!("| INT controller base: {:#010x}", intc_base as usize);
         let intc = timer::bcm2836_l1_intc_driver::new(intc_base);
-        let intc = InterruptSpinLock::new(intc);
         unsafe { IRQ_CONTROLLER.init(intc) };
+
+        unsafe { crate::exceptions::override_irq_handler(timer::exception_handler_irq) }
     }
 
     {
-        // println!("| ARM Generic Timer");
-        // let activate_addr = 0xFE00b000;
-        // let activate_base = unsafe { map_device(activate_addr) }.as_ptr();
-        // println!("| ARM timer addr: {:#010x}", activate_addr);
-        // println!("| ARM timer base: {:#010x}", activate_base as usize);
-
-        // unsafe { core::ptr::write_volatile((activate_base as usize + 0x210) as *mut u32, 15)};
-
-        // unsafe { write_volatile((activate_base as usize + 0x408) as *mut u32, (1 << 5) | (1 << 7) | 1);}
-        // unsafe { write_volatile((activate_base as usize + 0x400) as *mut u32, 0x1000);}
-
-        // let val = unsafe { read_volatile((activate_base as usize + 0x400) as  *mut u32) };
-        // println!("| ARM timer cntv_ctl: {:#010x}", val);
-
-        // let val = unsafe { read_volatile((activate_base as usize + 0x408) as  *mut u32) };
-        // println!("| ARM timer cntv_ctl: {:#010x}", val);
-
-        // let val = unsafe { read_volatile((activate_base as usize + 0x404) as  *mut u32) };
-        // println!("| ARM timer cntv_ctl: {:#010x}", val);
-
-        // let val = unsafe { read_volatile((activate_base as usize + 0x410) as  *mut u32) };
-        // println!("| ARM timer cntv_ctl: {:#010x}", val);
-
         println!("| initializing timer");
         let timer_iter = discover_compatible(tree, b"brcm,bcm2835-system-timer")
             .unwrap()
@@ -198,7 +178,40 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         println!("| timer initialized, time: {time}");
     }
 
+    // Set up the interrupt controllers to preempt on the arm generic
+    // timer interrupt.
+    if gic::GIC.is_initialized() {
+        init_fns.push(Box::new(|| {
+            gic::GIC.get().register_isr(30, timer_handler);
+        }));
+    } else {
+        let irq = IRQ_CONTROLLER.get();
+        irq.isr_table.set(timer::IRQ_CNTPNSIRQ, timer_handler);
+
+        init_fns.push(Box::new(|| {
+            let id = crate::arch::core_id() & 0b11;
+            irq.enable_irq_cntpnsirq(id as usize);
+        }));
+    }
+
+    init_fns.push(Box::new(|| {
+        // Run the generic timer at a 1ms interval for preemption
+        system_timer::ARM_GENERIC_TIMERS.with_current(|timer| {
+            timer.intialize_timer();
+            timer.set_timer_milliseconds(1);
+        });
+    }));
+
     unsafe { PER_CORE_INIT.init(init_fns) };
+}
+
+fn timer_handler(ctx: &mut crate::context::Context) {
+    crate::device::system_timer::ARM_GENERIC_TIMERS.with_current(|timer| {
+        timer.reset_timer();
+    });
+    // TODO: will this break batched interrupts?
+    // This will generally not return, and instead switch into the event loop
+    unsafe { crate::event::timer_handler(ctx) };
 }
 
 /// Discovers and starts all cores, and returns the number of cores found.
