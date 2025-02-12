@@ -27,17 +27,6 @@ unsafe fn sys_yield(ctx: &mut Context) -> *mut Context {
     let action = DescheduleAction::Yield;
     unsafe { deschedule_thread(core_sp, Some(thread), action) }
 }
-unsafe fn sys_print(ctx: &mut Context) -> *mut Context {
-    let ptr = ctx.regs[0];
-    let len = ctx.regs[1];
-    // TODO: soundness (check user permissions for the range)
-    let data = unsafe { core::slice::from_raw_parts(ptr as *const u8, len) };
-    let mut stdout = device::uart::UART.get().lock();
-    for c in data {
-        stdout.writec(*c);
-    }
-    ctx
-}
 unsafe fn sys_exit(ctx: &mut Context) -> *mut Context {
     let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
     let mut thread = thread.expect("usermode syscall without active thread");
@@ -411,10 +400,59 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
 
     OBJECTS.lock().push(None);
 
+    let (_stdio, mut stdin_tx, mut stdout_rx) = {
+        let (stdin_tx, stdin_rx) = ringbuffer::channel();
+        let (stdout_tx, stdout_rx) = ringbuffer::channel();
+        let stdio_chan = alloc_obj(Object::Channel {
+            send: stdout_tx,
+            recv: stdin_rx,
+        });
+        (stdio_chan, stdin_tx, stdout_rx)
+    };
+
+    task::spawn_async(async move {
+        let mut buf = [0; 256];
+        let mut buf_len = 0;
+        loop {
+            {
+                let uart = device::uart::UART.get();
+                let mut guard = uart.lock();
+                while let Some(c) = guard.try_getc() {
+                    buf[buf_len] = c;
+                    buf_len += 1;
+                    if buf_len >= 256 {
+                        break;
+                    }
+                }
+            }
+            if buf_len > 0 {
+                let msg = Message {
+                    tag: 0,
+                    objects: [const { None }; 4],
+                    data: Some(buf[..buf_len].into()),
+                };
+                stdin_tx.send_async(msg).await;
+                buf_len = 0;
+            }
+            task::yield_future().await;
+        }
+    });
+    task::spawn_async(async move {
+        loop {
+            let input = stdout_rx.recv_async().await;
+            if let Some(data) = input.data {
+                let uart = device::uart::UART.get();
+                let mut stdout = uart.lock();
+                for c in data {
+                    stdout.writec(c);
+                }
+            }
+        }
+    });
+
     unsafe {
         exceptions::register_syscall_handler(1, sys_shutdown);
         exceptions::register_syscall_handler(3, sys_yield);
-        exceptions::register_syscall_handler(4, sys_print);
         exceptions::register_syscall_handler(5, sys_spawn);
         exceptions::register_syscall_handler(6, sys_exit);
         exceptions::register_syscall_handler(7, sys_channel);
