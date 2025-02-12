@@ -1,8 +1,12 @@
 #![no_std]
 #![no_main]
 
+#[macro_use]
+extern crate ulib;
+
 mod runtime;
-mod syscall;
+
+use ulib::sys;
 
 static ELF_FILE: &[u8] = include_bytes_align!(u32, "../fs.arc");
 
@@ -32,13 +36,13 @@ pub extern "C" fn main() {
 
     let entry = elf.elf_header().e_entry();
     let new_sp = 0x80_0000;
-    unsafe { syscall::spawn(entry as usize, new_sp, 0) };
+    unsafe { sys::spawn(entry as usize, new_sp, 0) };
 
     for i in 0..10 {
         println!("Running in usermode! {}", i);
     }
 
-    unsafe { syscall::exit() };
+    unsafe { sys::exit() };
     unreachable!();
 }
 

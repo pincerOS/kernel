@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 elf = { path = "../elf" }
 initfs = { path = "../initfs" }
+ulib = { path = "../ulib", default-features = false }

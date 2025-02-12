@@ -39,6 +39,7 @@ version = "0.1.0"
 dependencies = [
  "elf",
  "initfs",
+ "ulib",
 ]
 
 [[package]]
@@ -60,4 +61,8 @@ dependencies = [
 
 [[package]]
 name = "lz4"
+version = "0.1.0"
+
+[[package]]
+name = "ulib"
 version = "0.1.0"
