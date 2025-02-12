@@ -189,8 +189,9 @@ fn single_indirect_read_test() {
     f.write(&text_bytes);
 
     // block size is 1024 for now
+    let image_path = "indirect1.img";
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, "indirect1.img", true);
+        create_ext2_fs("../../test/example_1.dir", 1024, image_path, true);
 
     let verify_requests = vec![
         VerifyRequest {
@@ -203,7 +204,7 @@ fn single_indirect_read_test() {
     ];
     fs::remove_file("../../test/example_1.dir/single.txt");
 
-    read_and_verify_test(&mut ext2, &verify_requests);
+    read_and_verify_test(&mut ext2, &verify_requests, image_path);
 }
 
 #[test]
@@ -216,8 +217,9 @@ fn double_indirect_read_test() {
     f.write(&text_bytes);
 
     // block size is 1024 for now
+    let image_path = "indirect2.img";
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, "indirect2.img", true);
+        create_ext2_fs("../../test/example_1.dir", 1024, image_path, true);
 
     let verify_requests = vec![
         VerifyRequest {
@@ -230,7 +232,7 @@ fn double_indirect_read_test() {
     ];
     fs::remove_file("../../test/example_1.dir/double.txt");
 
-    read_and_verify_test(&mut ext2, &verify_requests);
+    read_and_verify_test(&mut ext2, &verify_requests, image_path);
 }
 
 // TODO(Sasha): This test doesn't work yet and is also really slow so 
