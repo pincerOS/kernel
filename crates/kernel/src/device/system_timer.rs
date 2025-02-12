@@ -8,20 +8,18 @@
 //! Arm Generic Timer is implemented for each core to handle the timer interrupts, as the system timer is not functional in QEMU
 //!
 use crate::context::Context;
-use crate::sync::{ConstInit, PerCore, Volatile};
+use crate::sync::{ConstInit, PerCore, UnsafeInit, Volatile};
 use core::arch::asm;
 use core::panic;
 
-use super::gic::gic_register_isr;
-
-use crate::sync::UnsafeInit;
 static SYSTEM_TIMER: UnsafeInit<Bcm2835SysTmr> = unsafe { UnsafeInit::uninit() };
 
 pub static ARM_GENERIC_TIMERS: PerCore<ArmGenericTimer> = PerCore::new();
 
 /// Run on each core
 pub fn register_arm_generic_timer_irqs() {
-    gic_register_isr(30, arm_generic_timer_irq_handler);
+    let gic = super::gic::GIC.get();
+    gic.register_isr(30, arm_generic_timer_irq_handler);
 
     //Initialize the timer
     ARM_GENERIC_TIMERS.with_current(|timer| {
@@ -50,10 +48,11 @@ pub unsafe fn initialize_system_timer(base: *mut ()) {
 
 fn register_system_timer_irqs() {
     //Correct timer IRQ handlers for the Bcm2835_SystemTimer (Non functional in QEMU)
-    gic_register_isr(96, system_timer_irq_handler);
-    gic_register_isr(97, system_timer_irq_handler);
-    gic_register_isr(98, system_timer_irq_handler);
-    gic_register_isr(99, system_timer_irq_handler);
+    let gic = super::gic::GIC.get();
+    gic.register_isr(96, system_timer_irq_handler);
+    gic.register_isr(97, system_timer_irq_handler);
+    gic.register_isr(98, system_timer_irq_handler);
+    gic.register_isr(99, system_timer_irq_handler);
 }
 
 fn system_timer_irq_handler(_ctx: &mut Context) {

@@ -33,15 +33,11 @@
 //TODO: Handling private peripheral interrupts? 16-31 (make core specific?)
 //TODO: Handling FIQs?
 
-use crate::device::system_timer;
-extern crate core;
-use crate::context::Context;
-use crate::sync::SpinLockInner;
-use crate::sync::UnsafeInit;
+use core::arch::asm;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use core::arch::asm;
-use core::panic;
+use crate::context::Context;
+use crate::sync::{SpinLockInner, UnsafeInit};
 
 const SPI_COUNT: usize = 192;
 const IRQ_COUNT: usize = SPI_COUNT + 32;
@@ -110,48 +106,19 @@ const GICC_NSAPR0: usize = 0x00E0; // Non-Secure Active Priority Register (0x0E0
 const GICC_IIDR: usize = 0x00FC; // CPU Interface Identification Register (0x0FC)
 const GICC_DIR: usize = 0x1000; // Deactivate Interrupt Register (0x1000)
 
-static GIC: UnsafeInit<Gic400Driver> = unsafe { UnsafeInit::uninit() };
-//TODO: Add support for IRQs specific to a cpu
-static ISR_TABLE: IsrTable = IsrTable([const { AtomicUsize::new(0) }; IRQ_COUNT]);
-pub static IRQ_SET_LOCK: SpinLockInner = SpinLockInner::new();
-pub static IRQ_AFFINITY_LOCK: SpinLockInner = SpinLockInner::new();
-pub static IRQ_PRIORITY_LOCK: SpinLockInner = SpinLockInner::new();
-
 /// Register all the IRQ handlers for the GICC here
 pub fn register_gicc_irq_handlers() {
-    system_timer::register_arm_generic_timer_irqs();
+    super::system_timer::register_arm_generic_timer_irqs();
 }
+pub static GIC: UnsafeInit<Gic400Driver> = unsafe { UnsafeInit::uninit() };
 
-pub fn isb() {
+fn isb() {
     //Double check if this is correct
     unsafe { asm!("isb", options(nostack, nomem, preserves_flags)) }
 }
 
-/// Safety: must be called before ISR_TABLE is first used
-pub unsafe fn init_isr_table() {
-    for i in 0..IRQ_COUNT {
-        ISR_TABLE.set(i, irq_not_handled);
-    }
-}
-
-pub struct IsrTable([AtomicUsize; IRQ_COUNT]);
-impl IsrTable {
-    pub fn get(&self, irq: usize) -> fn(&mut Context) {
-        let func = self.0[irq % IRQ_COUNT].load(Ordering::Relaxed);
-        unsafe { core::mem::transmute(func) }
-    }
-    pub fn set(&self, irq: usize, func: fn(&mut Context)) {
-        self.0[irq % IRQ_COUNT].store(func as usize, Ordering::SeqCst);
-    }
-}
-
 pub fn irq_not_handled(_ctx: &mut Context) {
     panic!("IRQ not handled");
-}
-
-/// Level-triggered interrupts must be cleared by associaetd irq handler or else it will be called again
-pub fn irq_handler(ctx: &mut Context, irq: u32) {
-    ISR_TABLE.get(irq as usize)(ctx);
 }
 
 /// Handles the interrupt and asks handler to handle it
@@ -166,9 +133,11 @@ unsafe extern "C" fn gic_irq_handler(
 ) -> *mut Context {
     let _core = crate::arch::core_id() & 0b11;
     //Loop to handle all batched IRQs
+
+    let gic = GIC.get();
     loop {
         //read IAR for the interrupt number
-        let iar = read_gic(GIC.get().cpui_base + GICC_IAR);
+        let iar = unsafe { gic.reg_read_cpui(GICC_IAR) };
         let irq = iar & 0x3ff;
         // println!("IRQ: {irq} on core {_core}");
 
@@ -181,7 +150,7 @@ unsafe extern "C" fn gic_irq_handler(
             panic!("Invalid IRQ number");
         }
 
-        write_gic(GIC.get().cpui_base + GICC_EOIR, iar);
+        unsafe { gic.reg_write_cpui(GICC_EOIR, iar) };
         //acknowledge the interrupt
         //fence
         //TODO: Switch to dsb?
@@ -200,7 +169,10 @@ unsafe extern "C" fn gic_irq_handler(
         }
 
         //IRQ actual handling
-        irq_handler(ctx, irq);
+        // Level-triggered interrupts must be cleared by associated irq
+        // handler or else it will be called again
+        let irq_handler = gic.isr_table.get(irq as usize);
+        irq_handler(ctx);
 
         //TODO: HAndle level-triggered interrupts?
         // GICC_DIR is not necessary, Security Extensions are not enabled
@@ -209,303 +181,320 @@ unsafe extern "C" fn gic_irq_handler(
     ctx
 }
 
-/// Sends a software generated interrupt to the targetted cpus
-/// TargetListFilter:
-///     0b00: Forward the interrupt to the CPU interfaces specified in the CPUTargetList field
-///     0b01: Forward the interrupt to all CPU interfaces except that of the processor that requested the interrupt.
-///     0b10: Forward the interrupt only to the CPU interface of the processor that requested the interrupt.
-/// CPUTargetList: target list of cpus (one bit per cpu)
-/// irq: 0-15 for SGI
-///     
-pub fn gic_send_sgi(target_list_filter: u8, target_cpus: u8, irq: u8) {
-    //1 << 15 for the NSATT
-    let sgi_val = ((target_list_filter as u32) << 24)
-        | ((target_cpus as u32) << 16)
-        | (1 << 15)
-        | (irq as u32);
-    write_gic(GIC.get().dist_base + GICD_SGIR, sgi_val);
-}
+pub struct IsrTable([AtomicUsize; IRQ_COUNT]);
 
-/// returns the original priority mask that must be set back after use
-pub fn gic_set_interrupt_priority_mask(priority: u8) -> u32 {
-    let old_pmr = read_gic(GIC.get().cpui_base + GICC_PMR);
-    write_gic(GIC.get().cpui_base + GICC_PMR, priority as u32);
-    return old_pmr;
-}
-
-/// takes in the old priority mask and sets it back
-pub fn gic_reset_interrupt_priority_mask(old_pmr: u32) {
-    write_gic(GIC.get().cpui_base + GICC_PMR, old_pmr);
-}
-
-pub fn gic_register_isr(irq: usize, isr: fn(&mut Context)) {
-    gic_register_isr_detailed(irq, isr, 0xf, false, 0xa0);
-}
-
-/// Does not reset the ISR back to default after unregistering
-pub fn gic_unregister_isr(irq: usize) {
-    assert!(irq < IRQ_COUNT);
-    gic_disable_irq(irq);
-    ISR_TABLE.set(irq, irq_not_handled);
-}
-
-pub fn gic_register_isr_detailed(
-    irq: usize,
-    isr: fn(&mut Context),
-    target_cpus: u8,
-    int_type: bool,
-    priority: u8,
-) {
-    assert!(irq < IRQ_COUNT);
-    ISR_TABLE.set(irq, isr);
-    gic_set_irq_affinity(irq, target_cpus);
-    gic_set_irq_type(irq, int_type);
-    gic_set_irq_priority(irq, priority);
-
-    gic_enable_irq(irq);
-}
-
-//Sets the priority of the interrupt, 0 is the highest priority and 255 is the lowest
-pub fn gic_set_irq_priority(irq: usize, priority: u8) {
-    IRQ_PRIORITY_LOCK.lock();
-    //read the IPRIORITYR register for the interrupt
-    let mut priority_reg = read_gic(GIC.get().dist_base + GICD_IPRIORITYR + (irq / 4) * 4);
-    let shift = (irq % 4) * 8;
-    priority_reg &= !(0xff << shift);
-    priority_reg |= (priority as u32) << shift;
-
-    //write back the IPRIORITYR register
-    write_gic(
-        GIC.get().dist_base + GICD_IPRIORITYR + (irq / 4) * 4,
-        priority_reg,
-    );
-    IRQ_PRIORITY_LOCK.unlock();
-}
-
-//sets the affinity of the interrupt to the target_cpus
-pub fn gic_set_irq_affinity(irq: usize, target_cpus: u8) {
-    IRQ_AFFINITY_LOCK.lock();
-    //read the ITARGETSR register for the interrupt
-    let mut cpumask = read_gic(GIC.get().dist_base + GICD_ITARGETSR + (irq / 4) * 4);
-    let shift = (irq % 4) * 8;
-    cpumask &= !(0xff << shift);
-    cpumask |= (target_cpus as u32) << shift;
-
-    //write back the ITARGETSR register
-    write_gic(
-        GIC.get().dist_base + GICD_ITARGETSR + (irq / 4) * 4,
-        cpumask,
-    );
-    IRQ_AFFINITY_LOCK.unlock();
-}
-
-/// Edge/Level-Triggered Interrupts, 0 is level-triggered, 1 is edge-triggered
-/// irq must be disabled before use otherwise issues may arise
-pub fn gic_set_irq_type(irq: usize, int_type: bool) {
-    if irq < 16 {
-        panic!("Cannot set type for SGI or PPI");
+impl IsrTable {
+    fn new(fallback: fn(&mut Context)) -> Self {
+        IsrTable(core::array::from_fn(|_| {
+            AtomicUsize::new(fallback as usize)
+        }))
     }
-    IRQ_SET_LOCK.lock();
-
-    //read the ICFGR register for the interrupt
-    let mut icfgr = read_gic(GIC.get().dist_base + GICD_ICFGR + (irq / 16) * 4);
-    let shift = (irq % 16) * 2;
-    icfgr &= !(0x3 << shift);
-    //TODO: I think this could be issue
-    icfgr |= (int_type as u32) << (shift + 1);
-
-    //write back the ICFGR register
-    write_gic(GIC.get().dist_base + GICD_ICFGR + (irq / 16) * 4, icfgr);
-    IRQ_SET_LOCK.unlock();
-}
-
-/// Checks the type of interrupt, 0 is level-triggered, 1 is edge-triggered
-/// TODO: CHEcK if this actually works
-pub fn gic_check_irq_type(irq: usize) -> bool {
-    if irq < 16 {
-        panic!("Cannot check type for SGI or PPI");
+    pub fn get(&self, irq: usize) -> fn(&mut Context) {
+        let func = self.0[irq % IRQ_COUNT].load(Ordering::Relaxed);
+        unsafe { core::mem::transmute(func) }
     }
-
-    //read the ICFGR register for the interrupt
-    let icfgr = read_gic(GIC.get().dist_base + GICD_ICFGR + (irq / 16) * 4);
-    let shift = (irq % 16) * 2;
-    return (icfgr & (1 << shift)) != 0;
-}
-
-/// Clears the pending state of the corresponding peripheral interrupt
-/// Atomic register
-pub fn gic_clear_pending_irq(irq: usize) {
-    //write the ICPENDR register for the interrupt
-    write_gic(
-        GIC.get().dist_base + GICD_ICPENDR + (irq / 32) * 4,
-        1 << (irq % 32),
-    );
-}
-
-/// Enable the interrupt
-/// Atomic register
-pub fn gic_enable_irq(irq: usize) {
-    //write the ISENABLER register for the interrupt
-    write_gic(
-        GIC.get().dist_base + GICD_ISENABLER + (irq / 32) * 4,
-        1 << (irq % 32),
-    );
-}
-
-/// Deactivate the interrupt
-/// Atomic register
-pub fn gic_disable_irq(irq: usize) {
-    //write the ICENABLER register for the interrupt
-    write_gic(
-        GIC.get().dist_base + GICD_ICENABLER + (irq / 32) * 4,
-        1 << (irq % 32),
-    );
-}
-
-/// Checks is interrupt is enabled
-/// Atomic register
-pub fn gic_check_irq_enabled(irq: usize) -> bool {
-    //read the ISENABLER register for the interrupt
-    let isenabler = read_gic(GIC.get().dist_base + GICD_ICENABLER + (irq / 32) * 4);
-    return (isenabler & (1 << (irq % 32))) != 0;
-}
-
-/// Checks if interrupt is active
-pub fn gic_check_irq_active(irq: usize) -> bool {
-    //read the ISACTIVER register for the interrupt
-    let isactiver = read_gic(GIC.get().dist_base + GICD_ISACTIVER + (irq / 32) * 4);
-    return (isactiver & (1 << (irq % 32))) != 0;
-}
-
-/// Initialize the GIC-400 Distributor and CPU interface for primary core (should be run once) Non-Thread Safe
-pub unsafe fn gic_init(base_addr: *mut ()) {
-    unsafe {
-        init_isr_table();
-        GIC.init(Gic400Driver::new(base_addr));
+    pub fn set(&self, irq: usize, func: fn(&mut Context)) {
+        self.0[irq].store(func as usize, Ordering::SeqCst);
     }
-    init_distributor();
-    let gicc_type = gic_check_cpu_identification();
-    println!("| GICC Type: {:#010x}", gicc_type);
-
-    //Add interrupt registering here
-
-    //More care is needed for SGIs and PPIs as they are core specific
-
-    gic_init_other_cores();
-}
-
-/// Initlizalize the GIC-400 CPU interface for other cores
-pub fn gic_init_other_cores() {
-    println!(
-        "| GIC initing {} CPU core interface",
-        crate::arch::core_id() & 0b11
-    );
-    init_cpu_interface();
-
-    register_gicc_irq_handlers();
-}
-
-// initialize the GIC-400 distributor (CPU DEPENDENT)
-pub fn init_distributor() {
-    write_gic(GIC.get().dist_base + GICD_CTLR, GICD_DISABLE);
-
-    let mut cpumask = CPU_MASK | CPU_MASK << 8;
-    cpumask |= cpumask << 16;
-
-    for i in (32..IRQ_COUNT).step_by(4) {
-        write_gic(GIC.get().dist_base + GICD_ITARGETSR + i, cpumask);
-    }
-
-    dist_config();
-
-    write_gic(GIC.get().dist_base + GICD_CTLR, GICD_ENABLE);
-
-    let gicd_type = get_gicd_type();
-    println!("| GICD Type: {:#010x}", gicd_type);
-}
-
-// initialize the GIC-400 cpu interface (CPU DEPENDENT)
-pub fn init_cpu_interface() {
-    cpu_config();
-
-    write_gic(GIC.get().cpui_base + GICC_PMR, 0xf0);
-
-    //Active Priorities register implementation
-    for i in 0..4 {
-        write_gic(GIC.get().cpui_base + GICC_APR0 + i * 4, 0);
-    }
-
-    //preserves GICC_ENABLE bits (for GICC.EOLmode ns)
-    //TODO: Is this necessary? I don't think the GIC-400 on the Raspi supports Security extensions
-    let bypass = read_gic(GIC.get().cpui_base + GICC_CTLR) & 0x1e0;
-    write_gic(GIC.get().cpui_base + GICC_CTLR, bypass | GICC_ENABLE);
-}
-
-pub fn get_gicd_type() -> u32 {
-    return read_gic(GIC.get().dist_base + GICD_TYPER);
-}
-
-///Private methods
-
-//
-fn dist_config() {
-    //Sets interrupts to be level triggered
-    for i in (32..IRQ_COUNT).step_by(16) {
-        write_gic(GIC.get().dist_base + GICD_ICFGR + i / 4, 0);
-    }
-
-    //Set priority
-    for i in (32..IRQ_COUNT).step_by(4) {
-        write_gic(GIC.get().dist_base + GICD_IPRIORITYR + i, repeat_byte(0xa0));
-    }
-
-    //Deactivate all interrupts except for banked CPU registeres
-    for i in (32..IRQ_COUNT).step_by(32) {
-        write_gic(GIC.get().dist_base + GICD_ICENABLER + i / 8, 0xffffffff);
-        write_gic(GIC.get().dist_base + GICD_ICACTIVER + i / 8, 0xffffffff);
-    }
-}
-
-fn gic_check_cpu_identification() -> u32 {
-    return read_gic(GIC.get().cpui_base + GICC_IIDR);
-}
-
-fn cpu_config() {
-    //Deactivate SGIs and PPIs
-    write_gic(GIC.get().dist_base + GICD_ICACTIVER, 0xffffffff);
-    write_gic(GIC.get().dist_base + GICD_ICENABLER, 0xffffffff);
-
-    //Set priority on the SGIs and PPIs
-    for i in (0..32).step_by(4) {
-        write_gic(GIC.get().dist_base + GICD_IPRIORITYR + i, repeat_byte(0xa0));
-    }
-}
-
-fn write_gic(reg: usize, val: u32) {
-    unsafe { core::ptr::write_volatile(reg as *mut u32, val) }
-}
-
-fn read_gic(reg: usize) -> u32 {
-    unsafe { core::ptr::read_volatile(reg as *mut u32) }
-}
-
-#[inline]
-pub fn repeat_byte(byte: u8) -> u32 {
-    byte as u32 | (byte as u32) << 8 | (byte as u32) << 16 | (byte as u32) << 24
 }
 
 pub struct Gic400Driver {
-    dist_base: usize,
-    cpui_base: usize,
+    base_addr: *mut u32,
+
+    // TODO: Add support for IRQs specific to a cpu
+    isr_table: IsrTable,
+
+    irq_set_lock: SpinLockInner,
+    irq_affinity_lock: SpinLockInner,
+    irq_priority_lock: SpinLockInner,
 }
+
+unsafe impl Sync for Gic400Driver {}
 
 impl Gic400Driver {
     /// Creates and initializes a new GIC-400 driver.
     /// Maps the distributor and cpu_interface registers to the base address
-    pub fn new(base_addr: *mut ()) -> Self {
-        Self {
-            dist_base: (base_addr as usize + GICD_OFFSET),
-            cpui_base: (base_addr as usize + GICC_OFFSET),
+    ///
+    /// Initialize the GIC-400 Distributor and CPU interface for primary core
+    /// (should be run once) Non-Thread Safe
+    pub unsafe fn init(base_addr: *mut ()) -> Self {
+        let this = Self {
+            base_addr: base_addr.cast(),
+
+            isr_table: IsrTable::new(irq_not_handled),
+            irq_set_lock: SpinLockInner::new(),
+            irq_affinity_lock: SpinLockInner::new(),
+            irq_priority_lock: SpinLockInner::new(),
+        };
+
+        this.init_distributor();
+        let gicc_type = this.check_cpu_identification();
+        println!("| GICC Type: {:#010x}", gicc_type);
+
+        //Add interrupt registering here
+
+        //More care is needed for SGIs and PPIs as they are core specific
+
+        this.init_per_core();
+
+        this
+    }
+
+    /// Initlizalize the GIC-400 CPU interface for other cores
+    pub fn init_per_core(&self) {
+        println!(
+            "| GIC initing {} CPU core interface",
+            crate::arch::core_id() & 0b11
+        );
+        self.init_cpu_interface();
+    }
+
+    // initialize the GIC-400 distributor (CPU DEPENDENT)
+    pub fn init_distributor(&self) {
+        unsafe { self.reg_write_dist(GICD_CTLR, GICD_DISABLE) };
+
+        let mut cpumask = CPU_MASK | CPU_MASK << 8;
+        cpumask |= cpumask << 16;
+
+        for i in (32..IRQ_COUNT).step_by(4) {
+            unsafe { self.reg_write_dist(GICD_ITARGETSR + i, cpumask) };
+        }
+
+        self.dist_config();
+
+        unsafe { self.reg_write_dist(GICD_CTLR, GICD_ENABLE) };
+
+        let gicd_type = self.get_gicd_type();
+        println!("| GICD Type: {:#010x}", gicd_type);
+    }
+
+    // initialize the GIC-400 cpu interface (CPU DEPENDENT)
+    pub fn init_cpu_interface(&self) {
+        self.cpu_config();
+
+        unsafe { self.reg_write_cpui(GICC_PMR, 0xf0) };
+
+        //Active Priorities register implementation
+        for i in 0..4 {
+            unsafe { self.reg_write_cpui(GICC_APR0 + i * 4, 0) };
+        }
+
+        //preserves GICC_ENABLE bits (for GICC.EOLmode ns)
+        //TODO: Is this necessary? I don't think the GIC-400 on the Raspi supports Security extensions
+        let bypass = unsafe { self.reg_read_cpui(GICC_CTLR) } & 0x1e0;
+        unsafe { self.reg_write_cpui(GICC_CTLR, bypass | GICC_ENABLE) };
+    }
+
+    unsafe fn reg_write_dist(&self, reg: usize, val: u32) {
+        unsafe { core::ptr::write_volatile(self.base_addr.byte_add(GICD_OFFSET + reg), val) }
+    }
+    unsafe fn reg_write_cpui(&self, reg: usize, val: u32) {
+        unsafe { core::ptr::write_volatile(self.base_addr.byte_add(GICC_OFFSET + reg), val) }
+    }
+    unsafe fn reg_read_dist(&self, reg: usize) -> u32 {
+        unsafe { core::ptr::read_volatile(self.base_addr.byte_add(GICD_OFFSET + reg)) }
+    }
+    unsafe fn reg_read_cpui(&self, reg: usize) -> u32 {
+        unsafe { core::ptr::read_volatile(self.base_addr.byte_add(GICC_OFFSET + reg)) }
+    }
+
+    /// Sends a software generated interrupt to the targetted cpus
+    /// TargetListFilter:
+    ///     0b00: Forward the interrupt to the CPU interfaces specified in the CPUTargetList field
+    ///     0b01: Forward the interrupt to all CPU interfaces except that of the processor that requested the interrupt.
+    ///     0b10: Forward the interrupt only to the CPU interface of the processor that requested the interrupt.
+    /// CPUTargetList: target list of cpus (one bit per cpu)
+    /// irq: 0-15 for SGI
+    ///     
+    pub fn send_sgi(&self, target_list_filter: u8, target_cpus: u8, irq: u8) {
+        //1 << 15 for the NSATT
+        let sgi_val = ((target_list_filter as u32) << 24)
+            | ((target_cpus as u32) << 16)
+            | (1 << 15)
+            | (irq as u32);
+        unsafe { self.reg_write_dist(GICD_SGIR, sgi_val) };
+    }
+
+    /// returns the original priority mask that must be set back after use
+    pub fn set_interrupt_priority_mask(&self, priority: u8) -> u32 {
+        let old_pmr = unsafe { self.reg_read_cpui(GICC_PMR) };
+        unsafe { self.reg_write_cpui(GICC_PMR, priority as u32) };
+        return old_pmr;
+    }
+
+    /// takes in the old priority mask and sets it back
+    pub fn reset_interrupt_priority_mask(&self, old_pmr: u32) {
+        unsafe { self.reg_write_cpui(GICC_PMR, old_pmr) };
+    }
+
+    pub fn register_isr(&self, irq: usize, isr: fn(&mut Context)) {
+        self.register_isr_detailed(irq, isr, 0xf, false, 0xa0);
+    }
+
+    /// Does not reset the ISR back to default after unregistering
+    pub fn unregister_isr(&self, irq: usize) {
+        assert!(irq < IRQ_COUNT);
+        self.disable_irq(irq);
+        self.isr_table.set(irq, irq_not_handled);
+    }
+
+    pub fn register_isr_detailed(
+        &self,
+        irq: usize,
+        isr: fn(&mut Context),
+        target_cpus: u8,
+        int_type: bool,
+        priority: u8,
+    ) {
+        assert!(irq < IRQ_COUNT);
+        self.isr_table.set(irq, isr);
+        self.set_irq_affinity(irq, target_cpus);
+        self.set_irq_type(irq, int_type);
+        self.set_irq_priority(irq, priority);
+
+        self.enable_irq(irq);
+    }
+
+    //Sets the priority of the interrupt, 0 is the highest priority and 255 is the lowest
+    pub fn set_irq_priority(&self, irq: usize, priority: u8) {
+        self.irq_priority_lock.lock();
+        //read the IPRIORITYR register for the interrupt
+        let mut priority_reg = unsafe { self.reg_read_dist(GICD_IPRIORITYR + (irq / 4) * 4) };
+        let shift = (irq % 4) * 8;
+        priority_reg &= !(0xff << shift);
+        priority_reg |= (priority as u32) << shift;
+
+        //write back the IPRIORITYR register
+        unsafe { self.reg_write_dist(GICD_IPRIORITYR + (irq / 4) * 4, priority_reg) };
+        self.irq_priority_lock.unlock();
+    }
+
+    //sets the affinity of the interrupt to the target_cpus
+    pub fn set_irq_affinity(&self, irq: usize, target_cpus: u8) {
+        self.irq_affinity_lock.lock();
+        //read the ITARGETSR register for the interrupt
+        let mut cpumask = unsafe { self.reg_read_dist(GICD_ITARGETSR + (irq / 4) * 4) };
+        let shift = (irq % 4) * 8;
+        cpumask &= !(0xff << shift);
+        cpumask |= (target_cpus as u32) << shift;
+
+        //write back the ITARGETSR register
+        unsafe { self.reg_write_dist(GICD_ITARGETSR + (irq / 4) * 4, cpumask) };
+        self.irq_affinity_lock.unlock();
+    }
+
+    /// Edge/Level-Triggered Interrupts, 0 is level-triggered, 1 is edge-triggered
+    /// irq must be disabled before use otherwise issues may arise
+    pub fn set_irq_type(&self, irq: usize, int_type: bool) {
+        if irq < 16 {
+            panic!("Cannot set type for SGI or PPI");
+        }
+        self.irq_set_lock.lock();
+
+        //read the ICFGR register for the interrupt
+        let mut icfgr = unsafe { self.reg_read_dist(GICD_ICFGR + (irq / 16) * 4) };
+        let shift = (irq % 16) * 2;
+        icfgr &= !(0x3 << shift);
+        //TODO: I think this could be issue
+        icfgr |= (int_type as u32) << (shift + 1);
+
+        //write back the ICFGR register
+        unsafe { self.reg_write_dist(GICD_ICFGR + (irq / 16) * 4, icfgr) };
+        self.irq_set_lock.unlock();
+    }
+
+    /// Checks the type of interrupt, 0 is level-triggered, 1 is edge-triggered
+    /// TODO: CHEcK if this actually works
+    pub fn check_irq_type(&self, irq: usize) -> bool {
+        if irq < 16 {
+            panic!("Cannot check type for SGI or PPI");
+        }
+
+        //read the ICFGR register for the interrupt
+        let icfgr = unsafe { self.reg_read_dist(GICD_ICFGR + (irq / 16) * 4) };
+        let shift = (irq % 16) * 2;
+        return (icfgr & (1 << shift)) != 0;
+    }
+
+    /// Clears the pending state of the corresponding peripheral interrupt
+    /// Atomic register
+    pub fn clear_pending_irq(&self, irq: usize) {
+        //write the ICPENDR register for the interrupt
+        unsafe { self.reg_write_dist(GICD_ICPENDR + (irq / 32) * 4, 1 << (irq % 32)) };
+    }
+
+    /// Enable the interrupt
+    /// Atomic register
+    pub fn enable_irq(&self, irq: usize) {
+        //write the ISENABLER register for the interrupt
+        unsafe { self.reg_write_dist(GICD_ISENABLER + (irq / 32) * 4, 1 << (irq % 32)) };
+    }
+
+    /// Deactivate the interrupt
+    /// Atomic register
+    pub fn disable_irq(&self, irq: usize) {
+        //write the ICENABLER register for the interrupt
+        unsafe { self.reg_write_dist(GICD_ICENABLER + (irq / 32) * 4, 1 << (irq % 32)) };
+    }
+
+    /// Checks is interrupt is enabled
+    /// Atomic register
+    pub fn check_irq_enabled(&self, irq: usize) -> bool {
+        //read the ISENABLER register for the interrupt
+        let isenabler = unsafe { self.reg_read_dist(GICD_ICENABLER + (irq / 32) * 4) };
+        return (isenabler & (1 << (irq % 32))) != 0;
+    }
+
+    /// Checks if interrupt is active
+    pub fn check_irq_active(&self, irq: usize) -> bool {
+        //read the ISACTIVER register for the interrupt
+        let isactiver = unsafe { self.reg_read_dist(GICD_ISACTIVER + (irq / 32) * 4) };
+        return (isactiver & (1 << (irq % 32))) != 0;
+    }
+
+    pub fn get_gicd_type(&self) -> u32 {
+        return unsafe { self.reg_read_dist(GICD_TYPER) };
+    }
+
+    fn dist_config(&self) {
+        //Sets interrupts to be level triggered
+        for i in (32..IRQ_COUNT).step_by(16) {
+            unsafe { self.reg_write_dist(GICD_ICFGR + i / 4, 0) };
+        }
+
+        //Set priority
+        for i in (32..IRQ_COUNT).step_by(4) {
+            unsafe { self.reg_write_dist(GICD_IPRIORITYR + i, repeat_byte(0xa0)) };
+        }
+
+        //Deactivate all interrupts except for banked CPU registeres
+        for i in (32..IRQ_COUNT).step_by(32) {
+            unsafe {
+                self.reg_write_dist(GICD_ICENABLER + i / 8, 0xffffffff);
+                self.reg_write_dist(GICD_ICACTIVER + i / 8, 0xffffffff);
+            }
         }
     }
+
+    fn check_cpu_identification(&self) -> u32 {
+        return unsafe { self.reg_read_cpui(GICC_IIDR) };
+    }
+
+    fn cpu_config(&self) {
+        //Deactivate SGIs and PPIs
+        unsafe {
+            self.reg_write_dist(GICD_ICACTIVER, 0xffffffff);
+            self.reg_write_dist(GICD_ICENABLER, 0xffffffff);
+        }
+
+        //Set priority on the SGIs and PPIs
+        for i in (0..32).step_by(4) {
+            unsafe { self.reg_write_dist(GICD_IPRIORITYR + i, repeat_byte(0xa0)) };
+        }
+    }
+}
+
+#[inline]
+fn repeat_byte(byte: u8) -> u32 {
+    byte as u32 | (byte as u32) << 8 | (byte as u32) << 16 | (byte as u32) << 24
 }

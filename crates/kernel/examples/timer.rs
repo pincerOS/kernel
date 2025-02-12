@@ -4,9 +4,9 @@
 extern crate alloc;
 extern crate kernel;
 
-use kernel::{context::Context, device::gic::gic_register_isr, *};
+use kernel::*;
 
-fn test_irq_handler(_ctx: &mut Context) {
+fn test_irq_handler(_ctx: &mut context::Context) {
     //Reset the timer to ping again
     device::system_timer::ARM_GENERIC_TIMERS.with_current(|timer| {
         timer.reset_timer();
@@ -29,7 +29,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     let mut iteration = 0;
     let iteration_slice = 0x100000;
 
-    gic_register_isr(30, test_irq_handler);
+    device::gic::GIC.get().register_isr(30, test_irq_handler);
 
     device::system_timer::ARM_GENERIC_TIMERS.with_current(|timer| {
         timer.set_timer_microseconds(0x100000);

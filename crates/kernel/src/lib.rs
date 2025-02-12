@@ -21,7 +21,6 @@ pub mod task;
 pub mod thread;
 pub mod util;
 
-use device::gic::gic_init_other_cores;
 use device::uart;
 use sync::SpinLock;
 
@@ -96,7 +95,7 @@ pub unsafe extern "C" fn kernel_entry_rust_alt(_x0: u32, _x1: u64, _x2: u64, _x3
     let sp = arch::debug_get_sp();
     println!("| starting core {id}, initial sp {:#x}", sp);
 
-    gic_init_other_cores();
+    device::gic::GIC.get().init_per_core();
 
     INIT_BARRIER.fetch_add(1, Ordering::SeqCst);
     START_BARRIER.fetch_add(1, Ordering::SeqCst);

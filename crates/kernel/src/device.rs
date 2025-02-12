@@ -11,7 +11,6 @@ use device_tree::format::StructEntry;
 use device_tree::util::MappingIterator;
 use device_tree::DeviceTree;
 
-use crate::device::gic::gic_init;
 use crate::memory::{map_device, map_device_block};
 use crate::sync::{InterruptSpinLock, UnsafeInit};
 use crate::SpinLock;
@@ -153,7 +152,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
 
         println!("| GIC-400 addr: {:#010x}", gic_addr as usize);
         println!("| GIC-400 base: {:#010x}", gic_base as usize);
-        unsafe { gic_init(gic_base) };
+        unsafe { gic::GIC.init(gic::Gic400Driver::init(gic_base)) };
     }
 
     {
