@@ -252,6 +252,15 @@ unsafe extern "C" fn exception_handler_user(
         }
     }
 
+    let ttbr0: usize;
+    unsafe {
+        asm! {
+            "mrs {}, ttbr0_el1",
+            out(reg) ttbr0,
+            options(nomem, nostack, preserves_flags)
+        }
+    }
+
     let exception_class = esr >> 26;
     let class_name = *EXCEPTION_CLASS
         .get(exception_class as usize)
@@ -277,12 +286,13 @@ unsafe extern "C" fn exception_handler_user(
                     CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
                 let mut thread = thread.expect("usermode syscall without active thread");
                 unsafe { thread.save_context(ctx.into()) };
-                unsafe { deschedule_thread(core_sp, thread, DescheduleAction::FreeThread) }
+                unsafe { deschedule_thread(core_sp, Some(thread), DescheduleAction::FreeThread) }
             }
         }
         _ => {
             if uart::UART.is_initialized() {
                 println!("Received exception from usermode: elr={elr:#x} spsr={spsr:#010x} esr={esr:#010x} far={far:#010x} (class {exception_class:#x} / {class_name}) {arg}");
+                println!("ttbr0={ttbr0:#010x}");
             }
             halt()
         }

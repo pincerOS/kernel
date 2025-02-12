@@ -31,8 +31,9 @@ impl AllCores {
     /// Safety: Must only be called once, before any other accesses.
     pub unsafe fn init(&self) {
         for i in 0..4 {
-            let stack = &crate::arch::boot::STACKS[i];
-            self.0[i].core_sp.set(stack.as_ptr_range().end as usize);
+            let stack = unsafe { &raw const crate::arch::boot::STACKS[i] };
+            let stack_end = stack.wrapping_add(1);
+            self.0[i].core_sp.set(stack_end as usize);
         }
     }
 
@@ -223,7 +224,11 @@ pub enum DescheduleAction {
 
 #[allow(improper_ctypes)]
 extern "C" {
-    pub fn deschedule_thread(core_sp: usize, thread: Box<Thread>, action: DescheduleAction) -> !;
+    pub fn deschedule_thread(
+        core_sp: usize,
+        thread: Option<Box<Thread>>,
+        action: DescheduleAction,
+    ) -> !;
 }
 
 core::arch::global_asm!(
@@ -239,13 +244,15 @@ deschedule_thread:
 #[no_mangle]
 unsafe extern "C" fn deschedule_thread_inner(
     _core_sp: usize,
-    thread: Box<Thread>,
+    thread: Option<Box<Thread>>,
     action: DescheduleAction,
 ) -> ! {
     unsafe { crate::sync::enable_interrupts() };
-    match action {
-        DescheduleAction::Yield => SCHEDULER.add_task(Event::ScheduleThread(thread)),
-        DescheduleAction::FreeThread => drop(thread),
+    if let Some(thread) = thread {
+        match action {
+            DescheduleAction::Yield => SCHEDULER.add_task(Event::ScheduleThread(thread)),
+            DescheduleAction::FreeThread => drop(thread),
+        }
     }
     unsafe { run_event_loop() }
 }
