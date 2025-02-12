@@ -183,4 +183,10 @@ impl<'a> Elf<'a> {
             );
         Some(iter)
     }
+
+    pub fn segment_data(&self, phdr: &program_header::ProgramHeader) -> Option<&'a [u8]> {
+        let start = usize::try_from(phdr.p_offset).ok()?;
+        let end = usize::try_from(phdr.p_offset.checked_add(phdr.p_filesz)?).ok()?;
+        self.file_data.get(start..end)
+    }
 }
