@@ -28,11 +28,29 @@ exit # -->"##]
 #[macro_use]
 extern crate ulib;
 
+use ulib::sys;
+
 #[no_mangle]
-fn main() {
+fn main(chan: sys::ChannelDesc) {
+    let mut buf = [0; 1024];
+    let (len, msg) = sys::recv_block(chan, &mut buf).unwrap();
+    let data = &buf[..len];
+
+    println!(
+        "Received message from parent; tag {:#x}, data {:?}",
+        msg.tag,
+        core::str::from_utf8(data).unwrap()
+    );
+
     for i in 0..10 {
         println!("Running in usermode! {}", i);
     }
 
-    unsafe { ulib::sys::shutdown() };
+    let msg = sys::Message {
+        tag: 0xFF00FF00,
+        objects: [0; 4],
+    };
+    sys::send_block(chan, &msg, b"Hello parent!");
+
+    unsafe { ulib::sys::exit() };
 }
