@@ -17,6 +17,7 @@ strip = false
 incremental = false
 debug = 2
 panic = "abort"
+debug-assertions = true
 
 [profile.dev]
 incremental = false

@@ -24,7 +24,12 @@ impl<T> UnsafeInit<T> {
         }
         assert!(!self.initialized.swap(true, Ordering::SeqCst));
     }
+    #[track_caller]
     pub fn get(&self) -> &T {
+        debug_assert!(
+            self.initialized.load(Ordering::Relaxed),
+            "attempt to use an uninitialized UnsafeInit instance"
+        );
         unsafe { (*self.inner.get()).assume_init_ref() }
     }
     pub fn is_initialized(&self) -> bool {
