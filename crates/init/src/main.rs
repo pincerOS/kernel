@@ -57,14 +57,21 @@ pub extern "C" fn main() {
     sys::send_block(child, &msg, b"Hello child!");
 
     let mut buf = [0; 1024];
-    let (len, msg) = sys::recv_block(child, &mut buf).unwrap();
-    let data = &buf[..len];
 
-    println!(
-        "Received message from child; tag {:#x}, data {:?}",
-        msg.tag,
-        core::str::from_utf8(data).unwrap()
-    );
+    loop {
+        let (len, msg) = sys::recv_block(child, &mut buf).unwrap();
+        let data = &buf[..len];
+
+        println!(
+            "Received message from child; tag {:#x}, data {:?}",
+            msg.tag,
+            core::str::from_utf8(data).unwrap()
+        );
+
+        if data == b"shutdown" {
+            break;
+        }
+    }
 
     unsafe { sys::shutdown() };
     unreachable!();
