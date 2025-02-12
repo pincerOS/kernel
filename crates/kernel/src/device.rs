@@ -7,6 +7,8 @@ pub mod system_timer;
 pub mod timer;
 pub mod watchdog;
 
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 use device_tree::format::StructEntry;
 use device_tree::util::MappingIterator;
 use device_tree::DeviceTree;
@@ -89,7 +91,12 @@ pub static WATCHDOG: UnsafeInit<SpinLock<watchdog::bcm2835_wdt_driver>> =
 pub static IRQ_CONTROLLER: UnsafeInit<InterruptSpinLock<timer::bcm2836_l1_intc_driver>> =
     unsafe { UnsafeInit::uninit() };
 
+type InitTask = Box<dyn Fn() + Send + Sync>;
+pub static PER_CORE_INIT: UnsafeInit<Vec<InitTask>> = unsafe { UnsafeInit::uninit() };
+
 pub fn init_devices(tree: &DeviceTree<'_>) {
+    let mut init_fns: Vec<InitTask> = Vec::new();
+
     let mut uarts = discover_compatible(tree, b"arm,pl011").unwrap();
     {
         let uart = uarts.next().unwrap();
@@ -126,12 +133,25 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         println!("| last reset: {:#010x}", WATCHDOG.get().lock().last_reset());
     }
 
+    if let Some(gic) = discover_compatible(tree, b"arm,gic-400").unwrap().next() {
+        println!("| initializing GIC-400 interrupt controller");
+        let (gic_addr, _) = find_device_addr(gic).unwrap().unwrap();
+        let gic_base = unsafe { map_device_block(gic_addr, 0x8000) }.as_ptr();
+
+        println!("| GIC-400 addr: {:#010x}", gic_addr as usize);
+        println!("| GIC-400 base: {:#010x}", gic_base as usize);
+
+        let gic = unsafe { gic::Gic400Driver::init(gic_base) };
+        unsafe { gic::GIC.init(gic) };
+
+        init_fns.push(Box::new(|| {
+            gic::GIC.get().init_per_core();
+        }));
+    } else if let Some(intc) = discover_compatible(tree, b"brcm,bcm2836-l1-intc")
+        .unwrap()
+        .next()
     {
-        println!("| initializing interrupt controller");
-        let intc = discover_compatible(tree, b"brcm,bcm2836-l1-intc")
-            .unwrap()
-            .next()
-            .unwrap();
+        println!("| initializing local interrupt controller");
         let (intc_addr, _) = find_device_addr(intc).unwrap().unwrap();
         let intc_base = unsafe { map_device(intc_addr) }.as_ptr();
         println!("| INT controller addr: {:#010x}", intc_addr as usize);
@@ -139,20 +159,6 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let intc = timer::bcm2836_l1_intc_driver::new(intc_base);
         let intc = InterruptSpinLock::new(intc);
         unsafe { IRQ_CONTROLLER.init(intc) };
-    }
-
-    {
-        println!("| initializing GIC-400 interrupt controller");
-        let gic_iter = discover_compatible(tree, b"arm,gic-400")
-            .unwrap()
-            .next()
-            .unwrap();
-        let (gic_addr, _) = find_device_addr(gic_iter).unwrap().unwrap();
-        let gic_base = unsafe { map_device_block(gic_addr, 0x8000) }.as_ptr();
-
-        println!("| GIC-400 addr: {:#010x}", gic_addr as usize);
-        println!("| GIC-400 base: {:#010x}", gic_base as usize);
-        unsafe { gic::GIC.init(gic::Gic400Driver::init(gic_base)) };
     }
 
     {
@@ -191,6 +197,8 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let time = system_timer::get_time();
         println!("| timer initialized, time: {time}");
     }
+
+    unsafe { PER_CORE_INIT.init(init_fns) };
 }
 
 /// Discovers and starts all cores, and returns the number of cores found.
@@ -252,4 +260,11 @@ pub fn enable_cpus(tree: &device_tree::DeviceTree<'_>, start_fn: unsafe extern "
     unsafe { crate::arch::sev() };
 
     core_count
+}
+
+pub fn init_devices_per_core() {
+    let local = PER_CORE_INIT.get();
+    for init in local {
+        init();
+    }
 }

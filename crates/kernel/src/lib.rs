@@ -29,6 +29,7 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 static INIT_BARRIER: AtomicUsize = AtomicUsize::new(0);
 static START_BARRIER: AtomicUsize = AtomicUsize::new(0);
 static START_WAIT: AtomicBool = AtomicBool::new(false);
+static INIT_WAIT: AtomicBool = AtomicBool::new(false);
 
 const FLAG_MULTICORE: bool = true;
 const FLAG_PREEMPTION: bool = true;
@@ -63,8 +64,9 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     while INIT_BARRIER.load(Ordering::SeqCst) < core_count {
         unsafe { arch::yield_() };
     }
+    INIT_WAIT.store(true, Ordering::SeqCst);
 
-    if FLAG_PREEMPTION {
+    if FLAG_PREEMPTION && device::IRQ_CONTROLLER.is_initialized() {
         println!("| enabling preemption on all cores");
         let preemption_time_ns = 500_000;
         let mut irq = device::IRQ_CONTROLLER.get().lock();
@@ -72,6 +74,7 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
             irq.start_timer(core, preemption_time_ns);
         }
     }
+    device::init_devices_per_core();
 
     println!("| creating initial thread");
     thread::thread(move || {
@@ -80,7 +83,7 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     });
 
     START_BARRIER.fetch_add(1, Ordering::SeqCst);
-    while START_BARRIER.load(Ordering::SeqCst) < 4 {
+    while START_BARRIER.load(Ordering::SeqCst) < core_count {
         unsafe { arch::yield_() };
     }
     START_WAIT.store(true, Ordering::SeqCst);
@@ -95,9 +98,13 @@ pub unsafe extern "C" fn kernel_entry_rust_alt(_x0: u32, _x1: u64, _x2: u64, _x3
     let sp = arch::debug_get_sp();
     println!("| starting core {id}, initial sp {:#x}", sp);
 
-    device::gic::GIC.get().init_per_core();
-
     INIT_BARRIER.fetch_add(1, Ordering::SeqCst);
+    while !INIT_WAIT.load(Ordering::SeqCst) {
+        unsafe { arch::yield_() };
+    }
+
+    device::init_devices_per_core();
+
     START_BARRIER.fetch_add(1, Ordering::SeqCst);
     while !START_WAIT.load(Ordering::SeqCst) {
         unsafe { arch::yield_() };
