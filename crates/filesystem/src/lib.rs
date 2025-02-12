@@ -948,15 +948,17 @@ where
         Ok(new_inode_wrapper)
     }
 
+    // EXT2_S_IROTH is needed for fuse tests to succeed
     pub fn create_dir(&mut self, node: &mut INodeWrapper, name: &[u8]) 
         -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
-        self.create_file_with_mode(node, name, EXT2_S_IFDIR)
+        self.create_file_with_mode(node, name, EXT2_S_IFDIR | i_mode::EXT2_S_IROTH)
     }
 
     // Creates a file named name (<= 255 characters)
+    // EXT2_S_IROTH is needed for fuse tests to succeed
     pub fn create_file(&mut self, node: &mut INodeWrapper,
                        name: &[u8]) -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
-        self.create_file_with_mode(node, name, EXT2_S_IFREG)
+        self.create_file_with_mode(node, name, EXT2_S_IFREG | i_mode::EXT2_S_IROTH)
     }
 
     pub fn num_of_block_groups(&self) -> usize {

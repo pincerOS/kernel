@@ -2,7 +2,7 @@ use alloc::rc::Rc;
 use std::cell::RefCell;
 use crate::{linux::FileBlockDevice, INodeWrapper, Superblock};
 use std::fs::File;
-use std::{io, vec};
+use std::{env, io, println, vec};
 use std::io::Read;
 use std::prelude::v1::{Box, String, ToString, Vec};
 use std::process::{Command, Output};
@@ -38,9 +38,55 @@ struct VerifyRequest<'a> {
     create_dirs_if_nonexistent: bool
 }
 
-fn read_and_verify_test(ext2: &mut Ext2<FileBlockDevice>, verify_requests: &Vec<VerifyRequest>) {
-    let root_node: Rc<RefCell<INodeWrapper>> = ext2.get_root_inode_wrapper();
+fn unmount_fuse_fs(mount_dir: &str) {
+    let unmount_result = Command::new("umount").args([mount_dir]).output().unwrap();
+    let unmount_stderr = String::from_utf8_lossy(&unmount_result.stderr);
+    
+    println!("{}", unmount_stderr);
+}
 
+fn read_and_verify_via_fuse_test(verify_requests: &Vec<VerifyRequest>,
+                                 image_path: &str) {
+    let mut test_mount_dir = String::from("/tmp/tst-fuse-ext2-mnt-");
+    test_mount_dir.push_str(image_path);
+
+    let mkdir_result = Command::new("mkdir").args([test_mount_dir.as_str()]).output();
+    let mut complete_image_path = String::from(std::env::current_dir().unwrap().to_str().unwrap());
+
+    complete_image_path.push_str("/");
+    complete_image_path.push_str(image_path);
+
+    let fuse_ext2_output = Command::new("fuse-ext2")
+        .args([complete_image_path.as_str(), &*test_mount_dir, "-o", "rw+,allow_other,nonempty,uid=501,gid=20"]).output().unwrap();
+    let fuse_ext2_stderr = String::from_utf8(fuse_ext2_output.stderr).unwrap();
+
+    for verify_request in verify_requests {
+        let mut current_file_path: String = test_mount_dir.clone();
+        let mut file_bytes: Vec<u8> = Vec::new();
+        let expected_data: Vec<u8> = if verify_request.expect_data.is_some() {
+            verify_request.expect_data.unwrap().to_vec()
+        } else {
+            verify_request.data.to_vec()
+        };
+
+        current_file_path.push('/');
+        current_file_path.push_str(std::str::from_utf8(verify_request.file_path).unwrap());
+
+        File::open(current_file_path).unwrap().read_to_end(&mut file_bytes).unwrap();
+
+        if expected_data != file_bytes.as_slice() {
+            unmount_fuse_fs(test_mount_dir.as_str());
+            assert_eq!(expected_data, file_bytes);
+        }
+    }
+
+    unmount_fuse_fs(test_mount_dir.as_str());
+}
+
+fn read_and_verify_test(ext2: &mut Ext2<FileBlockDevice>, verify_requests: &Vec<VerifyRequest>,
+                        image_path: &str) {
+    let root_node: Rc<RefCell<INodeWrapper>> = ext2.get_root_inode_wrapper();
+    
     for verify_request in verify_requests {
         let file_node: Rc<RefCell<INodeWrapper>> =
             ext2.find_recursive(root_node.clone(), verify_request.file_path, false, false).unwrap();
@@ -54,9 +100,14 @@ fn read_and_verify_test(ext2: &mut Ext2<FileBlockDevice>, verify_requests: &Vec<
 
         assert_eq!(file_bytes, expected_data);
     }
+
+    if std::env::consts::OS == "linux" {
+        read_and_verify_via_fuse_test(verify_requests, image_path);
+    }
 }
 
-fn write_and_verify_test(ext2: &mut Ext2<FileBlockDevice>, verify_requests: &Vec<VerifyRequest>) {
+fn write_and_verify_test(ext2: &mut Ext2<FileBlockDevice>, verify_requests: &Vec<VerifyRequest>,
+                         image_path: &str) {
     let root_node = ext2.get_root_inode_wrapper();
 
     for verify_request in verify_requests {
@@ -78,13 +129,14 @@ fn write_and_verify_test(ext2: &mut Ext2<FileBlockDevice>, verify_requests: &Vec
         }
     }
 
-    read_and_verify_test(ext2, verify_requests)
+    read_and_verify_test(ext2, verify_requests, image_path);
 }
 
 #[test]
 fn read_example_1() {
+    let image_path = "ro.img";
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, "ro.img", true);
+        create_ext2_fs("../../test/example_1.dir", 1024, image_path, true);
 
     let verify_requests = vec![
         VerifyRequest {
@@ -103,13 +155,14 @@ fn read_example_1() {
         }
     ];
 
-    read_and_verify_test(&mut ext2, &verify_requests);
+    read_and_verify_test(&mut ext2, &verify_requests, image_path);
 }
 
 #[test]
 fn read_write_example_1() {
+    let image_path = "rw.img";
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, "rw.img", false);
+        create_ext2_fs("../../test/example_1.dir", 1024, image_path, false);
 
     let verify_requests = vec![
         VerifyRequest {
@@ -121,13 +174,14 @@ fn read_write_example_1() {
         }
     ];
 
-    write_and_verify_test(&mut ext2, &verify_requests);
+    write_and_verify_test(&mut ext2, &verify_requests, image_path);
 }
 
 #[test]
 fn append_alot_test() {
+    let image_path = "append-alot.img";
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, "append-alot.img", false);
+        create_ext2_fs("../../test/example_1.dir", 1024, image_path, false);
 
     let verify_requests = vec![
         VerifyRequest {
@@ -139,13 +193,14 @@ fn append_alot_test() {
         }
     ];
 
-    write_and_verify_test(&mut ext2, &verify_requests);
+    write_and_verify_test(&mut ext2, &verify_requests, image_path);
 }
 
 #[test]
 fn file_overwrite_test() {
+    let image_path = "rw_file_overwrite.img";
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, "rw_file_overwrite.img", false);
+        create_ext2_fs("../../test/example_1.dir", 1024, image_path, false);
 
     let verify_requests = vec![
         VerifyRequest {
@@ -157,13 +212,14 @@ fn file_overwrite_test() {
         }
     ];
 
-    write_and_verify_test(&mut ext2, &verify_requests);
+    write_and_verify_test(&mut ext2, &verify_requests, image_path);
 }
 
 #[test]
 fn file_overwrite_moreblocks_test() {
+    let image_path = "rw_file_overwrite_moreblocks.img";
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, "rw_file_overwritie_moreblocks.img", false);
+        create_ext2_fs("../../test/example_1.dir", 1024, image_path, false);
 
     let verify_requests = vec![
         VerifyRequest {
@@ -175,13 +231,14 @@ fn file_overwrite_moreblocks_test() {
         }
     ];
 
-    write_and_verify_test(&mut ext2, &verify_requests);
+    write_and_verify_test(&mut ext2, &verify_requests, image_path);
 }
 
 #[test]
 fn file_creation_test() {
+    let image_path = "rw_file_creation.img";
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, "rw_file_creation.img", false);
+        create_ext2_fs("../../test/example_1.dir", 1024, image_path, false);
 
     let verify_requests = vec![
         VerifyRequest {
@@ -193,13 +250,14 @@ fn file_creation_test() {
         }
     ];
 
-    write_and_verify_test(&mut ext2, &verify_requests);
+    write_and_verify_test(&mut ext2, &verify_requests, image_path);
 }
 
 #[test]
 fn directory_creation_test() {
+    let image_path = "rw_dir_creation.img";
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, "rw_dir_creation.img", false);
+        create_ext2_fs("../../test/example_1.dir", 1024, image_path, false);
 
     let verify_requests = vec![
         VerifyRequest {
@@ -211,13 +269,14 @@ fn directory_creation_test() {
         }
     ];
 
-    write_and_verify_test(&mut ext2, &verify_requests);
+    write_and_verify_test(&mut ext2, &verify_requests, image_path);
 }
 
 #[test]
 fn big_file_create_test() {
+    let image_path = "rw_big_file_creation.img";
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, "rw_big_file_creation.img", false);
+        create_ext2_fs("../../test/example_1.dir", 1024, image_path, false);
     let mut large_image_bytes: Vec<u8> = Vec::new();
 
     File::open("../../test/files_to_add/largeimage.png").unwrap().read_to_end(
@@ -233,13 +292,14 @@ fn big_file_create_test() {
         }
     ];
 
-    write_and_verify_test(&mut ext2, &verify_requests);
+    write_and_verify_test(&mut ext2, &verify_requests, image_path);
 }
 
 #[test]
 fn dir_tree_test() {
+    let image_path = "rw_dir_tree.img";
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, "rw_dir_tree.img", false);
+        create_ext2_fs("../../test/example_1.dir", 1024, image_path, false);
     let mut bart_image_bytes: Vec<u8> = Vec::new();
     let mut bee_movie_bytes: Vec<u8> = Vec::new();
     let mut wmata_image_bytes: Vec<u8> = Vec::new();
@@ -275,5 +335,5 @@ fn dir_tree_test() {
         }
     ];
 
-    write_and_verify_test(&mut ext2, &verify_requests);
+    write_and_verify_test(&mut ext2, &verify_requests, image_path);
 }
