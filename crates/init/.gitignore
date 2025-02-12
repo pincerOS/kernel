@@ -2,3 +2,5 @@
 *.elf.lz4
 *.arc
 *.bin
+/fs
+/fs.arc

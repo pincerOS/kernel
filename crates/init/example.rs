@@ -83,18 +83,127 @@ fn readline(reader: &mut LineReader) -> Result<&[u8], isize> {
     }
 }
 
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct ReadAt {
+    file_id: u32,
+    amount: u32,
+    offset: u64,
+}
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct Open {
+    path_len: u32,
+}
+
+fn spawn_child(files: ChannelDesc, procs: ChannelDesc, file_path: &str) -> ChannelDesc {
+    let mut buf = [0; 512];
+    buf[..4].copy_from_slice(&u32::to_le_bytes(file_path.len() as u32));
+    buf[4..][..file_path.len()].copy_from_slice(file_path.as_bytes());
+
+    let _status = send_block(
+        files,
+        &Message {
+            tag: u64::from_be_bytes(*b"OPEN----"),
+            objects: [0; 4],
+        },
+        &buf[..4 + file_path.len()],
+    );
+
+    let mut file_id = [0u8; 4];
+    let (_, msg) = recv_block(files, &mut file_id).unwrap();
+    assert_eq!(msg.tag, u64::from_be_bytes(*b"OPENSUCC"));
+    let file_id = u32::from_le_bytes(file_id);
+
+    let _status = send_block(
+        procs,
+        &Message {
+            tag: u64::from_be_bytes(*b"SPAWN---"),
+            objects: [0; 4],
+        },
+        &u32::to_le_bytes(file_id),
+    );
+
+    let (_, msg) = recv_block(procs, &mut []).unwrap();
+    assert_eq!(msg.tag, u64::from_be_bytes(*b"SUCCESS-"));
+    let child_handle = ChannelDesc(msg.objects[0]);
+    child_handle
+}
+
 #[no_mangle]
 fn main(chan: ChannelDesc) {
     println!("Starting 🐚");
 
-    let mut buf = [0; 1024];
-    let (len, msg) = recv_block(chan, &mut buf).unwrap();
-    let data = &buf[..len];
+    let _status = send_block(
+        chan,
+        &Message {
+            tag: u64::from_be_bytes(*b"CONNREQ-"),
+            objects: [0; 4],
+        },
+        b"FILES---",
+    );
+
+    let (_, msg) = recv_block(chan, &mut []).unwrap();
+    let filesystem = ChannelDesc(msg.objects[0]);
+
+    let _status = send_block(
+        filesystem,
+        &Message {
+            tag: u64::from_be_bytes(*b"OPEN----"),
+            objects: [0; 4],
+        },
+        "\x08\x00\x00\x00test.txt".as_bytes(),
+    );
+
+    let mut file_id = [0u8; 4];
+    let (_, msg) = recv_block(filesystem, &mut file_id).unwrap();
+    assert_eq!(msg.tag, u64::from_be_bytes(*b"OPENSUCC"));
+    let file_id = u32::from_le_bytes(file_id);
+
+    let read = ReadAt {
+        file_id,
+        amount: 4096,
+        offset: 0,
+    };
+    let _status = send_block(
+        filesystem,
+        &Message {
+            tag: u64::from_be_bytes(*b"READAT--"),
+            objects: [0; 4],
+        },
+        unsafe { core::slice::from_raw_parts(&read as *const _ as *const u8, size_of::<ReadAt>()) },
+    );
+
+    let mut data = [0u8; 4096];
+    let (len, msg) = recv_block(filesystem, &mut data).unwrap();
+    assert_eq!(msg.tag, u64::from_be_bytes(*b"DATA----"));
+    let file_content = &data[..len as usize];
 
     println!(
-        "Received message from parent; tag {:#x}, data {:?}",
-        msg.tag,
-        core::str::from_utf8(data).unwrap()
+        "File content:\n{}",
+        core::str::from_utf8(file_content).unwrap()
+    );
+
+    println!("Attempting to spawn child");
+
+    let _status = send_block(
+        chan,
+        &Message {
+            tag: u64::from_be_bytes(*b"CONNREQ-"),
+            objects: [0; 4],
+        },
+        b"PROCS---",
+    );
+
+    let (_, msg) = recv_block(chan, &mut []).unwrap();
+    let procs = ChannelDesc(msg.objects[0]);
+
+    let child_handle = spawn_child(filesystem, procs, "hello.elf");
+
+    let (_, msg) = recv_block(child_handle, &mut []).unwrap();
+    println!(
+        "from child: {}",
+        core::str::from_utf8(&msg.tag.to_be_bytes()).unwrap()
     );
 
     let mut reader = LineReader {
@@ -120,16 +229,7 @@ fn main(chan: ChannelDesc) {
             continue;
         }
 
-        let msg = Message {
-            tag: 0xAAAAAAAA,
-            objects: [0; 4],
-        };
-        send_block(chan, &msg, line.as_bytes());
-
-        for _ in 0..100 {
-            // TODO: this is a hack to prevent concurrent access to stdout...
-            unsafe { ulib::sys::yield_() }
-        }
+        println!("Line: {:?}", line);
     }
 
     unsafe { ulib::sys::exit() };

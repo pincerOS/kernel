@@ -483,8 +483,14 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
 
     println!("User ptr: {:p}", user_region);
     // TODO: sometimes get an insn abort here? (leads to UART deadlock)
+
+    let cur_ttbr0 = unsafe {
+        let ttbr0: u64;
+        asm!("mrs {0}, TTBR0_EL1", out(reg) ttbr0);
+        ttbr0
+    };
     println!(
-        "Physical addr: {:?}",
+        "Physical addr: {:?} ({cur_ttbr0:#010x})",
         memory::physical_addr(user_region.addr())
     );
     let access = crate::arch::memory::at_s1e0r(user_region.addr());
