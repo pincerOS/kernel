@@ -170,7 +170,7 @@ unsafe extern "C" fn gic_irq_handler(
         //read IAR for the interrupt number
         let iar = read_gic(GIC.get().cpui_base + GICC_IAR);
         let irq = iar & 0x3ff;
-        println!("IRQ: {irq} on core {_core}");
+        // println!("IRQ: {irq} on core {_core}");
 
         //spuriuos interrupt, ignore
         if irq > 1020 {

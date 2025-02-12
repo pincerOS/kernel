@@ -3,7 +3,7 @@
 set -e
 
 QEMU_TARGET_HARDWARE=${QEMU_TARGET_HARDWARE-"-M raspi4b -dtb bcm2711-rpi-4-b.dtb"}
-QEMU_DEBUG=${QEMU_DEBUG-"mmu,guest_errors,trace:bcm2835*"}
+QEMU_DEBUG=${QEMU_DEBUG-"mmu,guest_errors"}
 QEMU_DISPLAY=${QEMU_DISPLAY-"none"}
 DEBUG_ARGS=${DEBUG_ARGS-"-s"}
 
@@ -11,7 +11,7 @@ DEBUG_ARGS=${DEBUG_ARGS-"-s"}
 # DEBUG_ARGS="-s"     (run, attach debugger later)
 # DEBUG_ARGS=""       (no debugging)
 
-# QEMU_DEBUG="mmu,guest_errors,int"  (also log interrupts)
+# QEMU_DEBUG="mmu,guest_errors,int,trace:bcm2835*"  (also log interrupts)
 
 # QEMU_DISPLAY="default"  (show the framebuffer)
 

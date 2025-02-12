@@ -1,14 +1,14 @@
-use crate::arch;
+//! A system timer driver for the raspi4b.
+//! This is the Bcm2835-system-timer
+//!
+//! The bcm2835-system-timer was implemented as the primary timer instead of the ARM Generic Timer
+//!     as the BCM2711 Peripherals Manual states that the system timer is more accurate (and the arm generic timer is based off of it)
+//!     and therefore the system timer should be used for time keeping
+//!
+//! Arm Generic Timer is implemented for each core to handle the timer interrupts, as the system timer is not functional in QEMU
+//!
 use crate::context::Context;
-use crate::sync::Volatile;
-/// A system timer driver for the raspi4b.
-/// This is the Bcm2835-system-timer
-///
-/// The bcm2835-system-timer was implemented as the primary timer instead of the ARM Generic Timer
-///     as the BCM2711 Peripherals Manual states that the system timer is more accurate (and the arm generic timer is based off of it)
-///     and therefore the system timer should be used for time keeping
-///
-///
+use crate::sync::{ConstInit, PerCore, Volatile};
 use core::arch::asm;
 use core::panic;
 
@@ -17,33 +17,24 @@ use super::gic::gic_register_isr;
 use crate::sync::UnsafeInit;
 static SYSTEM_TIMER: UnsafeInit<Bcm2835SysTmr> = unsafe { UnsafeInit::uninit() };
 
-//Please help
-static mut ARM_GENERIC_TIMERS: [ArmGenericTimer; 4] = [
-    ArmGenericTimer::new(),
-    ArmGenericTimer::new(),
-    ArmGenericTimer::new(),
-    ArmGenericTimer::new(),
-];
+pub static ARM_GENERIC_TIMERS: PerCore<ArmGenericTimer> = PerCore::new();
 
 /// Run on each core
 pub fn register_arm_generic_timer_irqs() {
     gic_register_isr(30, arm_generic_timer_irq_handler);
 
     //Initialize the timer
-    let core = arch::core_id() & 3;
-    //How to do this in Rust
-    unsafe {
-        ARM_GENERIC_TIMERS[core as usize].intialize_timer();
-        ARM_GENERIC_TIMERS[core as usize].set_timer(0x5000000);
-    }
+    ARM_GENERIC_TIMERS.with_current(|timer| {
+        timer.intialize_timer();
+        timer.set_timer(0x50000000);
+    });
 }
 
 fn arm_generic_timer_irq_handler(_ctx: &mut Context) {
     //Reset the timer to ping again
-    let core = arch::core_id() & 3;
-    unsafe {
-        ARM_GENERIC_TIMERS[core as usize].reset_timer();
-    }
+    ARM_GENERIC_TIMERS.with_current(|timer| {
+        timer.reset_timer();
+    });
 
     //Do things
 }
@@ -69,11 +60,21 @@ fn system_timer_irq_handler(_ctx: &mut Context) {
     panic!("System timer IRQ handler not implemented");
 }
 
+enum TimerState {
+    Uninit,
+    Disabled,
+    Enabled,
+}
+
+impl ConstInit for ArmGenericTimer {
+    const INIT: Self = ArmGenericTimer::new();
+}
+
 // Need one per core
 impl ArmGenericTimer {
     pub const fn new() -> Self {
         Self {
-            is_enabled: false,
+            timer_state: TimerState::Uninit,
             freq: 0,
             time_skip: 0,
         }
@@ -81,49 +82,65 @@ impl ArmGenericTimer {
 
     /// Initialize the timer before everything else
     pub fn intialize_timer(&mut self) {
-        self.freq = read_cntfrq();
+        unsafe { self.freq = read_cntfrq() };
+        self.timer_state = TimerState::Disabled;
     }
 
     pub fn get_time(&self) -> u64 {
-        read_cntpct()
+        unsafe { read_cntpct() }
     }
 
     //after an interrupt, starts the timer again
     pub fn reset_timer(&self) {
-        write_cntp_tval(self.time_skip);
-        enable_cntp();
+        match self.timer_state {
+            TimerState::Uninit | TimerState::Disabled => {
+                println!("Reset Timer: Timer not initialized")
+            }
+            TimerState::Enabled => unsafe {
+                write_cntp_tval(self.time_skip);
+            },
+        }
     }
 
     //time is in the future
     pub fn set_timer(&mut self, time: u64) {
         self.time_skip = time;
-        if !self.is_enabled {
-            write_cntp_tval(time);
-            enable_cntp();
-            self.is_enabled = true;
-        } else {
-            write_cntp_cval(time);
+        match self.timer_state {
+            TimerState::Uninit => {
+                //TODO: Error handling
+                println!("Set Timer: Timer not initialized")
+            }
+            TimerState::Disabled => {
+                self.timer_state = TimerState::Enabled;
+                unsafe {
+                    write_cntp_tval(time);
+                    enable_cntp();
+                }
+            }
+            TimerState::Enabled => {
+                unsafe { write_cntp_tval(time) };
+            }
         }
     }
 
     pub fn set_timer_seconds(&mut self, seconds: u64) {
-        let time = self.get_time() + (seconds * self.freq);
+        let time = seconds * self.freq;
         self.set_timer(time);
     }
 
     pub fn set_timer_milliseconds(&mut self, milliseconds: u64) {
-        let time = self.get_time() + (milliseconds * self.freq / 1000);
+        let time = milliseconds * self.freq / 1000;
         self.set_timer(time);
     }
 
     pub fn set_timer_microseconds(&mut self, microseconds: u64) {
-        let time = self.get_time() + (microseconds * self.freq / 1_000_000);
+        let time = microseconds * self.freq / 1_000_000;
         self.set_timer(time);
     }
 
     pub fn clear_timer(&mut self) {
-        disable_cntp();
-        self.is_enabled = false;
+        unsafe { disable_cntp() };
+        self.timer_state = TimerState::Disabled;
     }
 }
 
@@ -157,7 +174,6 @@ impl Bcm2835SysTmr {
                 break;
             }
         }
-        // unsafe { self.reg(Self::TIMER_C3).write(lo + 0x100) };
         ((hi as u64) << 32) | (lo as u64)
     }
 
@@ -191,43 +207,44 @@ pub struct Bcm2835SysTmr {
 }
 
 pub struct ArmGenericTimer {
-    is_enabled: bool,
+    timer_state: TimerState,
     freq: u64,
     time_skip: u64,
 }
 
 #[inline(always)]
-fn read_cntpct() -> u64 {
+unsafe fn read_cntpct() -> u64 {
     let cnt: u64;
     unsafe { asm!("mrs {}, cntpct_el0", out(reg) cnt, options(nomem, nostack, preserves_flags)) };
     cnt
 }
 
 #[inline(always)]
-fn read_cntfrq() -> u64 {
+unsafe fn read_cntfrq() -> u64 {
     let cnt: u64;
     unsafe { asm!("mrs {}, cntfrq_el0", out(reg) cnt, options(nomem, nostack, preserves_flags)) };
     cnt
 }
 
+#[allow(dead_code)]
 #[inline(always)]
-fn write_cntp_cval(val: u64) {
+unsafe fn write_cntp_cval(val: u64) {
     unsafe { asm!("msr cntp_cval_el0, {}", in(reg) val, options(nomem, nostack, preserves_flags)) };
 }
 
 #[inline(always)]
-fn write_cntp_tval(val: u64) {
+unsafe fn write_cntp_tval(val: u64) {
     unsafe { asm!("msr cntp_tval_el0, {}", in(reg) val, options(nomem, nostack, preserves_flags)) };
 }
 
 #[inline(always)]
-fn enable_cntp() {
+unsafe fn enable_cntp() {
     let ctl: u64 = 1;
     unsafe { asm!("msr cntp_ctl_el0, {}", in(reg) ctl, options(nomem, nostack, preserves_flags)) };
 }
 
 #[inline(always)]
-fn disable_cntp() {
+unsafe fn disable_cntp() {
     let ctl: u64 = 0;
     unsafe { asm!("msr cntp_ctl_el0, {}", in(reg) ctl, options(nomem, nostack, preserves_flags)) };
 }
