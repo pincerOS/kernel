@@ -13,7 +13,7 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::context::Context;
-use crate::sync::Volatile;
+use crate::sync::{UnsafeInit, Volatile};
 
 const ROUTING_CORE_MASK: u32 = 0b0111;
 const ROUTING_IRQ: u32 = 0b0000;
@@ -44,6 +44,14 @@ const REG_TIMER_RELOAD: usize = 0x38;
 const REG_TIMER_CORES: usize = 0x40;
 const REG_PENDING_BASE: usize = 0x60;
 
+pub static LOCAL_INTC: UnsafeInit<bcm2836_l1_intc_driver> = unsafe { UnsafeInit::uninit() };
+
+#[allow(nonstandard_style)]
+pub struct bcm2836_l1_intc_driver {
+    base: *mut u32,
+    pub isr_table: IsrTable,
+}
+
 const IRQ_COUNT: usize = 32;
 
 pub struct IsrTable([AtomicUsize; IRQ_COUNT]);
@@ -61,12 +69,6 @@ impl IsrTable {
     pub fn set(&self, irq: usize, func: fn(&mut Context)) {
         self.0[irq].store(func as usize, Ordering::SeqCst);
     }
-}
-
-#[allow(nonstandard_style)]
-pub struct bcm2836_l1_intc_driver {
-    base: *mut u32,
-    pub isr_table: IsrTable,
 }
 
 bitflags::bitflags! {
@@ -179,7 +181,7 @@ impl bcm2836_l1_intc_driver {
 }
 
 fn local_timer_handler(ctx: &mut Context) {
-    let irq = super::IRQ_CONTROLLER.get();
+    let irq = LOCAL_INTC.get();
     irq.timer_reload();
     unsafe { crate::event::timer_handler(ctx) };
 }
@@ -195,7 +197,7 @@ pub unsafe extern "C" fn exception_handler_irq(
     _esr: u64,
     _arg: u64,
 ) -> *mut Context {
-    let irq = super::IRQ_CONTROLLER.get();
+    let irq = LOCAL_INTC.get();
     let core = crate::arch::core_id() & 0b11;
     let source = unsafe { irq.irq_source(core) };
 

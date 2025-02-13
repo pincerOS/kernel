@@ -1,10 +1,10 @@
 #[macro_use]
 pub mod uart;
 pub mod bcm2835_aux;
+pub mod bcm2836_intc;
 pub mod gic;
 pub mod mailbox;
 pub mod system_timer;
-pub mod timer;
 pub mod watchdog;
 
 use alloc::boxed::Box;
@@ -88,9 +88,6 @@ pub fn find_device_addr(iter: MappingIterator) -> Result<Option<(usize, usize)>,
 pub static WATCHDOG: UnsafeInit<SpinLock<watchdog::bcm2835_wdt_driver>> =
     unsafe { UnsafeInit::uninit() };
 
-pub static IRQ_CONTROLLER: UnsafeInit<timer::bcm2836_l1_intc_driver> =
-    unsafe { UnsafeInit::uninit() };
-
 type InitTask = Box<dyn Fn() + Send + Sync>;
 pub static PER_CORE_INIT: UnsafeInit<Vec<InitTask>> = unsafe { UnsafeInit::uninit() };
 
@@ -158,10 +155,10 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let intc_base = unsafe { map_device(intc_addr) }.as_ptr();
         println!("| INT controller addr: {:#010x}", intc_addr as usize);
         println!("| INT controller base: {:#010x}", intc_base as usize);
-        let intc = timer::bcm2836_l1_intc_driver::new(intc_base);
-        unsafe { IRQ_CONTROLLER.init(intc) };
+        let intc = bcm2836_intc::bcm2836_l1_intc_driver::new(intc_base);
+        unsafe { bcm2836_intc::LOCAL_INTC.init(intc) };
 
-        unsafe { crate::exceptions::override_irq_handler(timer::exception_handler_irq) }
+        unsafe { crate::exceptions::override_irq_handler(bcm2836_intc::exception_handler_irq) }
     }
 
     {
@@ -185,8 +182,9 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
             gic::GIC.get().register_isr(30, timer_handler);
         }));
     } else {
-        let irq = IRQ_CONTROLLER.get();
-        irq.isr_table.set(timer::IRQ_CNTPNSIRQ, timer_handler);
+        let irq = bcm2836_intc::LOCAL_INTC.get();
+        irq.isr_table
+            .set(bcm2836_intc::IRQ_CNTPNSIRQ, timer_handler);
 
         init_fns.push(Box::new(|| {
             let id = crate::arch::core_id() & 0b11;
