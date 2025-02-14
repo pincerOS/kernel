@@ -96,7 +96,7 @@ struct Open {
     path_len: u32,
 }
 
-fn spawn_child(files: ChannelDesc, procs: ChannelDesc, file_path: &str) -> ChannelDesc {
+fn open_file(files: ChannelDesc, file_path: &str) -> Option<u32> {
     let mut buf = [0; 512];
     buf[..4].copy_from_slice(&u32::to_le_bytes(file_path.len() as u32));
     buf[4..][..file_path.len()].copy_from_slice(file_path.as_bytes());
@@ -112,16 +112,21 @@ fn spawn_child(files: ChannelDesc, procs: ChannelDesc, file_path: &str) -> Chann
 
     let mut file_id = [0u8; 4];
     let (_, msg) = recv_block(files, &mut file_id).unwrap();
-    assert_eq!(msg.tag, u64::from_be_bytes(*b"OPENSUCC"));
+    if msg.tag != u64::from_be_bytes(*b"OPENSUCC") {
+        return None;
+    }
     let file_id = u32::from_le_bytes(file_id);
+    Some(file_id)
+}
 
+fn spawn_child(procs: ChannelDesc, exec_file_id: u32) -> ChannelDesc {
     let _status = send_block(
         procs,
         &Message {
             tag: u64::from_be_bytes(*b"SPAWN---"),
             objects: [0; 4],
         },
-        &u32::to_le_bytes(file_id),
+        &u32::to_le_bytes(exec_file_id),
     );
 
     let (_, msg) = recv_block(procs, &mut []).unwrap();
@@ -146,19 +151,7 @@ fn main(chan: ChannelDesc) {
     let (_, msg) = recv_block(chan, &mut []).unwrap();
     let filesystem = ChannelDesc(msg.objects[0]);
 
-    let _status = send_block(
-        filesystem,
-        &Message {
-            tag: u64::from_be_bytes(*b"OPEN----"),
-            objects: [0; 4],
-        },
-        "\x08\x00\x00\x00test.txt".as_bytes(),
-    );
-
-    let mut file_id = [0u8; 4];
-    let (_, msg) = recv_block(filesystem, &mut file_id).unwrap();
-    assert_eq!(msg.tag, u64::from_be_bytes(*b"OPENSUCC"));
-    let file_id = u32::from_le_bytes(file_id);
+    let file_id = open_file(filesystem, "test.txt").unwrap();
 
     let read = ReadAt {
         file_id,
@@ -198,7 +191,8 @@ fn main(chan: ChannelDesc) {
     let (_, msg) = recv_block(chan, &mut []).unwrap();
     let procs = ChannelDesc(msg.objects[0]);
 
-    let child_handle = spawn_child(filesystem, procs, "hello.elf");
+    let child_exec = open_file(filesystem, "hello.elf").unwrap();
+    let child_handle = spawn_child(procs, child_exec);
 
     let (_, msg) = recv_block(child_handle, &mut []).unwrap();
     println!(
@@ -229,7 +223,13 @@ fn main(chan: ChannelDesc) {
             continue;
         }
 
-        println!("Line: {:?}", line);
+        let (cmd, rest) = line.split_once(|c: char| c.is_ascii_whitespace()).unzip();
+        let cmd = cmd.unwrap_or(line);
+
+        println!("Line: {:?}", (cmd, rest));
+        if let Some(child_exec) = open_file(filesystem, cmd) {
+            let child_handle = spawn_child(procs, child_exec);
+        }
     }
 
     unsafe { ulib::sys::exit() };

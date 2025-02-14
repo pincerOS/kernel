@@ -30,3 +30,31 @@ impl<T> Volatile<T> {
         unsafe { core::ptr::write_volatile(self.0, value) }
     }
 }
+
+pub struct Semaphore {
+    count: SpinLock<isize>,
+    cvar: CondVar,
+}
+
+impl Semaphore {
+    pub const fn new(value: isize) -> Self {
+        Semaphore {
+            count: SpinLock::new(value),
+            cvar: CondVar::new(),
+        }
+    }
+    pub async fn down(&self) {
+        println!("down start");
+        let mut count = self.count.lock();
+        count = self.cvar.wait_while_async(count, |count| *count <= 0).await;
+        println!("down end");
+        *count -= 1;
+    }
+    pub fn up(&self) {
+        let mut count = self.count.lock();
+        *count += 1;
+        println!("up");
+        self.cvar.notify_one();
+        drop(count);
+    }
+}

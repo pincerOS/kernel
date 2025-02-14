@@ -18,8 +18,8 @@ halt:
     "
 );
 
-#[cfg(not(test))]
-#[panic_handler]
+#[cfg_attr(all(not(test), not(doc)), panic_handler)]
+#[allow(unused)]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     if let Some(loc) = info.location() {
         println!(

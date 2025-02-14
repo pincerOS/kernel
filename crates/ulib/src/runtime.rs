@@ -9,9 +9,8 @@ extern "C" fn _start(x0: usize) -> ! {
     loop {}
 }
 
-#[cfg(not(test))]
-#[cfg(not(feature = "test"))]
-#[panic_handler]
+#[cfg_attr(all(not(test), not(doc), not(feature = "test")), panic_handler)]
+#[allow(unused)]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     if let Some(loc) = info.location() {
         crate::println!(
