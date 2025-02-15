@@ -73,7 +73,9 @@ fn read_and_verify_via_fuse_test(verify_requests: &Vec<VerifyRequest>,
 
         current_file_path.push('/');
         current_file_path.push_str(std::str::from_utf8(verify_request.file_path).unwrap());
-
+        
+        println!("current file path {}", current_file_path);
+        
         File::open(current_file_path).unwrap().read_to_end(&mut file_bytes).unwrap();
 
         if expected_data != file_bytes.as_slice() {

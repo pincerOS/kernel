@@ -647,6 +647,7 @@ where
         let mut current_node: Rc<RefCell<INodeWrapper>> = node;
 
         for (index, file_dir) in path_split_vec.iter().enumerate() {
+            let file_dir_str = std::str::from_utf8(file_dir).unwrap();
             let mut current_node_result: Result<Rc<RefCell<INodeWrapper>>, Ext2Error> =
                 self.find(&current_node.borrow(), file_dir);
 
@@ -801,7 +802,8 @@ where
     }
     
     pub fn create_file_with_mode(&mut self, node: &mut INodeWrapper,
-                                 name: &[u8], i_mode: u16) -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
+                                 name: &[u8], i_mode: u16,
+                                 deferred_writes: &mut DeferredWriteMap) -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
         // what do we need to do when creating a new file?
         // go thru BGD inode bitmaps, find the next unallocated inode number and update it
         // update inode number
@@ -837,9 +839,8 @@ where
             return Err(Ext2Error::TooLongFileName);
         }
 
-        let mut deferred_writes: DeferredWriteMap = BTreeMap::new();
         let new_inode_wrapper =
-            self.acquire_next_available_inode(new_inode, &mut deferred_writes)?;
+            self.acquire_next_available_inode(new_inode, deferred_writes)?;
 
         let dir_entry_name_length: u16 =
             std::cmp::min(name.len(), DirectoryEntryConstants::MAX_FILE_NAME_LEN) as u16;
@@ -855,6 +856,10 @@ where
         };
 
         let mut dir_entries: Vec<DirectoryEntryWrapper> = node.get_dir_entries(self)?;
+
+        // there should at least be two directory entries]
+        // in each dir, one . and one ..
+        assert!(dir_entries.len() >= 2);
 
         new_dir_entry_wrapper.entry.
             name_characters[0..(new_dir_entry_wrapper.entry.name_length as usize)].
@@ -900,13 +905,12 @@ where
 
                 found_empty_dir_entry = true;
 
-                dir_entry_wrapper.add_deferred_write(self, node, &mut deferred_writes)?;
-                new_dir_entry_wrapper.add_deferred_write(self, node, &mut deferred_writes)?;
+                dir_entry_wrapper.add_deferred_write(self, node, deferred_writes)?;
+                new_dir_entry_wrapper.add_deferred_write(self, node, deferred_writes)?;
 
                 break;
             }
         }
-
 
         if !found_empty_dir_entry {
             let new_dir_entry: DirectoryEntry = new_dir_entry_wrapper.entry;
@@ -937,10 +941,8 @@ where
                 &dir_entry_bytes[0..actual_entry_size]);
 
             node.append_file_no_writeback(self, dir_entry_bytes_with_padding.as_slice(),
-                                          true, &mut deferred_writes)?;
+                                          true, deferred_writes)?;
         }
-
-        self.write_back_deferred_writes(deferred_writes)?;
 
         self.inode_map.insert(new_inode_wrapper.borrow().inode_num as usize,
                               Rc::downgrade(&new_inode_wrapper));
@@ -948,17 +950,83 @@ where
         Ok(new_inode_wrapper)
     }
 
-    // EXT2_S_IROTH is needed for fuse tests to succeed
+    // EXT2_S_IROTH and EXT2_S_IXOTH is needed for fuse tests to succeed
+    // without sudo escalation
     pub fn create_dir(&mut self, node: &mut INodeWrapper, name: &[u8]) 
         -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
-        self.create_file_with_mode(node, name, EXT2_S_IFDIR | i_mode::EXT2_S_IROTH)
+        let mut deferred_writes: DeferredWriteMap = BTreeMap::new();
+        let dir_node: Rc<RefCell<INodeWrapper>> =
+            self.create_file_with_mode(node, name, EXT2_S_IFDIR | i_mode::EXT2_S_IROTH | i_mode::EXT2_S_IXOTH,
+                                       &mut deferred_writes)?;
+
+        let mut cur_dir_entry = DirectoryEntryWrapper {
+            entry: DirectoryEntry {
+                inode_number: dir_node.borrow().inode_num,
+                entry_size: (DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE as u16) + 1,
+                name_length: 1,
+                name_characters: [0; 256],
+            },
+            inode_block_num: 0,
+            offset: 0
+        };
+
+        cur_dir_entry.entry.entry_size += 4 - (cur_dir_entry.entry.entry_size % 4);
+
+        let mut prev_dir_entry = DirectoryEntryWrapper {
+            entry: DirectoryEntry {
+                inode_number: node.inode_num,
+                entry_size: (DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE as u16) + 2,
+                name_length: 2,
+                name_characters: [0; 256],
+            },
+            inode_block_num: 0,
+            offset: cur_dir_entry.entry.entry_size as usize,
+        };
+
+        //prev_dir_entry.entry.entry_size += 4 - (cur_dir_entry.entry.entry_size % 4);
+
+        prev_dir_entry.entry.entry_size = (BLOCK_SIZE as u16) - cur_dir_entry.entry.entry_size;
+
+        cur_dir_entry.entry.name_characters[0] = b'.';
+        prev_dir_entry.entry.name_characters[0] = b'.';
+        prev_dir_entry.entry.name_characters[1] = b'.';
+
+        let new_blocks_allocated_result = dir_node.borrow().find_new_blocks(self, 1, true,
+                                                                            &mut deferred_writes)?;
+        dir_node.borrow_mut().write_new_blocks_to_inode(self, new_blocks_allocated_result.as_slice(),
+                                                    true, &mut deferred_writes)?;
+
+        cur_dir_entry.add_deferred_write(self, &mut *dir_node.borrow_mut(), &mut deferred_writes)?;
+        prev_dir_entry.add_deferred_write(self, &mut *dir_node.borrow_mut(), &mut deferred_writes)?;
+
+        dir_node.borrow_mut().update_size(BLOCK_SIZE as u64);
+        dir_node.borrow_mut().get_deferred_write_inode(self, &mut deferred_writes)?;
+
+        let writeback_result = self.write_back_deferred_writes(deferred_writes);
+
+        if writeback_result.is_err() {
+            Err(writeback_result.unwrap_err())
+        } else {
+            Ok(dir_node)
+        }
     }
 
     // Creates a file named name (<= 255 characters)
     // EXT2_S_IROTH is needed for fuse tests to succeed
     pub fn create_file(&mut self, node: &mut INodeWrapper,
                        name: &[u8]) -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
-        self.create_file_with_mode(node, name, EXT2_S_IFREG | i_mode::EXT2_S_IROTH)
+        let mut deferred_writes: DeferredWriteMap = BTreeMap::new();
+
+        let file_node =
+            self.create_file_with_mode(node, name, EXT2_S_IFREG | i_mode::EXT2_S_IROTH,
+                                       &mut deferred_writes)?;
+        let writeback_result = self.write_back_deferred_writes(deferred_writes);
+
+        if writeback_result.is_err() {
+            Err(writeback_result.unwrap_err())
+        } else {
+            Ok(file_node)
+        }
     }
 
     pub fn num_of_block_groups(&self) -> usize {
