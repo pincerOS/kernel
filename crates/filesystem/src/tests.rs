@@ -6,6 +6,7 @@ use std::fs::File;
 use std::{env, io, println, vec};
 use std::io::Read;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::prelude::v1::{Box, String, ToString, Vec};
 use std::process::{Command, Output};
 use crate::{BlockDevice, Ext2};
@@ -181,9 +182,43 @@ fn read_write_example_1() {
     write_and_verify_test(&mut ext2, &verify_requests, image_path);
 }
 
+const GENERATED_TEST_DIR_ROOT: &str = "../../test/generated_tests";
+
+// from Simon Buchan on stack overflow: https://stackoverflow.com/a/65192210
+fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> io::Result<()> {
+    std::fs::create_dir_all(&dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        } else {
+            std::fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        }
+    }
+    Ok(())
+}
+
+fn create_new_test_folder(test_folder_name: &str, base_folder: Option<&str>) -> PathBuf {
+    let path: PathBuf = [GENERATED_TEST_DIR_ROOT, test_folder_name].iter().collect();
+
+    if path.exists() {
+        std::fs::remove_dir_all(&path).unwrap();
+    }
+
+    copy_dir_all(base_folder.unwrap(), &path).unwrap();
+
+    path
+}
+
 #[test]
 fn single_indirect_read_test() {
-    let mut f = File::create_new("../../test/example_1.dir/single.txt").unwrap();
+    let test_folder_path: PathBuf = create_new_test_folder("single_indirect_read_test",
+                                                           Some("../../test/example_1.dir"));
+    let mut test_file_path: PathBuf = test_folder_path.clone();
+    test_file_path.push("single.txt");
+
+    let mut f = File::create_new(test_file_path).unwrap();
     let mut text_bytes = vec![0; 1024*13];
     for i in 0..13 {
         text_bytes[i*1024] = (i+1) as u8;
@@ -193,7 +228,7 @@ fn single_indirect_read_test() {
     // block size is 1024 for now
     let image_path = "indirect1.img";
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, image_path, true);
+        create_ext2_fs(test_folder_path.to_str().unwrap(), 1024, image_path, true);
 
     let verify_requests = vec![
         VerifyRequest {
@@ -211,7 +246,12 @@ fn single_indirect_read_test() {
 
 #[test]
 fn double_indirect_read_test() {
-    let mut f = File::create_new("../../test/example_1.dir/double.txt").unwrap();
+    let test_folder_path: PathBuf = create_new_test_folder("double_indirect_read_test",
+                                                           Some("../../test/example_1.dir"));
+    let mut test_file_path: PathBuf = test_folder_path.clone();
+    test_file_path.push("double.txt");
+
+    let mut f = File::create_new(test_file_path).unwrap();
     let mut text_bytes = vec![0; 1024*269];
     for i in 0..269 {
         text_bytes[i*1024] = (i+1) as u8;
@@ -221,7 +261,7 @@ fn double_indirect_read_test() {
     // block size is 1024 for now
     let image_path = "indirect2.img";
     let mut ext2 =
-        create_ext2_fs("../../test/example_1.dir", 1024, image_path, true);
+        create_ext2_fs(test_folder_path.to_str().unwrap(), 1024, image_path, true);
 
     let verify_requests = vec![
         VerifyRequest {

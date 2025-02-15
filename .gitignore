@@ -4,3 +4,4 @@ kernel.bin
 *.img
 .idea
 .vs
+/test/generated_tests
