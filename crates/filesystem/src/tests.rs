@@ -22,7 +22,7 @@ pub fn create_ext2_fs(dir_path: &str, block_size: usize, img_name: &str, ro: boo
 
     let mut ext2 = Ext2::new(disk);
 
-    ext2
+    ext2.unwrap()
 }
 
 #[derive(PartialEq, Eq)]
