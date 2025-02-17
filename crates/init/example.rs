@@ -68,7 +68,18 @@ fn readline(reader: &mut LineReader) -> Result<&[u8], isize> {
                     reader.cur_base = i + 1;
                     return Ok(&reader.buf[base..i]);
                 }
-                b'\x7f' => print!("^?"),
+                // b'\x7f' => print!("^?"),
+                b'\x7f' => {
+                    if reader.processed >= 2 {
+                        reader.processed -= 2;
+                        reader.cursor -= 2;
+                        print!("\x08 \x08");
+                    } else {
+                        reader.processed -= 1;
+                        reader.cursor -= 1;
+                    }
+                },
+
                 c if c.is_ascii_control() => print!("^{}", (c + 64) as char),
                 c => print!("{}", c as char),
             }
@@ -90,16 +101,16 @@ struct ReadAt {
     amount: u32,
     offset: u64,
 }
-#[repr(C)]
-#[derive(Copy, Clone)]
-struct Open {
-    path_len: u32,
-}
+// #[repr(C)]
+// #[derive(Copy, Clone)]
+// struct Open {
+//     path_len: u32,
+// }
 
-fn open_file(files: ChannelDesc, file_path: &str) -> Option<u32> {
+fn open_file(files: ChannelDesc, file_path: &[u8]) -> Option<u32> {
     let mut buf = [0; 512];
     buf[..4].copy_from_slice(&u32::to_le_bytes(file_path.len() as u32));
-    buf[4..][..file_path.len()].copy_from_slice(file_path.as_bytes());
+    buf[4..][..file_path.len()].copy_from_slice(file_path);
 
     let _status = send_block(
         files,
@@ -151,7 +162,7 @@ fn main(chan: ChannelDesc) {
     let (_, msg) = recv_block(chan, &mut []).unwrap();
     let filesystem = ChannelDesc(msg.objects[0]);
 
-    let file_id = open_file(filesystem, "test.txt").unwrap();
+    let file_id = open_file(filesystem, b"test.txt").unwrap();
 
     let read = ReadAt {
         file_id,
@@ -172,12 +183,12 @@ fn main(chan: ChannelDesc) {
     assert_eq!(msg.tag, u64::from_be_bytes(*b"DATA----"));
     let file_content = &data[..len as usize];
 
-    println!(
+    print!(
         "File content:\n{}",
         core::str::from_utf8(file_content).unwrap()
     );
 
-    println!("Attempting to spawn child");
+    // println!("Attempting to spawn child");
 
     let _status = send_block(
         chan,
@@ -191,14 +202,14 @@ fn main(chan: ChannelDesc) {
     let (_, msg) = recv_block(chan, &mut []).unwrap();
     let procs = ChannelDesc(msg.objects[0]);
 
-    let child_exec = open_file(filesystem, "hello.elf").unwrap();
-    let child_handle = spawn_child(procs, child_exec);
+    // let child_exec = open_file(filesystem, "hello.elf").unwrap();
+    // let child_handle = spawn_child(procs, child_exec);
 
-    let (_, msg) = recv_block(child_handle, &mut []).unwrap();
-    println!(
-        "from child: {}",
-        core::str::from_utf8(&msg.tag.to_be_bytes()).unwrap()
-    );
+    // let (_, msg) = recv_block(child_handle, &mut []).unwrap();
+    // println!(
+    //     "from child: {}",
+    //     core::str::from_utf8(&msg.tag.to_be_bytes()).unwrap()
+    // );
 
     let mut reader = LineReader {
         buf: [0; 4096],
@@ -226,11 +237,50 @@ fn main(chan: ChannelDesc) {
         let (cmd, rest) = line.split_once(|c: char| c.is_ascii_whitespace()).unzip();
         let cmd = cmd.unwrap_or(line);
 
-        println!("Line: {:?}", (cmd, rest));
-        if let Some(child_exec) = open_file(filesystem, cmd) {
+        if cmd == "exit" {
+            break;
+        }
+
+        let mut buf = [0u8; 64];
+        buf[..cmd.len()].copy_from_slice(cmd.as_bytes());
+        buf[cmd.len()..][..4].copy_from_slice(b".elf");
+        let cmd_with_elf = &buf[..cmd.len() + 4];
+
+        let file = open_file(filesystem, cmd.as_bytes())
+            .or_else(|| open_file(filesystem, cmd_with_elf));
+
+        // println!("Line: {:?}", (cmd, rest));
+        if let Some(child_exec) = file {
             let child_handle = spawn_child(procs, child_exec);
+            let msg = Message {
+                tag: u64::from_be_bytes(*b"ARGS----"),
+                objects: [0; 4],
+            };
+            send_block(child_handle, &msg, rest.unwrap_or("").as_bytes());
+
+            // TODO: proper control channels, waitpid
+            let (_, _msg) = recv_block(child_handle, &mut []).unwrap();
+        } else {
+            println!("{:?}: no such file or directory", cmd);
         }
     }
 
     unsafe { ulib::sys::exit() };
 }
+
+// fn split_args(s: &str) {
+//     let mut i = 0;
+//     let mut bytes = s.as_bytes();
+//     while let Some(c) = bytes.get(i) {
+//         match c {
+//             b'"' => {
+//                 for j in i + 1 .. bytes.len() {
+//                     if bytes[j] == b'"' && bytes[] {
+
+//                     }
+//                 }
+//             },
+//             b' ' | b'\t' | b'\n' | b'\r' => (),
+//         }
+//     }
+// }

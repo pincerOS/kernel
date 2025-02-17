@@ -251,7 +251,7 @@ unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
             });
         let Some((mut send, recv)) = sender else {
             // TODO: proper approach to mpsc channels?
-            println!("Skipping message, channel in-use or non-existant!");
+            // println!("Skipping message, channel in-use or non-existant!");
             return [(-1isize) as usize];
         };
 
@@ -291,7 +291,7 @@ unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
             if r.is_err() {
                 res = [-2isize as usize];
             } else {
-                res = [0 as usize];
+                res = [32 as usize];
             }
         } else {
             send.send_async(Message {
@@ -300,7 +300,7 @@ unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
                 data,
             })
             .await;
-            res = [0 as usize];
+            res = [32 as usize];
         }
 
         OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
@@ -336,7 +336,7 @@ unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
 
         let Some((send, mut recv)) = receiver else {
             // TODO: proper approach to mpsc channels?
-            println!("Skipping message, channel in-use or non-existant!");
+            // println!("Skipping message, channel in-use or non-existant!");
             return [(-1isize) as usize];
         };
 
@@ -400,7 +400,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
 
     OBJECTS.lock().push(None);
 
-    let (_stdio, mut stdin_tx, mut stdout_rx) = {
+    let (_stdio, mut stdin_tx, stdout_rx) = {
         let (stdin_tx, stdin_rx) = ringbuffer::channel();
         let (stdout_tx, stdout_rx) = ringbuffer::channel();
         let stdio_chan = alloc_obj(Object::Channel {
@@ -437,17 +437,9 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
             task::yield_future().await;
         }
     });
+
     task::spawn_async(async move {
-        loop {
-            let input = stdout_rx.recv_async().await;
-            if let Some(data) = input.data {
-                let uart = device::uart::UART.get();
-                let mut stdout = uart.lock();
-                for c in data {
-                    stdout.writec(c);
-                }
-            }
-        }
+        run_stdout_task(stdout_rx).await;
     });
 
     unsafe {
@@ -521,4 +513,17 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     event::SCHEDULER.add_task(event::Event::ScheduleThread(user_thread));
 
     thread::stop();
+}
+
+async fn run_stdout_task(mut stdout_rx: ringbuffer::Receiver<16, Message>) {
+    loop {
+        let input = stdout_rx.recv_async().await;
+        if let Some(data) = input.data {
+            let uart = device::uart::UART.get();
+            let mut stdout = uart.lock();
+            for c in data {
+                stdout.writec(c);
+            }
+        }
+    }
 }

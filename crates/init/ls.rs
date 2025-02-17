@@ -30,6 +30,26 @@ extern crate ulib;
 
 use ulib::sys;
 
+fn iter_args(mut data: &[u8]) -> impl Iterator<Item = &[u8]> + '_ {
+    core::iter::from_fn(move || {
+        if data.len() == 0 {
+            return None;
+        }
+        let idx = data
+            .iter()
+            .position(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
+            .unwrap_or(data.len());
+        let (arg, rest) = data.split_at(idx);
+
+        let idx = rest
+            .iter()
+            .position(|b| !matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
+            .unwrap_or(rest.len());
+        data = &rest[idx..];
+        Some(arg)
+    })
+}
+
 #[no_mangle]
 fn main(chan: sys::ChannelDesc) {
     let mut args = [0; 4096];
@@ -37,8 +57,9 @@ fn main(chan: sys::ChannelDesc) {
     assert_eq!(msg.tag, u64::from_be_bytes(*b"ARGS----"));
     let data = &args[..len];
 
-    println!("Hello from child!");
-    println!("Got arguments: {}", ulib::format_ascii(data));
+    for arg in iter_args(data) {
+        println!("Arg {}", ulib::format_ascii(arg));
+    }
 
     let _status = sys::send_block(
         chan,

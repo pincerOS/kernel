@@ -1,5 +1,7 @@
 #![no_std]
 #![no_main]
+// TODO: don't
+#![allow(static_mut_refs)]
 
 #[macro_use]
 extern crate ulib;
@@ -265,8 +267,8 @@ pub extern "C" fn main() {
         }
     }
 
+    #[allow(unreachable_code)]
     unsafe { sys::exit() };
-    unreachable!();
 }
 
 #[macro_use]

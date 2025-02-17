@@ -47,7 +47,15 @@ pub fn send(desc: ChannelDesc, msg: &Message, buf: &[u8]) -> isize {
     unsafe { _send(desc, msg, buf.as_ptr(), buf.len(), FLAG_NO_BLOCK) }
 }
 pub fn send_block(desc: ChannelDesc, msg: &Message, buf: &[u8]) -> isize {
-    unsafe { _send(desc, msg, buf.as_ptr(), buf.len(), 0) }
+    loop {
+        let res = unsafe { _send(desc, msg, buf.as_ptr(), buf.len(), 0) };
+        if res >= 0 {
+            assert!(res == 32);
+            break res
+        } else {
+            // Err(res)
+        }
+    }
 }
 pub fn recv(desc: ChannelDesc, buf: &mut [u8]) -> Result<(isize, Message), isize> {
     let mut msg = MaybeUninit::uninit();
@@ -67,11 +75,13 @@ pub fn recv(desc: ChannelDesc, buf: &mut [u8]) -> Result<(isize, Message), isize
     }
 }
 pub fn recv_block(desc: ChannelDesc, buf: &mut [u8]) -> Result<(usize, Message), isize> {
-    let mut msg = MaybeUninit::uninit();
-    let res = unsafe { _recv(desc, msg.as_mut_ptr(), buf.as_mut_ptr(), buf.len(), 0) };
-    if res >= 0 {
-        Ok((res as usize, unsafe { msg.assume_init() }))
-    } else {
-        Err(res)
+    loop {
+        let mut msg = MaybeUninit::uninit();
+        let res = unsafe { _recv(desc, msg.as_mut_ptr(), buf.as_mut_ptr(), buf.len(), 0) };
+        if res >= 0 {
+            break Ok((res as usize, unsafe { msg.assume_init() }))
+        } else {
+            // Err(res)
+        }
     }
 }

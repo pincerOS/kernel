@@ -60,11 +60,11 @@ fn create_user_table(phys_base: usize) -> alloc::boxed::Box<UserTranslationTable
             .difference(LeafDescriptor::UXN)
             .set_global()
             .difference(LeafDescriptor::IS_PAGE_DESCRIPTOR);
-        println!(
-            "map phys {:#010x} to virt {:#010x} for user ({i})",
-            phys_frame,
-            root_region_size * (i + 1)
-        );
+        // println!(
+        //     "map phys {:#010x} to virt {:#010x} for user ({i})",
+        //     phys_frame,
+        //     root_region_size * (i + 1)
+        // );
         desc.leaf = leaf;
     }
     table
@@ -79,7 +79,7 @@ pub unsafe fn create_user_region() -> (*mut [u8], usize) {
     let user_table = create_user_table(phys_base);
     let user_table_ptr = alloc::boxed::Box::into_raw(user_table);
     let user_table_phys = physical_addr(user_table_ptr.addr()).unwrap();
-    println!("creating user table, {:#010x}", user_table_phys);
+    // println!("creating user table, {:#010x}", user_table_phys);
 
     let ptr = core::ptr::with_exposed_provenance_mut::<u8>(virt_region_base);
     let slice = core::ptr::slice_from_raw_parts_mut(ptr, region_size);

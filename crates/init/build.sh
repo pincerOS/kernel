@@ -12,6 +12,8 @@ mkdir -p fs
 cp example.elf fs/
 ./hello.rs
 cp hello.elf fs/
+./ls.rs
+cp ls.elf fs/
 
 echo "hello" > fs/test.txt
 
