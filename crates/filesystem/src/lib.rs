@@ -1547,11 +1547,6 @@ impl INodeWrapper
 
                 ext2.add_write_to_deferred_writes_map(deferred_writes, double_indirect_block_num, block_num*size_of::<u32>(),
                 &block_list_buffer.0[block_num*size_of::<u32>()..(block_num+1)*size_of::<u32>()], None)?;
-                self.write_indirected_block_to_inode(ext2, double_indirect_block_num,
-                                                     num_of_blocks_allocated_within_list,
-                                                     num_of_blocks_allocated,
-                                                     blocks_newly_allocated,
-                                                     new_blocks, deferred_writes)?;
             }
 
             current_block_slot =
