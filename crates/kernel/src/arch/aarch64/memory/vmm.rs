@@ -4,6 +4,8 @@ use core::{
     ptr::{self, addr_of, NonNull},
 };
 
+//Create error enum and return a result - look in lz4/src/frame.rs has error enum and func on line 174 has example usage
+
 use super::{
     machine::{LeafDescriptor, TableDescriptor, TranslationDescriptor},
     physical_addr,
@@ -121,6 +123,61 @@ unsafe fn first_unused_virt_page(table: *mut KernelLeafTable) -> Option<usize> {
         }
     }
     None
+}
+
+//This should ideally be made more generalizable in the future
+//TODO: give option of setting bits for the mapping
+//TODO: change return type to something more appropriate
+//Maybe add option to map huge pages here
+pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> bool {
+
+    //TODO: stop using these constants
+    let mut index_bits = 25 - 21; //mildly redundant
+    let mut mask = (1 << index_bits) - 1;
+    //level 2 table index is bits 29-21
+    let mut table_index = (va >> 21) & mask;
+
+    let table_descriptor: TableDescriptor = unsafe { KERNEL_TRANSLATION_TABLE.0[table_index].table };
+
+    if !table_descriptor.is_table_descriptor() {
+        //huge page here instead of table descriptor
+        println!("Error: Huge page instead of table descriptor!");
+        return false;
+    }
+
+    let mut index_add: usize = 0;
+    if table_index == 15 {
+        index_add = PG_SZ / 8;
+    }
+
+    index_bits = 21 - 12;
+    mask = (1 << index_bits) - 1;
+    let table_index_in_page = (va >> 12) & mask;
+    table_index = table_index_in_page + index_add;
+
+    let table = &raw mut KERNEL_LEAF_TABLE;
+    let table_base = table.cast::<LeafDescriptor>();
+
+    let entry = table_base.wrapping_add(table_index);
+
+    if unsafe { entry.read() }.is_valid() {
+        println!("Error: spot in leaf table is taken!");
+        return false;
+    }
+
+    let aligned_pa = (pa / PG_SZ) * PG_SZ;
+    let new_desc = LeafDescriptor::new(aligned_pa).set_global();
+
+    unsafe { entry.write(new_desc) };
+
+    unsafe {
+        asm! {
+            "dsb ISH",
+            options(readonly, nostack, preserves_flags)
+        }
+    }
+
+    return true;
 }
 
 /// not thread safe
@@ -241,6 +298,7 @@ pub unsafe fn map_physical_noncacheable(pa_start: usize, size: usize) -> NonNull
 
 #[no_mangle]
 static mut KERNEL_LEAF_TABLE: KernelLeafTable =
+    //This is two adjacent pages all filled with leaf descriptors
     KernelLeafTable([LeafDescriptor::empty(); PG_SZ / 8 * 2]);
 
 #[no_mangle]
