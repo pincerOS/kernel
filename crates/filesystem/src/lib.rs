@@ -721,6 +721,7 @@ where
             let new_inode_num_base: usize =
                 (self.superblock.s_inodes_per_group as usize) * found_block_group_index;
             let mut new_inode_num: usize = 0;
+            let mut inode_byte_offset = 0;
 
             for (inode_bitmap_byte_index, inode_bitmap_byte)
             in block_buffer.iter().enumerate() {
@@ -729,7 +730,9 @@ where
                     let inode_reserved =
                         current_relative_inode_num < 10 && found_block_group_index == 0;
 
-                    if inode_bitmap_byte & (1 << (7 - i)) == 0 && !inode_reserved {
+                    inode_byte_offset = 7 - i;
+
+                    if inode_bitmap_byte & (1 << inode_byte_offset) == 0 && !inode_reserved {
                         new_inode_num += current_relative_inode_num;
                         found_new_inode = true;
                         break;
@@ -742,7 +745,9 @@ where
             }
 
             assert!(found_new_inode);
-            block_buffer[new_inode_num / 8] |= 1 << (new_inode_num % 8);
+            assert!(!self.inode_map.contains_key(&(new_inode_num + 1)));
+
+            block_buffer[new_inode_num / 8] |= 1 << inode_byte_offset;
             byte_write[0] = block_buffer[new_inode_num / 8];
             byte_write_pos = new_inode_num / 8;
 
@@ -876,6 +881,7 @@ where
 
         let mut dir_entries: Vec<DirectoryEntryWrapper> =
             node.get_dir_entries(self, Some(deferred_writes))?;
+        let name_string = std::str::from_utf8(name).unwrap();
 
         // there should at least be two directory entries]
         // in each dir, one . and one ..

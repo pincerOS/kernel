@@ -424,6 +424,40 @@ fn big_file_create_test() {
 }
 
 #[test]
+fn file_creation_within_created_dir_test() {
+    let mut image_bytes: Vec<u8> = Vec::new();
+    let mut text_file_bytes: Vec<u8> = Vec::new();
+    
+    let image_path = "rw_file_creation_within_created_dir.img";
+    let mut ext2 =
+        create_ext2_fs("../../test/example_1.dir", 1024, image_path, false);
+
+    File::open("../../test/files_to_add/bee_movie.txt").unwrap().read_to_end(
+                &mut text_file_bytes).unwrap();
+    File::open("../../test/files_to_add/image.jpg").unwrap().read_to_end(
+                &mut image_bytes).unwrap();
+
+    let verify_requests = vec![
+        VerifyRequest {
+            file_path: b"a/b/image.jpg",
+            data: &*image_bytes,
+            expect_data: None,
+            write_mode: WriteMode::CreateWrite,
+            create_dirs_if_nonexistent: true
+        },
+        VerifyRequest {
+            file_path: b"a/textfile.txt",
+            data: &*text_file_bytes,
+            expect_data: None,
+            write_mode: WriteMode::CreateWrite,
+            create_dirs_if_nonexistent: false
+        }
+    ];
+
+    write_and_verify_test(&mut ext2, &verify_requests, image_path);
+}
+
+#[test]
 fn dir_tree_test() {
     let image_path = "rw_dir_tree.img";
     let mut ext2 =
