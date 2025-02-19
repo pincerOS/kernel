@@ -400,15 +400,19 @@ impl ParEl1Success {
 #[inline]
 pub fn at_s1e1r(va: usize) -> Result<ParEl1Success, ParEl1Failure> {
     let par_el1: u64;
-    // When an address translation instruction is executed, explicit synchronization is required to guarantee the result is visible to subsequent direct reads of PAR_EL1.
+    // When an address translation instruction is executed, explicit
+    // synchronization is required to guarantee the result is visible to
+    // subsequent direct reads of PAR_EL1.
     unsafe {
+        let ints = crate::sync::disable_interrupts();
         asm! {
             "at s1e1r, {x}",
             "isb",
             "mrs {x}, par_el1",
             x = inlateout(reg) va => par_el1,
             options(readonly, preserves_flags, nostack)
-        }
+        };
+        crate::sync::restore_interrupts(ints);
     };
     if par_el1 & 1 == 0 {
         // No fault
@@ -422,15 +426,19 @@ pub fn at_s1e1r(va: usize) -> Result<ParEl1Success, ParEl1Failure> {
 #[inline]
 pub fn at_s1e0r(va: usize) -> Result<ParEl1Success, ParEl1Failure> {
     let par_el1: u64;
-    // When an address translation instruction is executed, explicit synchronization is required to guarantee the result is visible to subsequent direct reads of PAR_EL1.
+    // When an address translation instruction is executed, explicit
+    // synchronization is required to guarantee the result is visible to
+    // subsequent direct reads of PAR_EL1.
     unsafe {
+        let ints = crate::sync::disable_interrupts();
         asm! {
             "at s1e0r, {x}",
             "isb",
             "mrs {x}, par_el1",
             x = inlateout(reg) va => par_el1,
             options(readonly, preserves_flags, nostack)
-        }
+        };
+        crate::sync::restore_interrupts(ints);
     };
     if par_el1 & 1 == 0 {
         // No fault

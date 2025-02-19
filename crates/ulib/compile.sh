@@ -3,7 +3,7 @@
 set -e
 SOURCE=$(realpath "$1")
 NAME=$(basename "$SOURCE" .rs)
-RELATIVE=$(realpath --relative-to=. "$SOURCE")
+RELATIVE=$(realpath --relative-to=. "$SOURCE" || echo "$SOURCE")
 
 MANIFEST="$(cat)"
 
@@ -28,7 +28,9 @@ CARGO_TARGET_DIR="$TARGET_DIR" RUSTC_BOOTSTRAP=1 cargo rustc \
 BIN_PATH="${TARGET_DIR}/aarch64-unknown-none-softfloat/standalone/${NAME}"
 cp "${BIN_PATH}" "${SOURCE%.rs}.elf"
 
-SIZE=$(stat -c %s "${SOURCE%.rs}.elf" | python3 -c \
+# TODO: macos doesn't support realpath --relative-to, stat -c
+SIZE=$(test -f "${SOURCE%.rs}.elf" && find "${SOURCE%.rs}.elf" -printf "%s")
+SIZE=$(echo "${SIZE}" | python3 -c \
     "(lambda f:f(f,float(input()),0))\
      (lambda f,i,j:print('%.4g'%i,'BKMGTPE'[j]+'iB' if j else 'bytes')\
      if i<1024 else f(f,i/1024,j+1))"
