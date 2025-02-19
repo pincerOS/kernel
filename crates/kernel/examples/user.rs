@@ -10,6 +10,7 @@ use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::num::NonZeroU32;
 use core::ptr::copy_nonoverlapping;
+use syscall::run_async_syscall;
 
 use kernel::*;
 
@@ -143,85 +144,6 @@ struct UserMessage {
     objects: [u32; 4],
 }
 
-fn run_async_handler<const N: usize, F>(ctx: &mut Context, future: F) -> *mut Context
-where
-    F: core::future::Future<Output = [usize; N]> + Send + Sync + 'static,
-{
-    struct WrapperData<const N: usize> {
-        arr: Option<[usize; N]>,
-        should_schedule: Option<Box<thread::Thread>>,
-    }
-    struct FutureWrapper<const N: usize, F> {
-        inner: F,
-        data: WrapperData<N>,
-    }
-    impl<const N: usize, F> FutureWrapper<N, F> {
-        fn get_data(self: core::pin::Pin<&mut Self>) -> &mut WrapperData<N> {
-            unsafe { &mut self.get_unchecked_mut().data }
-        }
-    }
-    impl<const N: usize, F> core::future::Future for FutureWrapper<N, F>
-    where
-        F: core::future::Future<Output = [usize; N]>,
-    {
-        type Output = ();
-        fn poll(
-            self: core::pin::Pin<&mut Self>,
-            ctx: &mut core::task::Context<'_>,
-        ) -> core::task::Poll<Self::Output> {
-            let this = unsafe { core::pin::Pin::into_inner_unchecked(self) };
-            let inner = unsafe { core::pin::Pin::new_unchecked(&mut this.inner) };
-            let arr = core::task::ready!(inner.poll(ctx));
-            if let Some(mut thread) = this.data.should_schedule.take() {
-                let ctx = thread.context.as_mut().unwrap();
-                ctx.regs[..N].copy_from_slice(&arr);
-                event::SCHEDULER.add_task(event::Event::ScheduleThread(thread));
-            } else {
-                this.data.arr = Some(arr);
-            }
-            ().into()
-        }
-    }
-
-    let mut future = Box::pin(FutureWrapper {
-        inner: future,
-        data: WrapperData {
-            arr: None,
-            should_schedule: None,
-        },
-    });
-    let task_id = task::TASKS.alloc_task_slot();
-
-    let waker = task::create_waker(task_id);
-    let mut context = core::task::Context::from_waker(&waker);
-
-    match core::future::Future::poll(future.as_mut(), &mut context) {
-        core::task::Poll::Ready(()) => {
-            task::TASKS.remove_task(task_id);
-            let arr = future.as_mut().get_data().arr.take().unwrap();
-
-            ctx.regs[..N].copy_from_slice(&arr);
-            ctx
-        }
-        core::task::Poll::Pending => {
-            let (core_sp, thread) =
-                CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
-            let mut thread = thread.expect("usermode syscall without active thread");
-            unsafe { thread.save_context(ctx.into()) };
-
-            let data = future.as_mut().get_data();
-            data.should_schedule = Some(thread);
-
-            let woken = task::TASKS.return_task(task_id, task::Task::new(future));
-            if woken {
-                event::SCHEDULER.add_task(event::Event::AsyncTask(task_id));
-            }
-
-            unsafe { deschedule_thread(core_sp, None, DescheduleAction::FreeThread) };
-        }
-    }
-}
-
 bitflags::bitflags! {
     struct SendRecvFlags: u32 {
         const NO_BLOCK = 1 << 0;
@@ -235,7 +157,7 @@ unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
     let buf_len = ctx.regs[3];
     let flags = SendRecvFlags::from_bits_truncate(ctx.regs[4] as u32);
 
-    run_async_handler(ctx, async move {
+    run_async_syscall(ctx, async move {
         let Some(desc) = NonZeroU32::new(desc as u32) else {
             return [(-1isize) as usize];
         };
@@ -319,7 +241,7 @@ unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
     let user_ttbr0: usize;
     unsafe { asm!("mrs {0}, TTBR0_EL1", out(reg) user_ttbr0) };
 
-    run_async_handler(ctx, async move {
+    run_async_syscall(ctx, async move {
         let Some(desc) = NonZeroU32::new(desc as u32) else {
             return [(-1isize) as usize];
         };

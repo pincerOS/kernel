@@ -17,6 +17,7 @@ pub mod ringbuffer;
 pub mod runtime;
 pub mod scheduler;
 pub mod sync;
+pub mod syscall;
 pub mod task;
 pub mod thread;
 pub mod util;
