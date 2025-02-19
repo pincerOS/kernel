@@ -20,6 +20,10 @@ pub fn get_time() -> u64 {
     SYSTEM_TIMER.get().get_time()
 }
 
+pub fn get_freq() -> u64 {
+    return 54000000;
+}
+
 pub unsafe fn initialize_system_timer(base: *mut ()) {
     unsafe { SYSTEM_TIMER.init(Bcm2835SysTmr::new(base as *mut ())) };
     if super::gic::GIC.is_initialized() {
