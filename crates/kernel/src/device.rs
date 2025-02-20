@@ -8,6 +8,7 @@ pub mod system_timer;
 pub mod watchdog;
 pub mod dwc_otg;
 pub mod dwc_otgreg;
+pub mod usb;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -186,6 +187,8 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         dwc_otg::dwc_otg_initialize_controller(usb_base);
         println!("| USB controller addr: {:#010x}", usb_addr as usize);
 
+        gic::GIC.get().register_isr(105, test_handler);
+
         let mut sc = dwc_otg::dwc_otg_softc::new();
         dwc_otg::dwc_otg_init(&mut sc);
 
@@ -228,7 +231,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         //read usb_base + 0x88
         let val = unsafe { core::ptr::read_volatile((usb_base as usize + 0x88) as *mut u32) };
         println!("| USB controller value3: {:#010x}", val);
-        // shutdown();
+        shutdown();
     }
 
     // Set up the interrupt controllers to preempt on the arm generic
@@ -257,6 +260,12 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
     }));
 
     unsafe { PER_CORE_INIT.init(init_fns) };
+}
+
+fn test_handler(ctx: &mut crate::context::Context) {
+    println!("| USB: test_handler");
+    println!("| Function not implemented");
+    shutdown();
 }
 
 fn timer_handler(ctx: &mut crate::context::Context) {

@@ -21,7 +21,7 @@ pub fn get_time() -> u64 {
 }
 
 pub fn get_freq() -> u64 {
-    return 54000000;
+    return 1000000;
 }
 
 pub unsafe fn initialize_system_timer(base: *mut ()) {

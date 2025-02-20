@@ -2,6 +2,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2010,2011 Aleksandr Rybalko. All rights reserved.
+ * 
+ * Modified in 2025 for Rust compatibility and PincerOS by Aaron Lo <aaronlo0929@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,6 +35,9 @@ pub const GRSTCTL_RXFFLSH: u32 = 1 << 4;
 
 pub const GINTMSK_HCHINTMSK: u32 = 1 << 25;
 pub const GINTMSK_IEPINTMSK: u32 = 1 << 18;
+
+pub const GOTGCTL_BSESVLD: u32 = 1 << 19;
+pub const GOTGCTL_ASESVLD: u32 = 1 << 18;
 
 pub const HCINT_DEFAULT_MASK: u32 = 
     HCINT_STALL | HCINT_BBLERR |

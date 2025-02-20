@@ -5,7 +5,7 @@
  * Copyright (c) 2012-2015 Hans Petter Selasky. All rights reserved.
  * Copyright (c) 2010-2011 Aleksandr Rybalko. All rights reserved.
  *
- * Modified in 2025 for Rust compatibility by Aaron Lo <aaronlo0929@gmail.com>
+ * Modified in 2025 for Rust compatibility and PincerOS by Aaron Lo <aaronlo0929@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -48,11 +48,21 @@
 
 // mod dwc_otgreg;
 use crate::device::dwc_otgreg::*;
+use crate::device::usb::*;
 use super::system_timer::{self, SYSTEM_TIMER};
 pub static mut dwc_otg_driver: DWC_OTG = DWC_OTG { base_addr: 0 };
 
+fn dwc_otg_interrupt_poll_locked(sc: &mut dwc_otg_softc) {
+
+
+    let haint = read_volatile(HAINT);
+    println!("| haint: 0x{:08x}", haint);
+    //TODO: TODO: Implement
+
+}
+
 //TODO: TODO: Implement
-fn dwc_otg_do_poll() {
+fn dwc_otg_do_poll(sc: &mut dwc_otg_softc) {
     
     //TODO: Add a usb lock on this
 
@@ -64,6 +74,8 @@ fn dwc_otg_do_poll() {
 	// dwc_otg_interrupt_complete_locked(sc);
 	// USB_BUS_SPIN_UNLOCK(&sc->sc_bus);
 	// USB_BUS_UNLOCK(&sc->sc_bus);
+
+    dwc_otg_interrupt_poll_locked(sc);
 }
 
 fn dwc_otg_tx_fifo_reset(value: u32) {
@@ -140,6 +152,29 @@ fn dwc_otg_init_fifo(sc: &mut dwc_otg_softc) -> u32 {
     return 0;
 }
 
+fn dwc_otg_root_intr(sc: &mut dwc_otg_softc) {
+
+    //TODO: USB_BUS_LOCK_ASSERT(&sc->sc_bus, MA_OWNED);
+    sc.sc_hub_idata[0] = 0x02; /* we only have one port */
+
+    //TODO: TODO: https://elixir.bootlin.com/freebsd/v14.2/source/sys/dev/usb/controller/dwc_otg.c#L3491
+    // uhub_root_intr(&sc->sc_bus, sc->sc_hub_idata,
+	//     sizeof(sc->sc_hub_idata));
+    uhub_root_intr();
+}
+
+fn dwc_otg_vbus_interrupt(sc: &mut dwc_otg_softc, is_on: u8) {
+    println!("| vbus = {}", is_on);
+
+    if sc.sc_flags.status_vbus == 0 {
+        sc.sc_flags.status_vbus = 1;
+
+        /* complete root HUB interrupt endpoint */
+
+        dwc_otg_root_intr(sc);
+    }
+}
+
 
 pub fn dwc_otg_init(sc: &mut dwc_otg_softc) -> u32 {
     println!("| dwc_otg_init");
@@ -153,7 +188,7 @@ pub fn dwc_otg_init(sc: &mut dwc_otg_softc) -> u32 {
     //3863 ???
     //device_set_ivars(sc->sc_bus.bdev, &sc->sc_bus);
 
-    //TODO: Set up interrupts??
+    //TODO: TODO: Seems important Set up interrupts??
     // err = bus_setup_intr(sc->sc_bus.parent, sc->sc_irq_res,
 	//     INTR_TYPE_TTY | INTR_MPSAFE, &dwc_otg_filter_interrupt,
 	//     &dwc_otg_interrupt, sc, &sc->sc_intr_hdl);
@@ -242,7 +277,6 @@ pub fn dwc_otg_init(sc: &mut dwc_otg_softc) -> u32 {
 
     //TODO: Set up interrupts
 
-    sc.sc_irq_mask = 0;
     sc.sc_irq_mask |= (1 << 12) | (1 << 13) | (1 << 24) | (1 << 31) | (1 << 11) | (1 << 2) | (1 << 30);
     write_volatile(GINTMSK, sc.sc_irq_mask);
 
@@ -254,8 +288,9 @@ pub fn dwc_otg_init(sc: &mut dwc_otg_softc) -> u32 {
     write_volatile(HCFG, temp);
 
     //only enable global interrupts
+    println!("| Interrupts enabling");
     write_volatile(GAHBCFG, 1 << 0);
-
+    println!("| Interrupts enabled");
     //TODO: turn off the clocks
 	// dwc_otg_clocks_off(sc);
 
@@ -267,11 +302,13 @@ pub fn dwc_otg_init(sc: &mut dwc_otg_softc) -> u32 {
     //TODO: TODO: This seems important
     // dwc_otg_vbus_interrupt(sc,
 	    // (temp & (GOTGCTL_ASESVLD | GOTGCTL_BSESVLD)) ? 1 : 0);
+    let temp_interrupt = (temp & (GOTGCTL_ASESVLD | GOTGCTL_BSESVLD)) != 0;
+    dwc_otg_vbus_interrupt(sc, temp_interrupt as u8);
 
     //USB_BUS_UNLOCK(&sc->sc_bus);
 
     //catch any lost interrupts
-    dwc_otg_do_poll();
+    dwc_otg_do_poll(sc);
     
 
     return 0;
@@ -281,7 +318,7 @@ pub fn dwc_otg_init(sc: &mut dwc_otg_softc) -> u32 {
 //TODO: Add a usb lock on this
 fn usb_lock_mtx(time: usize) {
     let start_time = system_timer::get_time();
-    while((system_timer::get_time() - start_time) / (system_timer::get_freq() / 1000)) < (time as u64) { }
+    while(((system_timer::get_time() - start_time) * 1000) / (system_timer::get_freq())) < (time as u64) {}
 }
 
 fn read_volatile(reg: usize) -> u32 {
@@ -305,25 +342,27 @@ struct dwc_otg_chan_state {
     hcint: u32,
 }
 
-// struct dwc_otg_flags {
-// 	uint8_t	change_connect:1;
-// 	uint8_t	change_suspend:1;
-// 	uint8_t change_reset:1;
-// 	uint8_t change_enabled:1;
-// 	uint8_t change_over_current:1;
-// 	uint8_t	status_suspend:1;	/* set if suspended */
-// 	uint8_t	status_vbus:1;		/* set if present */
-// 	uint8_t	status_bus_reset:1;	/* set if reset complete */
-// 	uint8_t	status_high_speed:1;	/* set if High Speed is selected */
-// 	uint8_t	status_low_speed:1;	/* set if Low Speed is selected */
-// 	uint8_t status_device_mode:1;	/* set if device mode */
-// 	uint8_t	self_powered:1;
-// 	uint8_t	clocks_off:1;
-// 	uint8_t	port_powered:1;
-// 	uint8_t	port_enabled:1;
-// 	uint8_t port_over_current:1;
-// 	uint8_t	d_pulled_up:1;
-// }
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+struct dwc_otg_flags {
+    change_connect: u8,
+    change_suspend: u8,
+    change_reset: u8,
+    change_enabled: u8,
+    change_over_current: u8,
+    status_suspend: u8,
+    status_vbus: u8,
+    status_bus_reset: u8,
+    status_high_speed: u8,
+    status_low_speed: u8,
+    status_device_mode: u8,
+    self_powered: u8,
+    clocks_off: u8,
+    port_powered: u8,
+    port_enabled: u8,
+    port_over_current: u8,
+    d_pulled_up: u8,
+}
 
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
@@ -373,12 +412,14 @@ pub struct dwc_otg_softc {
     pub sc_mode: u8,    // mode of operation
     pub sc_hub_idata: [u8; 1],
 
-    // pub sc_flags: DwcOtgFlags,
+    pub sc_flags: dwc_otg_flags,
 }
 
 impl dwc_otg_softc {
     pub fn new() ->  Self {
-        Self::default()
+        let mut this = Self::default();
+        this.sc_flags.clocks_off = 1;
+        this
     }
 }
 
