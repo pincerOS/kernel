@@ -197,7 +197,7 @@ pub fn dtc_otg_init() -> u32 {
     return 0;
 }
 
-//time = 1000 for 1 second
+//time = 1000 for 1 second //Maybe
 //TODO: Add a usb lock on this
 fn usb_lock_mtx(time: usize) {
     let start_time = system_timer::get_time();
@@ -216,6 +216,7 @@ pub fn dwc_otg_initialize_controller(base_addr: *mut()) {
         dwc_otg_driver = DWC_OTG::init(base_addr);
     }
 }
+
 
 const GOTGCTL: usize = 0x000;
 const GOTGINT: usize = 0x004;
