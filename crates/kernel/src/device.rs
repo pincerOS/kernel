@@ -7,6 +7,7 @@ pub mod mailbox;
 pub mod system_timer;
 pub mod watchdog;
 pub mod dwc_otg;
+pub mod dwc_otgreg;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -185,7 +186,8 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         dwc_otg::dwc_otg_initialize_controller(usb_base);
         println!("| USB controller addr: {:#010x}", usb_addr as usize);
 
-        dwc_otg::dtc_otg_init();
+        let mut sc = dwc_otg::dwc_otg_softc::new();
+        dwc_otg::dwc_otg_init(&mut sc);
 
 
         // shutdown();

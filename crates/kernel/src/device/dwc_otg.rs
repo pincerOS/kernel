@@ -46,9 +46,12 @@
  * internal reset.
  */
 
+// mod dwc_otgreg;
+use crate::device::dwc_otgreg::*;
 use super::system_timer::{self, SYSTEM_TIMER};
 pub static mut dwc_otg_driver: DWC_OTG = DWC_OTG { base_addr: 0 };
 
+//TODO: TODO: Implement
 fn dwc_otg_do_poll() {
     
     //TODO: Add a usb lock on this
@@ -63,8 +66,82 @@ fn dwc_otg_do_poll() {
 	// USB_BUS_UNLOCK(&sc->sc_bus);
 }
 
+fn dwc_otg_tx_fifo_reset(value: u32) {
+    write_volatile(GRSTCTL, value);
 
-pub fn dtc_otg_init() -> u32 {
+    for _ in 0..16 {
+        let temp = read_volatile(GRSTCTL);
+        if(temp & (GRSTCTL_TXFFLSH | GRSTCTL_RXFFLSH)) == 0 {
+            break;
+        }
+    }
+}
+
+fn dwc_otg_init_fifo(sc: &mut dwc_otg_softc) -> u32 {
+    println!("| dwc_otg_init_fifo");
+
+    let mut fifo_size = sc.sc_fifo_size;
+    let fifo_regs = 4 * 16; // Why
+
+    if fifo_size < fifo_regs {
+        println!("| FIFO size too small: {}", fifo_size);
+        return EINVAL;
+    }
+
+    /* subtract FIFO regs from total once */
+	fifo_size -= fifo_regs;
+
+	/* split equally for IN and OUT */
+	fifo_size /= 2;
+
+	/* Align to 4 bytes boundary (refer to PGM) */
+	fifo_size &= !3;
+
+    /* set global receive FIFO size */
+    write_volatile(GRXFSIZ, fifo_size/4);
+
+    let mut tx_start = fifo_size;
+
+    /* reset active endpoints */
+    sc.sc_active_rx_ep = 0;
+    
+    /* split equally for periodic and non-periodic */
+    fifo_size /= 2;
+
+    println!("| PTX/NPTX FIFO size: {}", fifo_size);
+    /* align to 4 bytes boundary */
+    fifo_size &= !3;
+    write_volatile(GNPTXFSIZ, ((fifo_size / 4) << 16) | (tx_start / 4));
+
+    for i in 0..sc.sc_host_ch_max {
+        write_volatile(HCINTMSK(i as usize), HCINT_DEFAULT_MASK);
+    }
+
+    write_volatile(HPTXFSIZ, ((fifo_size / 4) << 16) | (tx_start / 4));
+    /* reset host channel state */
+    sc.sc_chan_state[0].allocated = 0;
+    sc.sc_chan_state[0].wait_halted = 0;
+    sc.sc_chan_state[0].hcint = 0;
+
+    /* enable all host channel interrupts */
+    write_volatile(HAINTMSK, (1 << sc.sc_host_ch_max) - 1);
+
+    /* enable proper host channel interrupts */
+    sc.sc_irq_mask |= GINTMSK_HCHINTMSK;
+    sc.sc_irq_mask &= !GINTMSK_IEPINTMSK;
+    write_volatile(GINTMSK, sc.sc_irq_mask);
+
+    /* reset RX FIFO */
+    dwc_otg_tx_fifo_reset(GRSTCTL_RXFFLSH);
+
+    /* reset all TX FIFOs */
+    dwc_otg_tx_fifo_reset((GRSTCTL_TXFIFO(0x10) | GRSTCTL_TXFFLSH) as u32);
+
+    return 0;
+}
+
+
+pub fn dwc_otg_init(sc: &mut dwc_otg_softc) -> u32 {
     println!("| dwc_otg_init");
 
     //TODO: Implement getting DMA memory -> 3854
@@ -103,8 +180,8 @@ pub fn dtc_otg_init() -> u32 {
     //GUSBCFG_FORCEHOSTMODE;
     let mut temp = 1<<29;
 
-    let sc_phy_type = 3;
-    let sc_phy_bits = 8; //TODO: Check, currently guessing based off of configuration
+    sc.sc_phy_bits = 3;
+    sc.sc_phy_type = 8; //TODO: Check, currently guessing based off of configuration
 
     // if (sc->sc_phy_type == 0)
 	// 	sc->sc_phy_type = dwc_otg_phy_type + 1;
@@ -117,7 +194,7 @@ pub fn dtc_otg_init() -> u32 {
     //     GUSBCFG_TRD_TIM_SET(5) | temp);
     // TODO: is GUSBCFG_TRD_TIM_SET(5) important? 3940
 
-    if sc_phy_bits == 16 { temp |= 1 << 3; }
+    if sc.sc_phy_type == 16 { temp |= 1 << 3; }
     write_volatile(GUSBCFG, (((5) & 15) << 10) | temp);
     write_volatile(GOTGCTL, 0);
 
@@ -139,21 +216,21 @@ pub fn dtc_otg_init() -> u32 {
     usb_lock_mtx(1000/100);
     
     let temp = read_volatile(GHWCFG3);
-    let sc_fifo_size = 4 * (temp >> 16); //?
+    sc.sc_fifo_size = 4 * (temp >> 16); //?
 
     let temp = read_volatile(GHWCFG2);
-    let sc_dev_ep_max = ((((temp) >> 10) & 15) + 1);
+    sc.sc_dev_ep_max = ((((temp) >> 10) & 15) + 1) as u8;
 	// if (sc->sc_dev_ep_max > DWC_OTG_MAX_ENDPOINTS)
 	// 	sc->sc_dev_ep_max = DWC_OTG_MAX_ENDPOINTS;
 
-    let sc_host_ch_max = ((((temp) >> 14) & 15) + 1);
+    sc.sc_host_ch_max = ((((temp) >> 14) & 15) + 1) as u8;
 	// if (sc->sc_host_ch_max > DWC_OTG_MAX_CHANNELS)
 	// 	sc->sc_host_ch_max = DWC_OTG_MAX_CHANNELS;
     
     let temp = read_volatile(GHWCFG4);
-    let sc_dev_in_ep_max = ((((temp) >> 26) & 15) + 1);
+    sc.sc_dev_in_ep_max = ((((temp) >> 26) & 15) + 1)  as u8;
 
-    println!("| fifo_size: {}, Device EPs: {}/{}, Host CHs: {}", sc_fifo_size, sc_dev_ep_max, sc_dev_in_ep_max, sc_host_ch_max);
+    println!("| fifo_size: {}, Device EPs: {}/{}, Host CHs: {}", sc.sc_fifo_size, sc.sc_dev_ep_max, sc.sc_dev_in_ep_max, sc.sc_host_ch_max);
 
     //TODO: TODO: SET UP FIFO
     /* setup FIFO */
@@ -161,10 +238,13 @@ pub fn dtc_otg_init() -> u32 {
 	// 	USB_BUS_UNLOCK(&sc->sc_bus);
 	// 	return (EINVAL);
 	// }
+    dwc_otg_init_fifo(sc); //Mode should be forced host
 
     //TODO: Set up interrupts
-    let sc_irq_mask = (1 << 12) | (1 << 13) | (1 << 24) | (1 << 31) | (1 << 11) | (1 << 2) | (1 << 30);
-    write_volatile(GINTMSK, sc_irq_mask);
+
+    sc.sc_irq_mask = 0;
+    sc.sc_irq_mask |= (1 << 12) | (1 << 13) | (1 << 24) | (1 << 31) | (1 << 11) | (1 << 2) | (1 << 30);
+    write_volatile(GINTMSK, sc.sc_irq_mask);
 
     //hostmode
     //setup clocks
@@ -217,6 +297,104 @@ pub fn dwc_otg_initialize_controller(base_addr: *mut()) {
     }
 }
 
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+struct dwc_otg_chan_state {
+    allocated: u16,
+    wait_halted: u16,
+    hcint: u32,
+}
+
+// struct dwc_otg_flags {
+// 	uint8_t	change_connect:1;
+// 	uint8_t	change_suspend:1;
+// 	uint8_t change_reset:1;
+// 	uint8_t change_enabled:1;
+// 	uint8_t change_over_current:1;
+// 	uint8_t	status_suspend:1;	/* set if suspended */
+// 	uint8_t	status_vbus:1;		/* set if present */
+// 	uint8_t	status_bus_reset:1;	/* set if reset complete */
+// 	uint8_t	status_high_speed:1;	/* set if High Speed is selected */
+// 	uint8_t	status_low_speed:1;	/* set if Low Speed is selected */
+// 	uint8_t status_device_mode:1;	/* set if device mode */
+// 	uint8_t	self_powered:1;
+// 	uint8_t	clocks_off:1;
+// 	uint8_t	port_powered:1;
+// 	uint8_t	port_enabled:1;
+// 	uint8_t port_over_current:1;
+// 	uint8_t	d_pulled_up:1;
+// }
+
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct dwc_otg_softc {
+    // struct usb_bus sc_bus;
+    // union dwc_otg_hub_temp sc_hub_temp;
+    // struct dwc_otg_profile sc_hw_ep_profile[DWC_OTG_MAX_ENDPOINTS];
+    // struct dwc_otg_tt_info sc_tt_info[DWC_OTG_MAX_DEVICES];
+    // struct usb_callout sc_timer;
+
+    // struct usb_device *sc_devices[DWC_OTG_MAX_DEVICES];
+    // struct resource *sc_io_res;
+    // struct resource *sc_irq_res;
+    // void   *sc_intr_hdl;
+    // bus_size_t sc_io_size;
+    // bus_space_tag_t sc_io_tag;
+    // bus_space_handle_t sc_io_hdl;
+
+    // uint32_t sc_bounce_buffer[MAX(512 * DWC_OTG_MAX_TXP, 1024) / 4];
+
+    pub sc_fifo_size: u32,
+    pub sc_irq_mask: u32,
+    pub sc_last_rx_status: u32,
+    pub sc_out_ctl: [u32; DWC_OTG_MAX_ENDPOINTS],
+    pub sc_in_ctl: [u32; DWC_OTG_MAX_ENDPOINTS],
+    pub sc_chan_state: [dwc_otg_chan_state; DWC_OTG_MAX_CHANNELS],
+    pub sc_tmr_val: u32,
+    pub sc_hprt_val: u32,
+    pub sc_xfer_complete: u32,
+
+    pub sc_current_rx_bytes: u16,
+    pub sc_current_rx_fifo: u16,
+
+    pub sc_active_rx_ep: u16,
+    pub sc_last_frame_num: u16,
+
+    pub sc_phy_type: u8,
+    pub sc_phy_bits: u8,
+
+    pub sc_timer_active: u8,
+    pub sc_dev_ep_max: u8,
+    pub sc_dev_in_ep_max: u8,
+    pub sc_host_ch_max: u8,
+    pub sc_needsof: u8,
+    pub sc_rt_addr: u8, // root HUB address
+    pub sc_conf: u8,    // root HUB config
+    pub sc_mode: u8,    // mode of operation
+    pub sc_hub_idata: [u8; 1],
+
+    // pub sc_flags: DwcOtgFlags,
+}
+
+impl dwc_otg_softc {
+    pub fn new() ->  Self {
+        Self::default()
+    }
+}
+
+
+pub const DWC_OTG_MAX_ENDPOINTS: usize = 16; // Update as needed
+pub const DWC_OTG_MAX_CHANNELS: usize = 8;   // Update as needed
+
+const DWC_OTG_PHY_ULPI: u8 = 1;
+const DWC_OTG_PHY_HSIC: u8 = 2;
+const DWC_OTG_PHY_INTERNAL: u8 = 3;
+const DWC_OTG_PHY_UTMI: u8 = 4;
+
+const DWC_MODE_OTG: u8 = 0;
+const DWC_MODE_DEVICE: u8 = 1;
+const DWC_MODE_HOST: u8 = 2;
+
 
 const GOTGCTL: usize = 0x000;
 const GOTGINT: usize = 0x004;
@@ -249,7 +427,22 @@ const HPTXFSIZ: usize = 0x100;
 const fn DIEPTXF(n: usize) -> usize { 0x104 + 4 * n }   
 
 const HCFG: usize = 0x400;
+const HFIR: usize = 0x404;
+const HFNUM: usize = 0x408;
+const HPTXSTS: usize = 0x410;
+const HAINT: usize = 0x414;
+const HAINTMSK: usize = 0x418;
+const HFLBADDR: usize = 0x41C;
 const HPRT: usize = 0x440;
+
+
+const fn HCCHAR(n: usize) -> usize { 0x500 + 0x20 * n }
+const fn HCSPLT(n: usize) -> usize { 0x504 + 0x20 * n }
+const fn HCINT(n: usize) -> usize { 0x508 + 0x20 * n }
+const fn HCINTMSK(n: usize) -> usize { 0x50C + 0x20 * n }
+const fn HCTSIZ(n: usize) -> usize { 0x510 + 0x20 * n }
+const fn HCDMA(n: usize) -> usize { 0x514 + 0x20 * n }
+const fn HCDMAB(n: usize) -> usize { 0x51C + 0x20 * n + 4 }
 
 const DCFG: usize = 0x800;
 const DCTL: usize = 0x804;
