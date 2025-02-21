@@ -323,15 +323,25 @@ impl TcrEl1 {
 }
 
 impl TableDescriptor {
-    const fn set_pa(self, pa: usize) -> Self {
+    pub const fn set_pa(self, pa: usize) -> Self {
         assert!(pa < (1 << 52), "field size mismatch");
         assert!(pa % (1 << 12) == 0, "alignment mismatch");
         self.difference(Self::NEXT_ADDR)
             .union(Self::from_bits_retain(pa as u64))
     }
 
+    //usize or u64
+    pub const fn get_pa(self) -> usize {
+        return ((self.bits() >> 12) & ((1 << 36) - 1)) as usize;
+    }
+
     pub const fn is_valid(self) -> bool {
         self.contains(Self::VALID)
+    }
+
+    //temporary, should be moved to more proper location
+    pub const fn is_table_descriptor(self) -> bool {
+        self.contains(Self::IS_TABLE_DESCRIPTOR)
     }
 
     pub const fn new(pa: usize) -> Self {

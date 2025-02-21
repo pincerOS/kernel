@@ -1,6 +1,7 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::{
     arch::asm,
+    fmt::{Display, Formatter},
     ptr::{self, addr_of, NonNull},
 };
 
@@ -123,6 +124,78 @@ unsafe fn first_unused_virt_page(table: *mut KernelLeafTable) -> Option<usize> {
     None
 }
 
+#[derive(Debug)]
+pub enum MappingError {
+    HugePagePresent,
+    LeafTableSpotTaken,
+}
+
+impl Display for MappingError {
+    fn fmt(&self, f: &mut Formatter) -> core::fmt::Result {
+        match self {
+            Self::HugePagePresent => {
+                write!(f, "Huge page present where table descriptor is expected")
+            }
+            Self::LeafTableSpotTaken => write!(
+                f,
+                "The spot in the leaf table that is being mapped to is already taken"
+            ),
+        }
+    }
+}
+
+//TODO: give option of setting bits for the mapping
+//Maybe add option to map huge pages here
+pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> Result<(), MappingError> {
+    //TODO: stop using these constants
+    let mut index_bits = 25 - 21; //mildly redundant
+    let mut mask = (1 << index_bits) - 1;
+    //level 2 table index is bits 29-21
+    let mut table_index = (va >> 21) & mask;
+
+    let table_descriptor: TableDescriptor =
+        unsafe { KERNEL_TRANSLATION_TABLE.0[table_index].table };
+
+    if !table_descriptor.is_table_descriptor() {
+        //Error: Huge page instead of table descriptor
+        return Err(MappingError::HugePagePresent);
+    }
+
+    let mut index_add: usize = 0;
+    if table_index == 15 {
+        index_add = PG_SZ / 8;
+    }
+
+    index_bits = 21 - 12;
+    mask = (1 << index_bits) - 1;
+    let table_index_in_page = (va >> 12) & mask;
+    table_index = table_index_in_page + index_add;
+
+    let table = &raw mut KERNEL_LEAF_TABLE;
+    let table_base = table.cast::<LeafDescriptor>();
+
+    let entry = table_base.wrapping_add(table_index);
+
+    if unsafe { entry.read() }.is_valid() {
+        //Error: spot in leaf table is taken
+        return Err(MappingError::LeafTableSpotTaken);
+    }
+
+    let aligned_pa = (pa / PG_SZ) * PG_SZ;
+    let new_desc = LeafDescriptor::new(aligned_pa).set_global();
+
+    unsafe { entry.write(new_desc) };
+
+    unsafe {
+        asm! {
+            "dsb ISH",
+            options(readonly, nostack, preserves_flags)
+        }
+    }
+
+    return Ok(());
+}
+
 /// not thread safe
 pub unsafe fn map_device(pa: usize) -> NonNull<()> {
     let pa_aligned = (pa / PG_SZ) * PG_SZ;
@@ -239,6 +312,7 @@ pub unsafe fn map_physical_noncacheable(pa_start: usize, size: usize) -> NonNull
     }
 }
 
+//This is two adjacent pages all filled with leaf descriptors
 #[no_mangle]
 static mut KERNEL_LEAF_TABLE: KernelLeafTable =
     KernelLeafTable([LeafDescriptor::empty(); PG_SZ / 8 * 2]);
