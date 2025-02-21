@@ -5,8 +5,6 @@ use core::{
     ptr::{self, addr_of, NonNull},
 };
 
-//Create error enum and return a result - look in lz4/src/frame.rs has error enum and func on line 174 has example usage
-
 use super::{
     machine::{LeafDescriptor, TableDescriptor, TranslationDescriptor},
     physical_addr,
@@ -146,9 +144,7 @@ impl Display for MappingError {
     }
 }
 
-//This should ideally be made more generalizable in the future
 //TODO: give option of setting bits for the mapping
-//TODO: change return type to something more appropriate
 //Maybe add option to map huge pages here
 pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> Result<(), MappingError> {
     //TODO: stop using these constants
@@ -161,7 +157,6 @@ pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> Result<(), MappingErr
         unsafe { KERNEL_TRANSLATION_TABLE.0[table_index].table };
 
     if !table_descriptor.is_table_descriptor() {
-        //huge page here instead of table descriptor
         //Error: Huge page instead of table descriptor
         return Err(MappingError::HugePagePresent);
     }
@@ -317,9 +312,9 @@ pub unsafe fn map_physical_noncacheable(pa_start: usize, size: usize) -> NonNull
     }
 }
 
+//This is two adjacent pages all filled with leaf descriptors
 #[no_mangle]
 static mut KERNEL_LEAF_TABLE: KernelLeafTable =
-    //This is two adjacent pages all filled with leaf descriptors
     KernelLeafTable([LeafDescriptor::empty(); PG_SZ / 8 * 2]);
 
 #[no_mangle]

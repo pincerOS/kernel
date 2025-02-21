@@ -8,7 +8,7 @@ use alloc::boxed::Box;
 use kernel::*;
 
 const VIRTUAL_ADDR: usize = 0xFFFF_FFFF_FE00_0000 | 0x1E00000;
-const HELLO_CHARS: [u8; 5] = ['h' as u8, 'e' as u8, 'l' as u8, 'l' as u8, 'o' as u8];
+static HELLO_CHARS: [u8; 5] = *b"hello";
 
 #[repr(C, align(4096))]
 struct SomePage([u8; 4096]);
@@ -25,15 +25,18 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     println!("Init complete");
 
     //hack: get a "page" from the heap and try to map it to some virtual address
-    let page_box = Box::<SomePage>::new(SomePage([0; 4096]));
+    let page_box = Box::new(SomePage([0; 4096]));
     let page_ptr: *mut SomePage = Box::into_raw(page_box);
 
+    //Copying hello into the first few bytes of the page
     let phys_addr: usize = crate::arch::memory::physical_addr((page_ptr).addr()).unwrap() as usize;
 
-    for i in 0..5 {
-        unsafe {
-            (*page_ptr).0[i] = HELLO_CHARS[i];
-        }
+    unsafe {
+        core::ptr::copy(
+            &raw const HELLO_CHARS,
+            page_ptr as *mut [u8; 5],
+            HELLO_CHARS.len(),
+        );
     }
 
     println!(
