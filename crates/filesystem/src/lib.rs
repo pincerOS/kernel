@@ -391,6 +391,22 @@ fn get_epoch_time() -> usize {
 }
 
 impl DirectoryEntryWrapper {
+    pub fn copy_to_bytes_slice(&self, slice: &mut [u8], use_offset: bool) {
+        let entry_bytes: &[u8] = bytemuck::bytes_of(&self.entry);
+
+        // we shouldn't write self.entry.entry_size because that contains padding bytes
+        // which can be larger than the maximum directory entry size without padding
+        let dir_entry_size_to_write =
+            (self.entry.name_length as usize) + DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE ;
+        let entry_slice: &[u8] = &entry_bytes[0..dir_entry_size_to_write];
+        
+        if use_offset {
+            slice[self.offset..(self.offset + dir_entry_size_to_write)].copy_from_slice(entry_slice);
+        } else {
+            slice.copy_from_slice(entry_slice);
+        }
+    }
+    
     pub fn add_deferred_write<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>,
                                               dir_node: &mut INodeWrapper,
                                               deferred_writes: &mut DeferredWriteMap)
@@ -517,6 +533,12 @@ where
             unsafe {std::mem::transmute::<[u8;size_of::<INode>()], INode>(inode_data)};
 
         Ok(inode)
+    }
+
+    pub fn get_inode_self(&mut self, inode_num: usize,
+                          deferred_writes: Option<&DeferredWriteMap>) -> Result<INode, Ext2Error> {
+        Self::get_inode(&mut self.device, &self.superblock, &self.block_group_descriptor_tables,
+                        inode_num, deferred_writes)
     }
 
     pub fn get_root_inode_wrapper(&mut self) -> Rc<RefCell<INodeWrapper>> {
@@ -760,7 +782,8 @@ where
             let inode_block_index: usize =
                 (self.block_group_descriptor_tables[found_block_group_index].bg_inode_table as usize) +
                     ((new_inode_num - 1) / num_of_inodes_per_block);
-            let inode_block_offset: usize = (new_inode_num - 1) % num_of_inodes_per_block;
+            let inode_block_offset: usize = 
+                ((new_inode_num - 1) % num_of_inodes_per_block) * size_of::<INode>();
 
             self.read_logical_block_self(inode_block_index, 1,
                                          &mut block_buffer, Some(deferred_write_map))?;
@@ -769,7 +792,7 @@ where
 
             block_buffer[inode_block_offset..inode_block_offset + size_of::<INode>()].copy_from_slice(inode_bytes);
 
-            self.add_write_to_deferred_writes_map(deferred_write_map, inode_bitmap_num,
+            self.add_write_to_deferred_writes_map(deferred_write_map, inode_block_index,
                                                   inode_block_offset, inode_bytes, None)?;
 
             new_inode_num += new_inode_num_base;
@@ -902,7 +925,6 @@ where
             new_dir_entry_wrapper.entry.entry_size +=
                 4 - (new_dir_entry_wrapper.entry.entry_size % 4);
         }
-
         let mut found_empty_dir_entry: bool = false;
 
         for dir_entry_wrapper in dir_entries.iter_mut() {
@@ -970,6 +992,8 @@ where
                                           true, deferred_writes)?;
         }
 
+        new_inode_wrapper.borrow_mut().get_deferred_write_inode(self, deferred_writes)?;
+
         self.inode_map.insert(new_inode_wrapper.borrow().inode_num as usize,
                               Rc::downgrade(&new_inode_wrapper));
 
@@ -1016,16 +1040,15 @@ where
         cur_dir_entry.entry.name_characters[0] = b'.';
         prev_dir_entry.entry.name_characters[0] = b'.';
         prev_dir_entry.entry.name_characters[1] = b'.';
+        
+        let mut dir_entry_bytes: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
 
-        let new_blocks_allocated_result = dir_node.borrow().find_new_blocks(self, 1, true,
-                                                                            &mut deferred_writes)?;
-        dir_node.borrow_mut().write_new_blocks_to_inode(self, new_blocks_allocated_result.as_slice(),
-                                                    true, &mut deferred_writes)?;
+        cur_dir_entry.copy_to_bytes_slice(&mut dir_entry_bytes, true);
+        prev_dir_entry.copy_to_bytes_slice(&mut dir_entry_bytes, true);
+        
+        dir_node.borrow_mut().append_file_no_writeback(self, &dir_entry_bytes,
+                                                       true, &mut deferred_writes)?;
 
-        cur_dir_entry.add_deferred_write(self, &mut *dir_node.borrow_mut(), &mut deferred_writes)?;
-        prev_dir_entry.add_deferred_write(self, &mut *dir_node.borrow_mut(), &mut deferred_writes)?;
-
-        dir_node.borrow_mut().update_size(BLOCK_SIZE as u64, self);
         dir_node.borrow_mut().get_deferred_write_inode(self, &mut deferred_writes)?;
 
         let writeback_result = self.write_back_deferred_writes(deferred_writes);
@@ -1106,7 +1129,7 @@ impl INodeWrapper
 
         // use div_up here
 
-        self.set_block_allocated_count(ext2, (new_size as usize) / BLOCK_SIZE);
+        self.set_block_allocated_count(ext2, Self::div_up(new_size as usize, BLOCK_SIZE));
     }
     
     pub fn get_deferred_write_inode<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>,
