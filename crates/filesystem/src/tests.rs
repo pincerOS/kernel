@@ -2,8 +2,9 @@ use alloc::rc::Rc;
 use std::cell::RefCell;
 use crate::{linux::FileBlockDevice, INodeWrapper, Superblock};
 use std::{format, fs};
-use std::fs::File;
+use std::fs::{File, ReadDir};
 use std::{env, io, println, vec};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -62,6 +63,10 @@ fn read_and_verify_via_fuse_test(verify_requests: &Vec<VerifyRequest>,
     let fuse_ext2_output = Command::new("fuse-ext2")
         .args([complete_image_path.as_str(), &*test_mount_dir, "-o", "rw+,allow_other,nonempty,uid=501,gid=20"]).output().unwrap();
     let fuse_ext2_stderr = String::from_utf8(fuse_ext2_output.stderr).unwrap();
+    
+    assert!(fuse_ext2_output.status.success());
+
+    let mut dir_trees: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 
     for verify_request in verify_requests {
         let mut current_file_path: String = test_mount_dir.clone();
@@ -72,8 +77,31 @@ fn read_and_verify_via_fuse_test(verify_requests: &Vec<VerifyRequest>,
             verify_request.data.to_vec()
         };
 
+        let file_path_string_slice: &str = std::str::from_utf8(verify_request.file_path).unwrap();
+
         current_file_path.push('/');
-        current_file_path.push_str(std::str::from_utf8(verify_request.file_path).unwrap());
+        current_file_path.push_str(file_path_string_slice);
+
+        let verify_path = Path::new(&current_file_path).parent().unwrap();
+
+        if !dir_trees.contains_key(verify_path.to_str().unwrap()) {
+            let mut dir_files: BTreeSet<String> = BTreeSet::new();
+
+            for path in fs::read_dir(verify_path).unwrap() {
+                let path_string = path.unwrap().path().to_str().unwrap().to_string();
+
+                dir_files.insert(path_string);
+            }
+
+            dir_trees.insert(verify_path.to_str().unwrap().to_string(), dir_files);
+        }
+
+        // need to check that file is accessible from directory scans, not just that
+        // we can read from them.
+        let dir_tree: &BTreeSet<String> =
+            dir_trees.get(&verify_path.to_str().unwrap().to_string()).unwrap();
+
+        assert!(dir_tree.contains(current_file_path.as_str()));
         
         println!("current file path {}", current_file_path);
         
