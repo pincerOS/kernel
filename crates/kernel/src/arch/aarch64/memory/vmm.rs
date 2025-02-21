@@ -1,6 +1,7 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::{
     arch::asm,
+    fmt::{Display, Formatter},
     ptr::{self, addr_of, NonNull},
 };
 
@@ -125,24 +126,44 @@ unsafe fn first_unused_virt_page(table: *mut KernelLeafTable) -> Option<usize> {
     None
 }
 
+#[derive(Debug)]
+pub enum MappingError {
+    HugePagePresent,
+    LeafTableSpotTaken,
+}
+
+impl Display for MappingError {
+    fn fmt(&self, f: &mut Formatter) -> core::fmt::Result {
+        match self {
+            Self::HugePagePresent => {
+                write!(f, "Huge page present where table descriptor is expected")
+            }
+            Self::LeafTableSpotTaken => write!(
+                f,
+                "The spot in the leaf table that is being mapped to is already taken"
+            ),
+        }
+    }
+}
+
 //This should ideally be made more generalizable in the future
 //TODO: give option of setting bits for the mapping
 //TODO: change return type to something more appropriate
 //Maybe add option to map huge pages here
-pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> bool {
-
+pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> Result<(), MappingError> {
     //TODO: stop using these constants
     let mut index_bits = 25 - 21; //mildly redundant
     let mut mask = (1 << index_bits) - 1;
     //level 2 table index is bits 29-21
     let mut table_index = (va >> 21) & mask;
 
-    let table_descriptor: TableDescriptor = unsafe { KERNEL_TRANSLATION_TABLE.0[table_index].table };
+    let table_descriptor: TableDescriptor =
+        unsafe { KERNEL_TRANSLATION_TABLE.0[table_index].table };
 
     if !table_descriptor.is_table_descriptor() {
         //huge page here instead of table descriptor
-        println!("Error: Huge page instead of table descriptor!");
-        return false;
+        //Error: Huge page instead of table descriptor
+        return Err(MappingError::HugePagePresent);
     }
 
     let mut index_add: usize = 0;
@@ -161,8 +182,8 @@ pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> bool {
     let entry = table_base.wrapping_add(table_index);
 
     if unsafe { entry.read() }.is_valid() {
-        println!("Error: spot in leaf table is taken!");
-        return false;
+        //Error: spot in leaf table is taken
+        return Err(MappingError::LeafTableSpotTaken);
     }
 
     let aligned_pa = (pa / PG_SZ) * PG_SZ;
@@ -177,7 +198,7 @@ pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> bool {
         }
     }
 
-    return true;
+    return Ok(());
 }
 
 /// not thread safe

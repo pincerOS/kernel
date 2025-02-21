@@ -4,14 +4,11 @@
 extern crate alloc;
 extern crate kernel;
 
-use alloc::alloc::{alloc, Layout};
 use alloc::boxed::Box;
-use core::ptr::addr_of;
 use kernel::*;
 
 const VIRTUAL_ADDR: usize = 0xFFFF_FFFF_FE00_0000 | 0x1E00000;
-
-const hello_chars: [u8; 5] = ['h' as u8, 'e' as u8, 'l' as u8, 'l' as u8, 'o' as u8];
+const HELLO_CHARS: [u8; 5] = ['h' as u8, 'e' as u8, 'l' as u8, 'l' as u8, 'o' as u8];
 
 #[repr(C, align(4096))]
 struct SomePage([u8; 4096]);
@@ -35,7 +32,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
 
     for i in 0..5 {
         unsafe {
-            (*page_ptr).0[i] = hello_chars[i];
+            (*page_ptr).0[i] = HELLO_CHARS[i];
         }
     }
 
@@ -44,19 +41,17 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         phys_addr, VIRTUAL_ADDR
     );
     unsafe {
-        let res: bool = crate::arch::memory::map_pa_to_va_kernel(phys_addr, VIRTUAL_ADDR);
-
-        if !res {
-            println!("Error case reached!");
+        match crate::arch::memory::map_pa_to_va_kernel(phys_addr, VIRTUAL_ADDR) {
+            Ok(()) => println!("Done mapping!"),
+            Err(e) => println!("Error: {}", e),
         }
     }
 
-    println!("Done mapping");
-    let mut virt_ptr: *const u8 = VIRTUAL_ADDR as *const u8;
+    let virt_ptr: *const u8 = VIRTUAL_ADDR as *const u8;
     let mut all_good = true;
 
     for i in 0..5 {
-        if unsafe { *(virt_ptr.wrapping_add(i)) != hello_chars[i] } {
+        if unsafe { *(virt_ptr.wrapping_add(i)) != HELLO_CHARS[i] } {
             all_good = false;
             break;
         }
