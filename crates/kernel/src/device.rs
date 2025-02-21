@@ -145,7 +145,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let gic = unsafe { gic::Gic400Driver::init(gic_base) };
         unsafe { gic::GIC.init(gic) };
 
-        unsafe { crate::exceptions::override_irq_handler(gic::gic_irq_handler) }
+        unsafe { crate::event::exceptions::override_irq_handler(gic::gic_irq_handler) }
 
         init_fns.push(Box::new(|| {
             gic::GIC.get().init_per_core();
@@ -162,7 +162,9 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let intc = bcm2836_intc::bcm2836_l1_intc_driver::new(intc_base);
         unsafe { bcm2836_intc::LOCAL_INTC.init(intc) };
 
-        unsafe { crate::exceptions::override_irq_handler(bcm2836_intc::exception_handler_irq) }
+        unsafe {
+            crate::event::exceptions::override_irq_handler(bcm2836_intc::exception_handler_irq)
+        }
     }
 
     {
@@ -221,7 +223,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
     unsafe { PER_CORE_INIT.init(init_fns) };
 }
 
-fn timer_handler(ctx: &mut crate::context::Context) {
+fn timer_handler(ctx: &mut crate::event::context::Context) {
     crate::device::system_timer::ARM_GENERIC_TIMERS.with_current(|timer| {
         timer.reset_timer();
     });

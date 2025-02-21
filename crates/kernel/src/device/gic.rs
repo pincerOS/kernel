@@ -36,7 +36,7 @@
 use core::arch::asm;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::context::Context;
+use crate::event::context::Context;
 use crate::sync::{SpinLockInner, UnsafeInit};
 
 const SPI_COUNT: usize = 192;

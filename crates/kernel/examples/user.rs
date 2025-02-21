@@ -6,6 +6,7 @@ extern crate kernel;
 
 use core::arch::asm;
 
+use event::{context, task, thread};
 use kernel::*;
 
 static INIT_CODE: &[u8] = kernel::util::include_bytes_align!(u32, "../../init/init.bin");

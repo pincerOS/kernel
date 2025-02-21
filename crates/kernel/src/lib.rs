@@ -8,18 +8,13 @@ extern crate alloc;
 pub mod device;
 
 pub mod arch;
-pub mod context;
 pub mod event;
-pub mod exceptions;
 pub mod heap;
 pub mod memory;
 pub mod ringbuffer;
 pub mod runtime;
-pub mod scheduler;
 pub mod sync;
 pub mod syscall;
-pub mod task;
-pub mod thread;
 pub mod util;
 
 use device::uart;
@@ -54,7 +49,7 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
 
     device::init_devices(&device_tree);
 
-    unsafe { context::CORES.init() };
+    unsafe { event::context::CORES.init() };
     println!("| initialized per-core data");
 
     println!("| starting other cores...");
@@ -69,7 +64,7 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     device::init_devices_per_core();
 
     println!("| creating initial thread");
-    thread::thread(move || {
+    event::thread::thread(move || {
         unsafe { kernel_main(device_tree) };
         shutdown();
     });

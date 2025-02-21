@@ -3,9 +3,9 @@ use core::cell::Cell;
 
 use alloc::boxed::Box;
 
-use crate::event::{run_event_loop, Event, SCHEDULER};
+use super::thread::Thread;
+use super::{run_event_loop, Event, SCHEDULER};
 use crate::sync::{disable_interrupts, restore_interrupts};
-use crate::thread::Thread;
 
 pub static CORES: AllCores = AllCores::new();
 
@@ -74,7 +74,7 @@ pub struct Context {
     pub spsr: usize,
 }
 
-type EventQueue = crate::scheduler::Queue<Event>;
+type EventQueue = super::scheduler::Queue<Event>;
 
 pub enum SwitchAction<'a> {
     Yield,
@@ -215,7 +215,7 @@ unsafe extern "C" fn context_switch_inner(
         }
     }
 
-    unsafe { crate::event::run_event_loop() };
+    unsafe { super::run_event_loop() };
 }
 
 #[repr(C)]

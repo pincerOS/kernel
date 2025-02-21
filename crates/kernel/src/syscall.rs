@@ -4,9 +4,9 @@ use core::task::Poll;
 
 use alloc::boxed::Box;
 
-use crate::context::{deschedule_thread, Context, DescheduleAction, CORES};
-use crate::exceptions::register_syscall_handler;
-use crate::{event, task, thread};
+use crate::event::context::{deschedule_thread, Context, DescheduleAction, CORES};
+use crate::event::exceptions::register_syscall_handler;
+use crate::event::{self, task, thread};
 
 pub mod channel;
 pub mod proc;

@@ -4,7 +4,7 @@ use core::num::NonZeroU32;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::context::Context;
+use crate::event::context::Context;
 use crate::ringbuffer;
 use crate::sync::SpinLock;
 

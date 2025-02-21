@@ -1,8 +1,8 @@
 use alloc::boxed::Box;
 use core::ptr::NonNull;
 
-use crate::context::{context_switch, Context, SwitchAction, CORES};
-use crate::event::{Event, SCHEDULER};
+use super::context::{context_switch, Context, SwitchAction, CORES};
+use super::{Event, SCHEDULER};
 
 pub fn yield_() {
     context_switch(SwitchAction::Yield);
@@ -165,7 +165,7 @@ impl Thread {
         assert!(old.is_none());
 
         // switch into the thread
-        unsafe { crate::context::restore_context(next_ctx) };
+        unsafe { super::context::restore_context(next_ctx) };
         // unreachable
     }
 }

@@ -3,8 +3,8 @@ use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::ptr::copy_nonoverlapping;
 
-use crate::context::{deschedule_thread, Context, DescheduleAction, CORES};
-use crate::{event, shutdown, thread};
+use crate::event::context::{deschedule_thread, Context, DescheduleAction, CORES};
+use crate::{event, event::thread, shutdown};
 
 pub unsafe fn sys_shutdown(_ctx: &mut Context) -> *mut Context {
     shutdown();

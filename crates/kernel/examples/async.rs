@@ -4,6 +4,7 @@
 extern crate alloc;
 extern crate kernel;
 
+use kernel::event::{task, thread};
 use kernel::*;
 
 #[no_mangle]

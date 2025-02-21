@@ -1,8 +1,8 @@
 use core::arch::{asm, global_asm};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use super::context::{deschedule_thread, Context, DescheduleAction, CORES};
 use crate::arch::halt;
-use crate::context::{deschedule_thread, Context, DescheduleAction, CORES};
 use crate::uart;
 
 // TODO:

@@ -12,7 +12,7 @@
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::context::Context;
+use crate::event::context::Context;
 use crate::sync::{UnsafeInit, Volatile};
 
 const ROUTING_CORE_MASK: u32 = 0b0111;

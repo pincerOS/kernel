@@ -1,14 +1,20 @@
+pub mod context;
+pub mod exceptions;
+pub mod scheduler;
+pub mod task;
+pub mod thread;
+
 use alloc::boxed::Box;
 
-use crate::context::{deschedule_thread, Context, DescheduleAction, CORES};
-use crate::scheduler::Scheduler;
+use context::{deschedule_thread, Context, DescheduleAction, CORES};
+use scheduler::Scheduler;
 
 pub static SCHEDULER: Scheduler<Event> = Scheduler::new();
 
 pub enum Event {
     Function(Box<dyn FnOnce() + Send + 'static>),
-    AsyncTask(crate::task::TaskId),
-    ScheduleThread(Box<crate::thread::Thread>),
+    AsyncTask(task::TaskId),
+    ScheduleThread(Box<thread::Thread>),
 }
 
 pub fn schedule<F>(f: F)
@@ -30,16 +36,16 @@ pub unsafe extern "C" fn run_event_loop() -> ! {
                 unsafe { thread.enter_thread() };
             }
             Event::AsyncTask(task_id) => {
-                let waker = crate::task::create_waker(task_id);
+                let waker = task::create_waker(task_id);
                 let mut context = core::task::Context::from_waker(&waker);
 
-                if let Some(mut task) = crate::task::TASKS.take_task(task_id) {
+                if let Some(mut task) = task::TASKS.take_task(task_id) {
                     match task.poll(&mut context) {
                         core::task::Poll::Ready(()) => {
-                            crate::task::TASKS.remove_task(task_id);
+                            task::TASKS.remove_task(task_id);
                         }
                         core::task::Poll::Pending => {
-                            let woken = crate::task::TASKS.return_task(task_id, task);
+                            let woken = task::TASKS.return_task(task_id, task);
                             if woken {
                                 SCHEDULER.add_task(Event::AsyncTask(task_id));
                             }

@@ -1,11 +1,12 @@
 use core::future::Future;
 
-use crate::context::{context_switch, SwitchAction};
-use crate::event::Event;
+use crate::event::context::{context_switch, SwitchAction};
+use crate::event::SCHEDULER;
+use crate::event::{scheduler, Event};
 
 use super::lock::SpinLockGuard;
 
-type EventQueue = crate::scheduler::Queue<Event>;
+type EventQueue = scheduler::Queue<Event>;
 
 pub struct CondVar {
     queue: EventQueue,
@@ -19,11 +20,11 @@ impl CondVar {
     }
     pub fn notify_one(&self) {
         if let Some(t) = self.queue.pop() {
-            crate::event::SCHEDULER.add_task(t);
+            SCHEDULER.add_task(t);
         }
     }
     pub fn notify_all(&self) {
-        crate::event::SCHEDULER.add_all(&self.queue);
+        SCHEDULER.add_all(&self.queue);
     }
     pub fn wait<'a, T>(&self, guard: SpinLockGuard<'a, T>) -> SpinLockGuard<'a, T> {
         let lock = guard.lock;
@@ -97,7 +98,7 @@ impl<T> Future for WaitFuture<'_, '_, T> {
             Some(guard) => {
                 // TODO: this is a hack that only works on our executor,
                 // and will break other async libraries
-                let task = crate::task::task_id_from_waker(ctx.waker()).unwrap();
+                let task = crate::event::task::task_id_from_waker(ctx.waker()).unwrap();
                 self.this.queue.add(Event::AsyncTask(task));
                 drop(guard);
                 core::task::Poll::Pending
