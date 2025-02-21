@@ -64,7 +64,7 @@ pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
     //    - return to running the event loop
     // - otherwise, do nothing
 
-    let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
+    let thread = CORES.with_current(|core| core.thread.take());
 
     if let Some(mut thread) = thread {
         let stacks = &raw const crate::arch::boot::STACKS;
@@ -76,7 +76,7 @@ pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
         }
 
         unsafe { thread.save_context(ctx.into()) };
-        unsafe { deschedule_thread(core_sp, Some(thread), DescheduleAction::Yield) };
+        unsafe { deschedule_thread(DescheduleAction::Yield, Some(thread)) };
     } else {
         ctx
     }

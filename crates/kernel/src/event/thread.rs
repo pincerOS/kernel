@@ -4,15 +4,6 @@ use core::ptr::NonNull;
 use super::context::{context_switch, Context, SwitchAction, CORES};
 use super::{Event, SCHEDULER};
 
-pub fn yield_() {
-    context_switch(SwitchAction::Yield);
-}
-
-pub fn stop() -> ! {
-    context_switch(SwitchAction::FreeThread);
-    unreachable!()
-}
-
 pub struct Thread {
     pub last_context: NonNull<Context>,
     pub stack: NonNull<[u128]>,
@@ -140,7 +131,7 @@ impl Thread {
         if let Some(user) = &self.user_regs {
             let ctx = unsafe { &mut *next_ctx };
 
-            // TODO: proper tlb flush stuff
+            // TODO: proper tlb flush stuff for switching address spaces
             unsafe {
                 core::arch::asm!(
                     "msr TTBR0_EL1, {0}",
@@ -181,6 +172,7 @@ impl Drop for Thread {
 trait Callback: FnOnce() {
     unsafe fn call(&mut self);
 }
+
 impl<F: FnOnce()> Callback for F {
     unsafe fn call(&mut self) {
         unsafe { core::ptr::read(self)() }
@@ -212,4 +204,13 @@ extern "C" fn init_thread() {
     unsafe { (*func.as_ptr()).call() };
 
     stop();
+}
+
+pub fn yield_() {
+    context_switch(SwitchAction::Yield);
+}
+
+pub fn stop() -> ! {
+    context_switch(SwitchAction::FreeThread);
+    unreachable!()
 }

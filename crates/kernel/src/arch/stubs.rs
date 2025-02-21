@@ -13,7 +13,9 @@ pub fn core_id() -> u32 {
 
 pub unsafe fn wfe() {}
 pub unsafe fn sev() {}
-pub unsafe fn yield_() {}
+pub unsafe fn yield_() {
+    core::hint::spin_loop();
+}
 pub unsafe fn udf() -> ! {
     loop {}
 }

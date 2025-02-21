@@ -34,10 +34,9 @@
 //TODO: Handling FIQs?
 
 use core::arch::asm;
-use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::event::context::Context;
-use crate::sync::{SpinLockInner, UnsafeInit};
+use crate::sync::{HandlerTableInner, SpinLockInner, UnsafeInit};
 
 const SPI_COUNT: usize = 192;
 const IRQ_COUNT: usize = SPI_COUNT + 32;
@@ -177,20 +176,19 @@ pub unsafe extern "C" fn gic_irq_handler(
     ctx
 }
 
-pub struct IsrTable([AtomicUsize; IRQ_COUNT]);
+type Isr = fn(&mut Context);
+
+pub struct IsrTable(HandlerTableInner<IRQ_COUNT>);
 
 impl IsrTable {
-    fn new(fallback: fn(&mut Context)) -> Self {
-        IsrTable(core::array::from_fn(|_| {
-            AtomicUsize::new(fallback as usize)
-        }))
+    pub fn new(fallback: Isr) -> Self {
+        Self(HandlerTableInner::new(fallback as usize))
     }
-    pub fn get(&self, irq: usize) -> fn(&mut Context) {
-        let func = self.0[irq % IRQ_COUNT].load(Ordering::Relaxed);
-        unsafe { core::mem::transmute(func) }
+    pub fn get(&self, num: usize) -> Isr {
+        unsafe { core::mem::transmute::<usize, _>(self.0.get(num)) }
     }
-    pub fn set(&self, irq: usize, func: fn(&mut Context)) {
-        self.0[irq].store(func as usize, Ordering::SeqCst);
+    pub fn set(&self, num: usize, func: Isr) {
+        self.0.set(num, func as usize);
     }
 }
 

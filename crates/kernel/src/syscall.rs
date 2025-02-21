@@ -59,8 +59,7 @@ where
             // The handler yielded; suspend the current thread, and set
             // up the future to reschedule the thread when it finishes.
 
-            let (core_sp, thread) =
-                CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
+            let thread = CORES.with_current(|core| core.thread.take());
             let mut thread = thread.expect("usermode syscall without active thread");
             unsafe { thread.save_context(ctx.into()) };
 
@@ -73,7 +72,7 @@ where
             }
 
             // Switch back to the event loop.
-            unsafe { deschedule_thread(core_sp, None, DescheduleAction::FreeThread) }
+            unsafe { deschedule_thread(DescheduleAction::FreeThread, None) }
         }
     }
 }

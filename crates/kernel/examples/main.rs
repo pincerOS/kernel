@@ -4,8 +4,8 @@
 extern crate alloc;
 extern crate kernel;
 
-use kernel::*;
 use kernel::event::thread;
+use kernel::*;
 
 #[no_mangle]
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {

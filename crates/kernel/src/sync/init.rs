@@ -19,9 +19,7 @@ impl<T> UnsafeInit<T> {
     /// - Must be called before any uses of the value
     /// - Must be called exactly once
     pub unsafe fn init(&self, value: T) {
-        unsafe {
-            (*self.inner.get()).write(value);
-        }
+        unsafe { (*self.inner.get()).write(value) };
         assert!(!self.initialized.swap(true, Ordering::SeqCst));
     }
     #[track_caller]
@@ -40,9 +38,7 @@ impl<T> UnsafeInit<T> {
 impl<T> Drop for UnsafeInit<T> {
     fn drop(&mut self) {
         if self.initialized.load(Ordering::SeqCst) {
-            unsafe {
-                self.inner.get_mut().assume_init_drop();
-            }
+            unsafe { self.inner.get_mut().assume_init_drop() };
         }
     }
 }

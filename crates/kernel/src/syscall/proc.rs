@@ -11,12 +11,10 @@ pub unsafe fn sys_shutdown(_ctx: &mut Context) -> *mut Context {
 }
 
 pub unsafe fn sys_exit(ctx: &mut Context) -> *mut Context {
-    let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
+    let thread = CORES.with_current(|core| core.thread.take());
     let mut thread = thread.expect("usermode syscall without active thread");
     unsafe { thread.save_context(ctx.into()) };
-
-    let action = DescheduleAction::FreeThread;
-    unsafe { deschedule_thread(core_sp, Some(thread), action) }
+    unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
 }
 
 pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {

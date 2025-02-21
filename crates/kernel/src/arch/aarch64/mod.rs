@@ -42,7 +42,8 @@ pub unsafe fn wfe() {
     unsafe { asm!("wfe") };
 }
 pub unsafe fn yield_() {
-    unsafe { asm!("yield") };
+    // isb sy
+    core::hint::spin_loop();
 }
 pub unsafe fn udf() -> ! {
     unsafe { asm!("udf #0", options(noreturn)) };

@@ -82,10 +82,10 @@ pub enum SwitchAction<'a> {
     QueueAddUnlock(&'a EventQueue, &'a crate::sync::SpinLockInner),
 }
 
-pub fn context_switch(mut action: SwitchAction) {
-    let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
-    let thread = thread.expect("attempt to context switch from an event");
-    unsafe { asm_context_switch(Some(thread), Some(&mut action), core_sp) };
+#[repr(C)]
+pub enum DescheduleAction {
+    Yield,
+    FreeThread,
 }
 
 #[allow(improper_ctypes)]
@@ -95,6 +95,11 @@ extern "C" {
         action: Option<&mut SwitchAction>,
         core_sp: usize,
     );
+    pub fn asm_deschedule_thread(
+        thread: Option<Box<Thread>>,
+        action: DescheduleAction,
+        core_sp: usize,
+    ) -> !;
     pub fn switch_to_helper(
         src_thread: Option<Box<Thread>>,
         action: Option<&mut SwitchAction>,
@@ -151,7 +156,7 @@ asm_context_switch:
 
 switch_to_helper:
     mov sp, x2
-    bl context_switch_inner
+    bl context_switch_callback
 
     // NOTE: fall-through
 
@@ -180,12 +185,18 @@ restore_context:
     ldp x0, x1, [x0, #0x00]
 
     eret
+
+asm_deschedule_thread:
+    mov sp, x2
+    bl deschedule_thread_callback
+    udf #0
+
 "#,
     thread_ctx_offset = const core::mem::offset_of!(Thread, last_context),
 );
 
 #[no_mangle]
-unsafe extern "C" fn context_switch_inner(
+unsafe extern "C" fn context_switch_callback(
     thread: Option<Box<Thread>>,
     action: Option<&mut SwitchAction>,
 ) -> *mut Context {
@@ -193,6 +204,22 @@ unsafe extern "C" fn context_switch_inner(
         .map(|ptr| core::mem::replace(ptr, SwitchAction::Yield))
         .unwrap_or(SwitchAction::Yield);
 
+    context_switch_inner(thread, action)
+}
+
+#[no_mangle]
+unsafe extern "C" fn deschedule_thread_callback(
+    thread: Option<Box<Thread>>,
+    action: DescheduleAction,
+) -> *mut Context {
+    let action = match action {
+        DescheduleAction::Yield => SwitchAction::Yield,
+        DescheduleAction::FreeThread => SwitchAction::FreeThread,
+    };
+    context_switch_inner(thread, action)
+}
+
+fn context_switch_inner(thread: Option<Box<Thread>>, action: SwitchAction<'_>) -> ! {
     if let Some(thread) = thread {
         match action {
             SwitchAction::Yield => SCHEDULER.add_task(Event::ScheduleThread(thread)),
@@ -215,46 +242,17 @@ unsafe extern "C" fn context_switch_inner(
         }
     }
 
-    unsafe { super::run_event_loop() };
-}
-
-#[repr(C)]
-pub enum DescheduleAction {
-    Yield,
-    FreeThread,
-}
-
-#[allow(improper_ctypes)]
-extern "C" {
-    pub fn deschedule_thread(
-        core_sp: usize,
-        thread: Option<Box<Thread>>,
-        action: DescheduleAction,
-    ) -> !;
-}
-
-core::arch::global_asm!(
-    "
-.global deschedule_thread
-deschedule_thread:
-    mov sp, x0
-    bl deschedule_thread_inner
-    udf #0
-"
-);
-
-#[no_mangle]
-unsafe extern "C" fn deschedule_thread_inner(
-    _core_sp: usize,
-    thread: Option<Box<Thread>>,
-    action: DescheduleAction,
-) -> ! {
     unsafe { crate::sync::enable_interrupts() };
-    if let Some(thread) = thread {
-        match action {
-            DescheduleAction::Yield => SCHEDULER.add_task(Event::ScheduleThread(thread)),
-            DescheduleAction::FreeThread => drop(thread),
-        }
-    }
-    unsafe { run_event_loop() }
+    unsafe { run_event_loop() };
+}
+
+pub fn context_switch(mut action: SwitchAction) {
+    let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
+    let thread = thread.expect("attempt to context switch from an event");
+    unsafe { asm_context_switch(Some(thread), Some(&mut action), core_sp) }
+}
+
+pub unsafe fn deschedule_thread(action: DescheduleAction, thread: Option<Box<Thread>>) -> ! {
+    let core_sp = CORES.with_current(|core| core.core_sp.get());
+    unsafe { asm_deschedule_thread(thread, action, core_sp) }
 }
