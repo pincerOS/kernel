@@ -46,18 +46,488 @@
  * internal reset.
  */
 
+
+use crate::device::gic;
+use crate::context::Context;
 // mod dwc_otgreg;
 use crate::device::dwc_otgreg::*;
 use crate::device::usb::*;
+use crate::shutdown;
+use crate::sync::{SpinLockInner, UnsafeInit};
 use super::system_timer::{self, SYSTEM_TIMER};
+use core::ptr;
+use core::ptr::read;
+use alloc::boxed::Box;
+
 pub static mut dwc_otg_driver: DWC_OTG = DWC_OTG { base_addr: 0 };
+pub static mut dwc_otg_sc: *mut dwc_otg_softc = core::ptr::null_mut();
+
+pub fn initialize_dwc_otg_sc() {
+    let softc = Box::new(dwc_otg_softc::new());
+    unsafe {
+        dwc_otg_sc = Box::into_raw(softc); // Convert Box to raw pointer
+    }
+}
+
+pub fn register_dwc_otg_interrupt_handler() {
+    gic::GIC.get().register_isr(105, dwc_otg_interrupt_handler);
+}
+
+fn dwc_otg_interrupt_handler(ctx: &mut Context) {
+    let retval = dwc_otg_filter_interrupt(&ctx);
+    println!("| retval: 0x{:08x}", retval);
+    if retval == FILTER_SCHEDULE_THREAD {
+        dwc_otg_interrupt(ctx);
+    }
+}
+
+//TODO: This should run at high priority, even overriding disabled interrupts
+fn dwc_otg_filter_interrupt(_ctx: &Context) -> u32 {
+    let mut retval = FILTER_HANDLED;
+    let mut sc = unsafe { &mut *dwc_otg_sc };
+    //USB_BUS_SPIN_LOCK(&sc->sc_bus);
+
+    /* read and clear interrupt status */
+    let status = read_volatile(GINTSTS);
+    /* clear interrupts we are handling here */
+    write_volatile(GINTSTS, status & !DWC_OTG_MSK_GINT_THREAD_IRQ);
+
+    /* check for USB state change interrupts */
+    if (status & DWC_OTG_MSK_GINT_THREAD_IRQ) != 0 {
+        retval = FILTER_SCHEDULE_THREAD;
+    }
+
+    /* clear FIFO empty interrupts */
+    if (status & sc.sc_irq_mask & (GINTSTS_PTXFEMP | GINTSTS_NPTXFEMP) != 0) {
+        sc.sc_irq_mask &= !(GINTSTS_PTXFEMP | GINTSTS_NPTXFEMP);
+        write_volatile(GINTMSK, sc.sc_irq_mask);
+    }
+    /* clear all IN endpoint interrupts */
+    if status & GINTSTS_IEPINT != 0 {
+        for x in 0..sc.sc_dev_in_ep_max {
+            let temp = read_volatile(DIEPINT(x as u32) as usize);
+            if temp != 0 {
+                write_volatile(DIEPINT(x as u32) as usize, temp);
+            }
+        }
+    }
+    /* poll FIFOs, if any */
+    dwc_otg_interrupt_poll_locked(sc);
+
+    if sc.sc_xfer_complete != 0 {
+        retval = FILTER_SCHEDULE_THREAD;
+    }
+
+    // USB_BUS_SPIN_UNLOCK(&sc->sc_bus);
+    return retval;
+}
+
+fn dwc_otg_suspend_irq(sc: &mut dwc_otg_softc)
+{
+	if sc.sc_flags.status_suspend == 0 {
+		/* update status bits */
+		sc.sc_flags.status_suspend = 1;
+		sc.sc_flags.change_suspend = 1;
+
+		if (sc.sc_flags.status_device_mode) != 0 {
+			/*
+			 * Disable suspend interrupt and enable resume
+			 * interrupt:
+			 */
+			sc.sc_irq_mask &= !GINTMSK_USBSUSPMSK;
+			sc.sc_irq_mask |= GINTMSK_WKUPINTMSK;
+			write_volatile(GINTMSK, sc.sc_irq_mask);
+		}
+
+		/* complete root HUB interrupt endpoint */
+		dwc_otg_root_intr(sc);
+	}
+}
+
+fn dwc_otg_resume_irq(sc: &mut dwc_otg_softc)
+{
+	if (sc.sc_flags.status_suspend != 0) {
+		/* update status bits */
+		sc.sc_flags.status_suspend = 0;
+		sc.sc_flags.change_suspend = 1;
+
+		if (sc.sc_flags.status_device_mode != 0) {
+			/*
+			 * Disable resume interrupt and enable suspend
+			 * interrupt:
+			 */
+			sc.sc_irq_mask &= !GINTMSK_WKUPINTMSK;
+			sc.sc_irq_mask |= GINTMSK_USBSUSPMSK;
+			write_volatile(GINTMSK, sc.sc_irq_mask);
+		}
+
+		/* complete root HUB interrupt endpoint */
+		dwc_otg_root_intr(sc);
+	}
+}
+
+//TODO: Scary message: https://elixir.bootlin.com/freebsd/v14.2/source/sys/dev/usb/controller/dwc_otg.c#L465
+fn dwc_otg_update_host_frame_interval(sc: &mut dwc_otg_softc) {
+
+	/* setup HOST frame interval register, based on existing value */
+	let mut temp = read_volatile(HFIR) & HFIR_FRINT_MASK;
+	if (temp >= 10000) {
+		temp /= 1000;
+    }
+	else {
+		temp /= 125;
+    }
+
+	/* figure out nearest X-tal value */
+	if (temp >= 54) {
+		temp = 60;	/* MHz */
+    }
+	else if (temp >= 39) {
+		temp = 48;	/* MHz */
+    }
+	else {
+		temp = 30;	/* MHz */
+    }
+
+	if (sc.sc_flags.status_high_speed) != 0 {
+		temp *= 125;
+    }
+	else {
+		temp *= 1000;
+    }
+
+    println!("| HFIR=0x{:08x}", temp);
+
+	write_volatile(HFIR, temp);
+}
+
+
+//Runs in regular / realtime thread context
+fn dwc_otg_interrupt(_ctx: &mut Context) {
+    let mut sc = unsafe { &mut *dwc_otg_sc };
+
+    // USB_BUS_LOCK(&sc->sc_bus);
+	// USB_BUS_SPIN_LOCK(&sc->sc_bus); Why double lock?
+
+    /* read and clear interrupt status */
+    let status = read_volatile(GINTSTS);
+    /* clear interrupts we are handling here */
+	write_volatile(GINTSTS, status & DWC_OTG_MSK_GINT_THREAD_IRQ);
+    println!("| GINTSTS=0x{:08x} HAINT=0x{:08x} HFNUM=0x{:08x}", status, read_volatile(HAINT), read_volatile(HFNUM));
+
+	if (status & GINTSTS_USBRST) != 0 {
+		/* set correct state */
+		sc.sc_flags.status_device_mode = 1;
+		sc.sc_flags.status_bus_reset = 0;
+		sc.sc_flags.status_suspend = 0;
+		sc.sc_flags.change_suspend = 0;
+		sc.sc_flags.change_connect = 1;
+
+		/* Disable SOF interrupt */
+		sc.sc_irq_mask &= !GINTMSK_SOFMSK;
+		write_volatile( GINTMSK, sc.sc_irq_mask);
+
+		/* complete root HUB interrupt endpoint */
+		dwc_otg_root_intr(sc);
+	}
+
+    /* check for any bus state change interrupts */
+	if (status & GINTSTS_ENUMDONE) != 0 {
+        println!("| end of reset");
+
+		/* set correct state */
+		sc.sc_flags.status_device_mode = 1;
+		sc.sc_flags.status_bus_reset = 1;
+		sc.sc_flags.status_suspend = 0;
+		sc.sc_flags.change_suspend = 0;
+		sc.sc_flags.change_connect = 1;
+		sc.sc_flags.status_low_speed = 0;
+		sc.sc_flags.port_enabled = 1;
+
+		/* reset FIFOs */
+        println!("| dwc_otg_interrupt: this should not run...");
+        shutdown();
+		// (void) dwc_otg_init_fifo(sc, DWC_MODE_DEVICE);
+
+		/* reset function address */
+		// dwc_otg_set_address(sc, 0);
+
+		// /* figure out enumeration speed */
+		// temp = DWC_OTG_READ_4(sc, DOTG_DSTS);
+		// if (DSTS_ENUMSPD_GET(temp) == DSTS_ENUMSPD_HI)
+		// 	sc->sc_flags.status_high_speed = 1;
+		// else
+		// 	sc->sc_flags.status_high_speed = 0;
+
+		// /*
+		//  * Disable resume and SOF interrupt, and enable
+		//  * suspend and RX frame interrupt:
+		//  */
+		// sc->sc_irq_mask &= ~(GINTMSK_WKUPINTMSK | GINTMSK_SOFMSK);
+		// sc->sc_irq_mask |= GINTMSK_USBSUSPMSK;
+		// DWC_OTG_WRITE_4(sc, DOTG_GINTMSK, sc->sc_irq_mask);
+
+		/* complete root HUB interrupt endpoint */
+		// dwc_otg_root_intr(sc);
+	}
+
+    if (status & GINTSTS_PRTINT) != 0 {
+
+		let hprt = read_volatile(HPRT);
+
+		/* clear change bits */
+        write_volatile(HPRT, (hprt & (HPRT_PRTPWR | HPRT_PRTENCHNG | HPRT_PRTCONNDET | HPRT_PRTOVRCURRCHNG)) | sc.sc_hprt_val);
+
+        println!("| GINTSTS=0x{:08x}, HPRT=0x{:08x}", status, hprt);
+
+		sc.sc_flags.status_device_mode = 0;
+
+		if (hprt & HPRT_PRTCONNSTS) != 0 {
+			sc.sc_flags.status_bus_reset = 1;
+        }
+		else {
+			sc.sc_flags.status_bus_reset = 0;
+        }
+
+		if ((hprt & HPRT_PRTENCHNG) != 0) && ((hprt & HPRT_PRTENA) == 0) {
+			sc.sc_flags.change_enabled = 1;
+        }
+
+		if (hprt & HPRT_PRTENA) != 0 {
+			sc.sc_flags.port_enabled = 1;
+        } else {
+			sc.sc_flags.port_enabled = 0;
+        }
+
+		if (hprt & HPRT_PRTOVRCURRCHNG) != 0 {
+			sc.sc_flags.change_over_current = 1;
+        }
+
+		if (hprt & HPRT_PRTOVRCURRACT) != 0 {
+			sc.sc_flags.port_over_current = 1;
+        }
+		else {
+			sc.sc_flags.port_over_current = 0;
+        }
+
+		if (hprt & HPRT_PRTPWR) != 0 {
+			sc.sc_flags.port_powered = 1;
+        }
+		else {
+			sc.sc_flags.port_powered = 0;
+        }
+
+		if (((hprt & HPRT_PRTSPD_MASK) >> HPRT_PRTSPD_SHIFT) == HPRT_PRTSPD_LOW) {
+			sc.sc_flags.status_low_speed = 1;
+        }
+		else {
+			sc.sc_flags.status_low_speed = 0;
+        }
+
+		if (((hprt & HPRT_PRTSPD_MASK) >> HPRT_PRTSPD_SHIFT) == HPRT_PRTSPD_HIGH) {
+            sc.sc_flags.status_high_speed = 1;
+        }
+		else {
+			sc.sc_flags.status_high_speed = 0;
+        }
+
+		if (hprt & HPRT_PRTCONNDET) != 0 {
+			sc.sc_flags.change_connect = 1;
+        }
+
+		if (hprt & HPRT_PRTSUSP) != 0 {
+			dwc_otg_suspend_irq(sc);
+        }
+		else {
+			dwc_otg_resume_irq(sc);
+        }
+
+		/* complete root HUB interrupt endpoint */
+		dwc_otg_root_intr(sc);
+
+		/* update host frame interval */
+		dwc_otg_update_host_frame_interval(sc);
+	}
+
+    /*
+	 * If resume and suspend is set at the same time we interpret
+	 * that like RESUME. Resume is set when there is at least 3
+	 * milliseconds of inactivity on the USB BUS.
+	 */
+	if (status & GINTSTS_WKUPINT) != 0 {
+        println!("| resume interrupt");
+
+		dwc_otg_resume_irq(sc);
+
+	} else if (status & GINTSTS_USBSUSP) != 0 {
+        println!("| suspend interrupt");
+		dwc_otg_suspend_irq(sc);
+	}
+	/* check VBUS */
+	if status & (GINTSTS_USBSUSP | GINTSTS_USBRST | GINTMSK_OTGINTMSK | GINTSTS_SESSREQINT) != 0 {
+		let temp = read_volatile(GOTGCTL);
+
+        println!("| GOTGCTL=0x{:08x}", temp);
+
+        let mut is_on = 0;
+        if temp & (GOTGCTL_ASESVLD | GOTGCTL_BSESVLD) != 0 {
+            is_on = 1;
+        }
+		dwc_otg_vbus_interrupt(sc,is_on);
+	}
+
+	if sc.sc_xfer_complete != 0 {
+		sc.sc_xfer_complete = 0;
+
+		/* complete FIFOs, if any */
+		dwc_otg_interrupt_complete_locked(sc);
+	}
+	// USB_BUS_SPIN_UNLOCK(&sc->sc_bus);
+	// USB_BUS_UNLOCK(&sc->sc_bus);
+}
+
+//TODO: TODO: Implement
+fn dwc_otg_update_host_transfer_schedule_locked(sc: &mut dwc_otg_softc) -> u8 {
+    0
+}
+
+//TODO: TODO: Implement
+fn dwc_otg_xfer_do_fifo(sc: &mut dwc_otg_softc) {
+
+}
+
+fn dwc_otg_common_rx_ack(sc: &mut dwc_otg_softc) {
+    println!("| RX status cleared");
+
+    /* enable RX FIFO level interrupt */
+	sc.sc_irq_mask |= GINTMSK_RXFLVLMSK;
+	write_volatile(GINTMSK, sc.sc_irq_mask);
+
+	if sc.sc_current_rx_bytes != 0 {
+		/* need to dump remaining data */
+
+        println!("| dwc_otg_common_rx_ack: not implemented");
+        //TODO: TODO:
+		// bus_space_read_region_4(sc->sc_io_tag, sc->sc_io_hdl,
+		//     sc->sc_current_rx_fifo, sc->sc_bounce_buffer,
+		//     sc->sc_current_rx_bytes / 4);
+		/* clear number of active bytes to receive */
+		sc.sc_current_rx_bytes = 0;
+	}
+	/* clear cached status */
+	sc.sc_last_rx_status = 0;
+}
+
+//TODO: TODO: Implement
+fn dwc_otg_interrupt_complete_locked(sc: &mut dwc_otg_softc) {
+
+}
 
 fn dwc_otg_interrupt_poll_locked(sc: &mut dwc_otg_softc) {
 
+    let mut got_rx_status = 0;
+    if sc.sc_flags.status_device_mode == 0 {
+        dwc_otg_update_host_transfer_schedule_locked(sc);
+    }
 
-    let haint = read_volatile(HAINT);
-    println!("| haint: 0x{:08x}", haint);
-    //TODO: TODO: Implement
+
+    for _ in 0..16 {
+        /* get all host channel interrupts */
+        let mut haint = read_volatile(HAINT);
+
+        while haint != 0 {
+            let x = haint.trailing_zeros() as usize; // Find first set bit (0-based index)
+            
+            if x >= sc.sc_host_ch_max as usize {
+                break;
+            }
+    
+            let mut temp = read_volatile(HCINT(x));
+            write_volatile( HCINT(x), temp);
+            temp &= !HCINT_SOFTWARE_ONLY; // Mask out software-only interrupt flags
+    
+            sc.sc_chan_state[x].hcint |= temp;
+            haint &= !(1 << x);
+        }
+
+        if sc.sc_last_rx_status == 0 {
+            let temp = read_volatile(GINTSTS);
+            if temp & GINTSTS_RXFLVL != 0 {
+                sc.sc_last_rx_status = read_volatile(GRXSTSP);
+            }
+
+            if sc.sc_last_rx_status != 0 {
+                let temp = sc.sc_last_rx_status & GRXSTSRD_PKTSTS_MASK;
+
+                /* non-data messages we simply skip */
+                if temp != GRXSTSRD_STP_DATA && temp != GRXSTSRD_STP_COMPLETE && temp != GRXSTSRD_OUT_DATA {
+                    /* check for halted channel */
+                    if temp == GRXSTSRH_HALTED {
+                        let chnum = GRXSTSRD_CHNUM_GET(sc.sc_last_rx_status);
+                        sc.sc_chan_state[chnum as usize].wait_halted = 0;
+                        println!("| Channel {} halt completed", chnum);
+                    }
+                    /* store bytes and FIFO offset */
+                    sc.sc_current_rx_bytes = 0;
+                    sc.sc_current_rx_fifo = 0;
+
+                    /* acknowledge status */
+                    dwc_otg_common_rx_ack(sc);
+                    continue;
+                }
+
+                let temp = GRXSTSRD_BCNT_GET(sc.sc_last_rx_status);
+                let ep_no = GRXSTSRD_CHNUM_GET(sc.sc_last_rx_status);
+    
+                /* store bytes and FIFO offset */
+                sc.sc_current_rx_bytes = (temp as u16 + 3) & !3;
+                sc.sc_current_rx_fifo = DOTG_DFIFO(ep_no) as u16;
+                println!("| Reading {} bytes from ep {}", temp, ep_no);
+
+                /* check if we should dump the data */
+                if (sc.sc_active_rx_ep & (1 << ep_no)) == 0 {
+                    dwc_otg_common_rx_ack(sc);
+                    continue;
+                }
+
+                got_rx_status = 1;
+                // DPRINTFN(5, "RX status = 0x%08x: ch=%d pid=%d bytes=%d sts=%d\n",
+			    // sc->sc_last_rx_status, ep_no,
+			    // (sc->sc_last_rx_status >> 15) & 3,
+			    // GRXSTSRD_BCNT_GET(sc->sc_last_rx_status),
+			    // (sc->sc_last_rx_status >> 17) & 15);
+                println!("| RX status = 0x{:08x}: ch={} pid={} bytes={} sts={}", sc.sc_last_rx_status, ep_no, (sc.sc_last_rx_status >> 15) & 3, GRXSTSRD_BCNT_GET(sc.sc_last_rx_status), (sc.sc_last_rx_status >> 17) & 15);
+            } else {
+                got_rx_status = 0;
+            }
+        } else {
+            let ep_no = GRXSTSRD_CHNUM_GET(sc.sc_last_rx_status);
+            /* check if we should dump the data */
+            if (sc.sc_active_rx_ep & (1 << ep_no)) == 0 {
+                dwc_otg_common_rx_ack(sc);
+                continue;
+            }
+
+            got_rx_status = 1;
+        }
+        /* execute FIFOs */
+        //TODO: TODO: Implement
+        // TAILQ_FOREACH(xfer, &sc->sc_bus.intr_q.head, wait_entry)
+		// dwc_otg_xfer_do_fifo(sc, xfer);
+
+        if got_rx_status == 1 {
+            /* check if data was consumed */
+            if sc.sc_last_rx_status == 0 {
+                continue;
+            }
+    
+            /* disable RX FIFO level interrupt */
+            sc.sc_irq_mask &= !GINTMSK_RXFLVLMSK;
+            write_volatile(GINTMSK, sc.sc_irq_mask);
+        }
+
+        break;
+    }
 
 }
 
@@ -70,12 +540,11 @@ fn dwc_otg_do_poll(sc: &mut dwc_otg_softc) {
 
 	// USB_BUS_LOCK(&sc->sc_bus);
 	// USB_BUS_SPIN_LOCK(&sc->sc_bus);
-	// dwc_otg_interrupt_poll_locked(sc);
-	// dwc_otg_interrupt_complete_locked(sc);
+	dwc_otg_interrupt_poll_locked(sc);
+	dwc_otg_interrupt_complete_locked(sc);
 	// USB_BUS_SPIN_UNLOCK(&sc->sc_bus);
 	// USB_BUS_UNLOCK(&sc->sc_bus);
 
-    dwc_otg_interrupt_poll_locked(sc);
 }
 
 fn dwc_otg_tx_fifo_reset(value: u32) {
@@ -166,13 +635,27 @@ fn dwc_otg_root_intr(sc: &mut dwc_otg_softc) {
 fn dwc_otg_vbus_interrupt(sc: &mut dwc_otg_softc, is_on: u8) {
     println!("| vbus = {}", is_on);
 
-    if sc.sc_flags.status_vbus == 0 {
-        sc.sc_flags.status_vbus = 1;
+    if ((is_on != 0) || (sc.sc_mode == DWC_MODE_HOST)) {
+		if (sc.sc_flags.status_vbus == 0) {
+			sc.sc_flags.status_vbus = 1;
 
-        /* complete root HUB interrupt endpoint */
+			/* complete root HUB interrupt endpoint */
 
-        dwc_otg_root_intr(sc);
-    }
+			dwc_otg_root_intr(sc);
+		}
+	} else {
+		if (sc.sc_flags.status_vbus == 0) {
+			sc.sc_flags.status_vbus = 0;
+			sc.sc_flags.status_bus_reset = 0;
+			sc.sc_flags.status_suspend = 0;
+			sc.sc_flags.change_suspend = 0;
+			sc.sc_flags.change_connect = 1;
+
+			/* complete root HUB interrupt endpoint */
+
+			dwc_otg_root_intr(sc);
+		}
+	}
 }
 
 
@@ -192,6 +675,8 @@ pub fn dwc_otg_init(sc: &mut dwc_otg_softc) -> u32 {
     // err = bus_setup_intr(sc->sc_bus.parent, sc->sc_irq_res,
 	//     INTR_TYPE_TTY | INTR_MPSAFE, &dwc_otg_filter_interrupt,
 	//     &dwc_otg_interrupt, sc, &sc->sc_intr_hdl);
+
+    register_dwc_otg_interrupt_handler();
 
     // usb_callout_init_mtx(&sc->sc_timer,
 	//     &sc->sc_bus.bus_mtx, 0);
@@ -363,6 +848,30 @@ struct dwc_otg_flags {
     port_over_current: u8,
     d_pulled_up: u8,
 }
+ 
+impl dwc_otg_flags {
+    pub const fn new() -> Self {
+        dwc_otg_flags {
+            change_connect: 0,
+            change_suspend: 0,
+            change_reset: 0,
+            change_enabled: 0,
+            change_over_current: 0,
+            status_suspend: 0,
+            status_vbus: 0,
+            status_bus_reset: 0,
+            status_high_speed: 0,
+            status_low_speed: 0,
+            status_device_mode: 0,
+            self_powered: 0,
+            clocks_off: 1,
+            port_powered: 0,
+            port_enabled: 0,
+            port_over_current: 0,
+            d_pulled_up: 0
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
@@ -416,10 +925,63 @@ pub struct dwc_otg_softc {
 }
 
 impl dwc_otg_softc {
-    pub fn new() ->  Self {
-        let mut this = Self::default();
-        this.sc_flags.clocks_off = 1;
+    pub const fn new() ->  Self {
+        let mut this = dwc_otg_softc {
+            sc_fifo_size: 0,
+            sc_irq_mask: 0,
+            sc_last_rx_status: 0,
+            sc_out_ctl: [0; DWC_OTG_MAX_ENDPOINTS],
+            sc_in_ctl: [0; DWC_OTG_MAX_ENDPOINTS],
+            sc_chan_state: [dwc_otg_chan_state { wait_halted: 0, allocated: 0, hcint: 0 }; DWC_OTG_MAX_CHANNELS],
+            sc_tmr_val: 0,
+            sc_hprt_val: 0,
+            sc_xfer_complete: 0,
+            sc_current_rx_bytes: 0,
+            sc_current_rx_fifo: 0,
+            sc_active_rx_ep: 0,
+            sc_last_frame_num: 0,
+            sc_phy_type: 0,
+            sc_phy_bits: 0,
+            sc_timer_active: 0,
+            sc_dev_ep_max: 0,
+            sc_dev_in_ep_max: 0,
+            sc_host_ch_max: 0,
+            sc_needsof: 0,
+            sc_rt_addr: 0, // root HUB address
+            sc_conf: 0,    // root HUB config
+            sc_mode: 0,    // mode of operation
+            sc_hub_idata: [0; 1],
+            sc_flags: dwc_otg_flags::new(),
+        };
         this
+    }
+
+    pub fn init(&mut self) {
+        self.sc_fifo_size = 0;
+        self.sc_irq_mask = 0;
+        self.sc_last_rx_status = 0;
+        self.sc_out_ctl = [0; DWC_OTG_MAX_ENDPOINTS];
+        self.sc_in_ctl = [0; DWC_OTG_MAX_ENDPOINTS];
+        self.sc_chan_state = [dwc_otg_chan_state { wait_halted: 0, allocated: 0, hcint: 0 }; DWC_OTG_MAX_CHANNELS];
+        self.sc_tmr_val = 0;
+        self.sc_hprt_val = 0;
+        self.sc_xfer_complete = 0;
+        self.sc_current_rx_bytes = 0;
+        self.sc_current_rx_fifo = 0;
+        self.sc_active_rx_ep = 0;
+        self.sc_last_frame_num = 0;
+        self.sc_phy_type = 0;
+        self.sc_phy_bits = 0;
+        self.sc_timer_active = 0;
+        self.sc_dev_ep_max = 0;
+        self.sc_dev_in_ep_max = 0;
+        self.sc_host_ch_max = 0;
+        self.sc_needsof = 0;
+        self.sc_rt_addr = 0; // root HUB address
+        self.sc_conf = 0;    // root HUB config
+        self.sc_mode = 0;    // mode of operation
+        self.sc_hub_idata = [0; 1];
+        self.sc_flags = dwc_otg_flags::new();
     }
 }
 
@@ -488,6 +1050,8 @@ const fn HCDMAB(n: usize) -> usize { 0x51C + 0x20 * n + 4 }
 const DCFG: usize = 0x800;
 const DCTL: usize = 0x804;
 const DSTS: usize = 0x808;
+
+pub const fn DIEPINT(ep: u32) -> u32 { 0x908 + (ep) * 32 }
 
 const PCGCCTL: usize = 0x0E00;
 

@@ -187,9 +187,10 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         dwc_otg::dwc_otg_initialize_controller(usb_base);
         println!("| USB controller addr: {:#010x}", usb_addr as usize);
 
-        gic::GIC.get().register_isr(105, test_handler);
+        // gic::GIC.get().register_isr(105, test_handler);
 
-        let mut sc = dwc_otg::dwc_otg_softc::new();
+        dwc_otg::initialize_dwc_otg_sc();
+        let mut sc = unsafe { &mut *dwc_otg::dwc_otg_sc };
         dwc_otg::dwc_otg_init(&mut sc);
 
 
@@ -231,7 +232,6 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         //read usb_base + 0x88
         let val = unsafe { core::ptr::read_volatile((usb_base as usize + 0x88) as *mut u32) };
         println!("| USB controller value3: {:#010x}", val);
-        shutdown();
     }
 
     // Set up the interrupt controllers to preempt on the arm generic
