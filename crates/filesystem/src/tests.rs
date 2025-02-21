@@ -92,7 +92,7 @@ fn read_and_verify_test(ext2: &mut Ext2<FileBlockDevice>, verify_requests: &Vec<
                         image_path: &str) {
     let root_node: Rc<RefCell<INodeWrapper>> = ext2.get_root_inode_wrapper();
     
-    for verify_request in verify_requests {
+    for (i, verify_request) in verify_requests.iter().enumerate() {
         let file_node: Rc<RefCell<INodeWrapper>> =
             ext2.find_recursive(root_node.clone(), verify_request.file_path, false, false).unwrap();
 

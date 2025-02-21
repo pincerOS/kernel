@@ -30,7 +30,7 @@ use std::cmp::PartialEq;
 use std::collections::BTreeMap;
 use std::fs::DirEntry;
 use std::prelude::v1::{String, Vec};
-use std::print;
+use std::{print, slice};
 use std::ptr::{read, write};
 use std::time::{SystemTime, UNIX_EPOCH};
 use bytemuck::bytes_of;
@@ -814,7 +814,9 @@ where
                                             deferred_write_map: &mut DeferredWriteMap,
                                             block_num: usize, start_write: usize, write_bytes: &[u8],
                                             optional_block_buffer: Option<[u8; BLOCK_SIZE]>) -> Result<(), Ext2Error> {
-        if !deferred_write_map.contains_key(&block_num) {
+        let map_no_block = !deferred_write_map.contains_key(&block_num);
+
+        if map_no_block {
             let mut block_buffer: [u8; BLOCK_SIZE] = if optional_block_buffer.is_some() {
                 optional_block_buffer.unwrap()
             } else {
@@ -1258,7 +1260,7 @@ impl INodeWrapper
         let mut block_tmp_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
 
         for i in 0..logical_block_length {
-            let cur_file_block: usize = logical_block_start + (i as usize);
+            let cur_file_block: usize = logical_block_start + i;
             let logical_block_num: usize = self.get_inode_block_num(cur_file_block, ext2,
                                                                     deferred_writes)? as usize;
 
@@ -1411,8 +1413,7 @@ impl INodeWrapper
             while blocks_allocated_from_block_group < needed_blocks {
                 let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
                 let mut block_buffer_dirty: bool = false;
-                let mut byte_write: [u8; 1] = [0; 1];
-                let mut byte_write_pos: usize = 0;
+                let mut byte_writes: BTreeMap<usize, u8> = BTreeMap::new();
 
                 ext2.read_logical_block_self(current_block_bitmap_block, 1,
                                              &mut block_buffer, Some(deferred_writes))?;
@@ -1424,11 +1425,12 @@ impl INodeWrapper
                         if (*block_buffer_byte & (1 << i)) == 0 {
                             *block_buffer_byte |= 1 << i;
                             block_buffer_dirty = true;
-                            byte_write_pos = index;
-                            byte_write[0] = *block_buffer_byte;
+                            byte_writes.insert(index, *block_buffer_byte);
                             blocks_allocated_from_block_group += 1;
 
-                            return_value.push(base_block_index + i);
+                            let new_block = base_block_index + i;
+
+                            return_value.push(new_block);
 
                             if blocks_allocated_from_block_group >= needed_blocks {
                                 break;
@@ -1451,9 +1453,12 @@ impl INodeWrapper
 
                     ext2.add_super_block_deferred_write(deferred_writes)?;
                     ext2.add_block_group_deferred_write(deferred_writes, current_block_group_index)?;
-                    ext2.add_write_to_deferred_writes_map(deferred_writes, current_block_bitmap_block,
-                                                          byte_write_pos, &byte_write,
-                                                          Some(block_buffer))?;
+
+                    for byte_write in byte_writes {
+                        ext2.add_write_to_deferred_writes_map(deferred_writes, current_block_bitmap_block,
+                                                              byte_write.0, slice::from_ref(&byte_write.1),
+                                                              Some(block_buffer))?;
+                    }
                 }
 
                 if blocks_allocated_from_block_group < needed_blocks {
