@@ -547,13 +547,15 @@ impl INodeWrapper
 
         self.read_block(0, blocks_to_read, return_value.as_mut_slice(), ext2);
 
+        return_value.resize(self.size() as usize, 0);
+
         return_value
     }
 
     pub fn read_text_file_as_str<D: BlockDevice>(&self, ext2: &mut Ext2<D>) -> String {
         let mut bytes: Vec<u8> = self.read_file(ext2);
 
-        String::from_utf8_lossy(bytes.as_mut_slice()).into_owned().trim_end_matches('\0').into()
+        String::from_utf8_lossy(bytes.as_mut_slice()).into_owned().into()
     }
 
     pub fn get_dir_entries<D: BlockDevice>(&self, ext2: &mut Ext2<D>) -> Vec<DirectoryEntry> {
