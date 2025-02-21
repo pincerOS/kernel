@@ -1,7 +1,7 @@
 use alloc::rc::Rc;
 use std::cell::RefCell;
 use crate::{linux::FileBlockDevice, INodeWrapper, Superblock};
-use std::fs;
+use std::{format, fs};
 use std::fs::File;
 use std::{env, io, println, vec};
 use std::io::Read;
@@ -453,6 +453,49 @@ fn file_creation_within_created_dir_test() {
             create_dirs_if_nonexistent: false
         }
     ];
+
+    write_and_verify_test(&mut ext2, &verify_requests, image_path);
+}
+
+#[test]
+fn mass_file_creation_test() {
+    let image_path = "rw_mass_file_creation.img";
+    let mut ext2 =
+        create_ext2_fs("../../test/example_1.dir", 1024, image_path, false);
+    let mut bart_image_bytes: Vec<u8> = Vec::new();
+    let mut bee_movie_bytes: Vec<u8> = Vec::new();
+
+    File::open("../../test/files_to_add/image.jpg").unwrap().read_to_end(
+        &mut bart_image_bytes).unwrap();
+    File::open("../../test/files_to_add/bee_movie.txt").unwrap().read_to_end(
+        &mut bee_movie_bytes).unwrap();
+
+    let mut verify_requests: Vec<VerifyRequest> = Vec::new();
+    let mut file_paths: [String; 50] = core::array::from_fn(|i| String::from(""));
+
+    for i in 0..50 {
+        let file_suffix: &str = match i % 2 {
+            0 => "image.jpg",
+            _ => "bee_movie.txt"
+        };
+
+        file_paths[i] = format!("{}{}", i, file_suffix);
+    }
+
+    for i in 0..50 {
+        let data_ptr = match i % 2 {
+            0 => &*bart_image_bytes,
+            _ => &*bee_movie_bytes,
+        };
+
+        verify_requests.push(VerifyRequest {
+            file_path: file_paths[i].as_bytes(),
+            data: data_ptr,
+            expect_data: None,
+            write_mode: WriteMode::CreateWrite,
+            create_dirs_if_nonexistent: false
+        });
+    }
 
     write_and_verify_test(&mut ext2, &verify_requests, image_path);
 }
