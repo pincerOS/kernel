@@ -32,9 +32,9 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     let phys_addr: usize = crate::arch::memory::physical_addr((page_ptr).addr()).unwrap() as usize;
 
     unsafe {
-        core::ptr::copy(
-            &raw const HELLO_CHARS,
-            page_ptr as *mut [u8; 5],
+        core::ptr::copy_nonoverlapping(
+            &raw const HELLO_CHARS[0],
+            page_ptr as *mut u8,
             HELLO_CHARS.len(),
         );
     }
