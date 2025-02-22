@@ -1,15 +1,15 @@
-use super::condvar::CondVar;
+use super::condvar::Condvar;
 use super::lock::{Lock, LockGuard, LockImpl, SpinLock};
 
 pub struct BlockingLockInner {
     lock: SpinLock<bool>,
-    condvar: CondVar,
+    condvar: Condvar,
 }
 impl BlockingLockInner {
     pub const fn new() -> Self {
         Self {
             lock: SpinLock::new(false),
-            condvar: CondVar::new(),
+            condvar: Condvar::new(),
         }
     }
     pub fn lock_blocking(&self) {

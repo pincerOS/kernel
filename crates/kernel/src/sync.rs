@@ -11,7 +11,7 @@ pub use crate::arch::interrupts;
 
 pub use barrier::Barrier;
 pub use blocking_lock::{BlockingLock, BlockingLockGuard};
-pub use condvar::CondVar;
+pub use condvar::Condvar;
 pub use handler_table::HandlerTableInner;
 pub use init::UnsafeInit;
 pub use interrupts::{disable_interrupts, enable_interrupts, restore_interrupts, InterruptsState};
