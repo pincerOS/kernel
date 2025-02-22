@@ -26,14 +26,14 @@ impl CondVar {
     pub fn notify_all(&self) {
         SCHEDULER.add_all(&self.queue);
     }
-    pub fn wait<'a, T>(&self, guard: SpinLockGuard<'a, T>) -> SpinLockGuard<'a, T> {
+    pub fn wait_blocking<'a, T>(&self, guard: SpinLockGuard<'a, T>) -> SpinLockGuard<'a, T> {
         let lock = guard.lock;
         core::mem::forget(guard);
         context_switch(SwitchAction::QueueAddUnlock(&self.queue, &lock.inner));
         lock.lock()
     }
 
-    pub fn wait_while<'a, T, F>(
+    pub fn wait_while_blocking<'a, T, F>(
         &self,
         mut guard: SpinLockGuard<'a, T>,
         mut condition: F,
@@ -42,12 +42,12 @@ impl CondVar {
         F: FnMut(&mut T) -> bool,
     {
         while condition(&mut *guard) {
-            guard = self.wait(guard);
+            guard = self.wait_blocking(guard);
         }
         guard
     }
 
-    pub fn wait_async<'a, 'b, T>(
+    pub fn wait<'a, 'b, T>(
         &'b self,
         guard: SpinLockGuard<'a, T>,
     ) -> impl Future<Output = SpinLockGuard<'a, T>> + Send + Sync + use<'a, 'b, T>
@@ -65,7 +65,7 @@ impl CondVar {
         }
     }
 
-    pub async fn wait_while_async<'a, T, F>(
+    pub async fn wait_while<'a, T, F>(
         &self,
         mut guard: SpinLockGuard<'a, T>,
         mut condition: F,
@@ -75,7 +75,7 @@ impl CondVar {
         T: Send + Sync,
     {
         while condition(&mut *guard) {
-            guard = self.wait_async(guard).await;
+            guard = self.wait(guard).await;
         }
         guard
     }

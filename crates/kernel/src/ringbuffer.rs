@@ -140,12 +140,12 @@ impl<const N: usize, T> Sender<N, T> {
         res
     }
 
-    pub async fn send_async(&mut self, event: T) {
+    pub async fn send(&mut self, event: T) {
         let mut guard = self.inner.len.lock();
         guard = self
             .inner
             .cond
-            .wait_while_async(guard, |len| *len == (N - 1))
+            .wait_while(guard, |len| *len == (N - 1))
             .await;
 
         let res = unsafe { self.inner.buf.try_send(event) };
@@ -176,13 +176,9 @@ impl<const N: usize, T> Receiver<N, T> {
         res
     }
 
-    pub async fn recv_async(&mut self) -> T {
+    pub async fn recv(&mut self) -> T {
         let mut guard = self.inner.len.lock();
-        guard = self
-            .inner
-            .cond
-            .wait_while_async(guard, |len| *len == 0)
-            .await;
+        guard = self.inner.cond.wait_while(guard, |len| *len == 0).await;
 
         let res = unsafe { self.inner.buf.try_recv() };
         let res = res.unwrap();

@@ -132,7 +132,7 @@ pub unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
                 res = [0];
             }
         } else {
-            send.send_async(Message {
+            send.send(Message {
                 tag: user_message.tag,
                 objects,
                 data,
@@ -182,7 +182,7 @@ pub unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
         if flags.contains(SendRecvFlags::NO_BLOCK) {
             message = recv.try_recv();
         } else {
-            message = Some(recv.recv_async().await);
+            message = Some(recv.recv().await);
         }
 
         OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
