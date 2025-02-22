@@ -52,9 +52,11 @@ use crate::context::Context;
 // mod dwc_otgreg;
 use crate::device::dwc_otgreg::*;
 use crate::device::usb::*;
+use crate::device::usbreg::*;
 use crate::shutdown;
 use crate::sync::{SpinLockInner, UnsafeInit};
 use super::system_timer::{self, SYSTEM_TIMER};
+use core::default;
 use core::ptr;
 use core::ptr::read;
 use alloc::boxed::Box;
@@ -81,6 +83,504 @@ fn dwc_otg_interrupt_handler(ctx: &mut Context) {
     }
 }
 
+fn dwc_otg_clocks_on(sc: &mut dwc_otg_softc)
+{
+	if sc.sc_flags.clocks_off != 0 && sc.sc_flags.port_powered != 0 {
+		/* TODO - platform specific */
+		sc.sc_flags.clocks_off = 0;
+	}
+}
+
+fn dwc_otg_clocks_off(sc: &mut dwc_otg_softc)
+{
+	if sc.sc_flags.clocks_off == 0 {
+		/* TODO - platform specific */
+		sc.sc_flags.clocks_off = 1;
+	}
+}
+
+fn dwc_otg_pull_up(sc: &mut dwc_otg_softc)
+{
+	/* pullup D+, if possible */
+	if (sc.sc_flags.d_pulled_up == 0 && sc.sc_flags.port_powered != 0) {
+		sc.sc_flags.d_pulled_up = 1;
+
+		let mut temp = read_volatile(DCTL);
+		temp &= !DCTL_SFTDISCON;
+		write_volatile(DCTL, temp);
+	}
+}
+
+fn dwc_otg_pull_down(sc: &mut dwc_otg_softc)
+{
+	/* pulldown D+, if possible */
+	if sc.sc_flags.d_pulled_up != 0 {
+		sc.sc_flags.d_pulled_up = 0;
+
+		let mut temp = read_volatile(DCTL);
+		temp |= DCTL_SFTDISCON;
+		write_volatile(DCTL, temp);
+	}
+}
+
+pub const DWC_OTG_INTR_ENDPT: u8 = 1;
+
+pub fn dwc_otg_roothub_exec(sc: &mut dwc_otg_softc, req: usb_device_request) -> (usb_error_t, *const core::ffi::c_void, u16) {
+
+    //USB_BUS_LOCK_ASSERT(&sc->sc_bus, MA_OWNED);
+
+    /* buffer reset */
+    let mut ptr = &mut sc.sc_hub_temp as *const _ as *const core::ffi::c_void;
+    let mut len = 0;
+	let mut err = usb_error_t::USB_ERR_NORMAL_COMPLETION;
+
+    // value = UGETW(req->wValue); //TODO: What is the point of UGETW
+	// index = UGETW(req->wIndex);
+
+    let mut value = req.wValue;
+    let index = req.wIndex;
+
+    /* demultiplex the control request */
+    match req.bmRequestType {
+        UT_READ_DEVICE => {
+            match req.bRequest {
+                UR_GET_DESCRIPTOR => {
+                    let match_value = (value >> 8) as u8;
+                    match match_value {
+                        UDESC_DEVICE => {
+                            if (value & 0xff) != 0 {
+                                err = usb_error_t::USB_ERR_STALLED;
+                            } else {
+                                len = core::mem::size_of::<usb_device_descriptor>() as u16;
+                                ptr = &dwc_otg_devd as *const _ as *const core::ffi::c_void;
+                            }
+                        }
+                        UDESC_CONFIG => {
+                            if (value & 0xff) != 0 {
+                                err = usb_error_t::USB_ERR_STALLED;
+                            } else {
+                                len = core::mem::size_of::<usb_config_descriptor>() as u16;
+                                ptr = &dwc_otg_confd as *const _ as *const core::ffi::c_void;
+                            }
+                        }
+                        UDESC_STRING => {
+                            println!("| UR_GET_DESCRIPTOR: UDESC_STRING Not implemented");
+                            shutdown();
+                        }
+                        _ => {}
+                    }
+                } 
+                UR_GET_CONFIG => {
+                    len = 1;
+                    unsafe { usetw_lower(&mut sc.sc_hub_temp.wValue, sc.sc_conf) };
+                }
+                UR_GET_STATUS => {
+                    len = 2;
+                    unsafe { usetw(&mut sc.sc_hub_temp.wValue, UDS_SELF_POWERED) };
+                }
+                _ => {
+                    err = usb_error_t::USB_ERR_STALLED;
+                }
+            }   
+        }
+        UT_WRITE_DEVICE => {
+            match req.bRequest {
+                UR_SET_ADDRESS => {
+                    if (value & 0xFF00) != 0 {
+                        err = usb_error_t::USB_ERR_STALLED;
+                    } else {
+                        sc.sc_rt_addr = value as u8;
+                    }
+                }
+                UR_SET_CONFIG => {
+                    if value >= 2 {
+                        err = usb_error_t::USB_ERR_STALLED;
+                    } else {
+                        sc.sc_conf = value as u8;
+                    }
+                }
+                UR_CLEAR_FEATURE => {
+                    /* nop */
+                }
+                UR_SET_DESCRIPTOR => {
+                    /* nop */
+                }
+                UR_SET_FEATURE => {
+                    err = usb_error_t::USB_ERR_STALLED;
+                }
+                _ => {
+                    err = usb_error_t::USB_ERR_STALLED;
+                }
+            }
+        }
+        UT_WRITE_ENDPOINT => {
+            match req.bRequest {
+                UR_CLEAR_FEATURE => {
+                    match req.wValue {
+                        UF_ENDPOINT_HALT => {
+                            /* noop */
+                        }
+                        UF_DEVICE_REMOTE_WAKEUP => {
+                            /* noop */
+                        }
+                        _ => {
+                            err = usb_error_t::USB_ERR_STALLED;
+                        }
+                    }
+                }
+                UR_SET_FEATURE => {
+                    match req.wValue {
+                        UF_ENDPOINT_HALT => {
+                            /* nop */
+                        }
+                        UF_DEVICE_REMOTE_WAKEUP => {
+                            /* nop */
+                        }
+                        _ => {
+                            err = usb_error_t::USB_ERR_STALLED;
+                        }
+                    }
+                }
+                UR_SYNCH_FRAME => {
+                    /* nop */
+                }
+                _ => {
+                    err = usb_error_t::USB_ERR_STALLED;
+                }
+            }
+        }
+        UT_READ_ENDPOINT => {
+            match req.bRequest {
+                UR_GET_STATUS => {
+                    len = 2;
+                    unsafe { usetw(&mut sc.sc_hub_temp.wValue, 0) };
+                }
+                _ => {
+                    err = usb_error_t::USB_ERR_STALLED;
+                }
+            }
+        }
+        UT_WRITE_INTERFACE => {
+            match req.bRequest {
+                UR_SET_INTERFACE => {
+                    /* nop */
+                }
+                UR_CLEAR_FEATURE => {
+                    /* nop */
+                }
+                UR_SET_FEATURE => {
+                    err = usb_error_t::USB_ERR_STALLED;
+                }
+                _ => {
+                    err = usb_error_t::USB_ERR_STALLED;
+                }
+            }
+        }
+        UT_READ_INTERFACE => {
+            match req.bRequest {
+                UR_GET_INTERFACE => {
+                    len = 1;
+                    // sc->sc_hub_temp.wValue[0] = 0;
+                    unsafe { usetw_lower(&mut sc.sc_hub_temp.wValue, 0) };
+                }
+                UR_GET_STATUS => {
+                    len = 2;
+                    sc.sc_hub_temp.wValue = 0;
+                }
+                _ => {
+                    err = usb_error_t::USB_ERR_STALLED;
+                }
+            }
+        }
+        UT_WRITE_CLASS_INTERFACE => {
+            /* nop */
+        }
+        UT_WRITE_VENDOR_INTERFACE => {
+            /* nop */
+        }
+        UT_READ_CLASS_INTERFACE => {
+            /* nop */
+        }
+        UT_READ_VENDOR_INTERFACE => {
+            /* nop */
+        }
+        UT_WRITE_CLASS_DEVICE => {
+            /* nop */
+        }
+        UT_WRITE_CLASS_OTHER => {
+            match req.bRequest {
+                UR_CLEAR_FEATURE => {
+                    if index != 1 {
+                        err = usb_error_t::USB_ERR_STALLED;
+                    } else {
+                        println!("| UR_CLEAR_FEATURE: on port {}", index);
+                        match value {
+                            UHF_PORT_SUSPEND => {
+                                println!("| UR_CLEAR_FEATURE: UHF_PORT_SUSPEND not implementd");
+                                shutdown();
+                            }
+                            UHF_PORT_ENABLE => {
+                                if sc.sc_flags.status_device_mode == 0 {
+                                    write_volatile(HPRT,
+                                        sc.sc_hprt_val | HPRT_PRTENA);
+                                }
+                                sc.sc_flags.port_enabled = 0;
+                            }
+                            UHF_C_PORT_RESET => {
+                                sc.sc_flags.change_reset = 0;
+                            }
+                            UHF_C_PORT_ENABLE => {
+                                sc.sc_flags.change_enabled = 0;
+                            }
+                            UHF_C_PORT_OVER_CURRENT => {
+                                sc.sc_flags.change_over_current = 0;
+                            }
+                            UHF_PORT_TEST => {
+                                /* nop */
+                            }
+                            UHF_PORT_INDICATOR => {
+                                /* nops */
+                            }
+                            UHF_PORT_POWER => {
+                                sc.sc_flags.port_powered = 0;
+                                if (sc.sc_mode == DWC_MODE_HOST || sc.sc_mode == DWC_MODE_OTG) {
+                                    sc.sc_hprt_val = 0;
+                                    write_volatile(HPRT, HPRT_PRTENA);
+                                }
+                                dwc_otg_pull_down(sc);
+                                dwc_otg_clocks_off(sc);
+                            }
+                            UHF_C_PORT_CONNECTION => {
+                                /* clear connect change flag */
+		                        sc.sc_flags.change_connect = 0;
+                            }
+                            UHF_C_PORT_SUSPEND => {
+                                sc.sc_flags.change_suspend = 0;
+                            }
+                            _ => {
+                                err = usb_error_t::USB_ERR_IOERROR;
+                            }
+                        }
+                    }
+                }
+                UR_SET_FEATURE => {
+                    if index != 1 {
+                        err = usb_error_t::USB_ERR_STALLED;
+                    } else {
+                        match value {
+                            UHF_PORT_ENABLE => {
+                                /* noop */
+                            }
+                            UHF_PORT_SUSPEND => {
+                                if sc.sc_flags.status_device_mode == 0 {
+                                    /* set suspend BIT */
+                                    sc.sc_hprt_val |= HPRT_PRTSUSP;
+                                    write_volatile( HPRT, sc.sc_hprt_val);
+                                    /* generate HUB suspend event */
+                                    dwc_otg_suspend_irq(sc);
+                                }
+                            }
+                            UHF_PORT_RESET => {
+                                if sc.sc_flags.status_device_mode == 0 {
+                                    println!("| Dwc otg PORT RESET\n");
+    
+                                    /* enable PORT reset */
+                                    write_volatile(HPRT, sc.sc_hprt_val | HPRT_PRTRST);
+    
+                                    /* Wait 62.5ms for reset to complete */
+                                    // usb_pause_mtx(&sc->sc_bus.bus_mtx, hz / 16);
+                                    usb_pause_mtx(1000/16);
+    
+                                    write_volatile(HPRT, sc.sc_hprt_val);
+    
+                                    /* Wait 62.5ms for reset to complete */
+                                    usb_pause_mtx(1000/16);
+    
+                                    /* reset FIFOs */
+                                    // dwc_otg_init_fifo(sc, DWC_MODE_HOST);
+                                    dwc_otg_init_fifo(sc);
+    
+                                    sc.sc_flags.change_reset = 1;
+                                } else {
+                                    err = usb_error_t::USB_ERR_IOERROR;
+                                }
+                            }
+                            UHF_PORT_TEST => {
+                                /* nop */
+                            }
+                            UHF_PORT_INDICATOR => {
+                                /* nops */
+                            }
+                            UHF_PORT_POWER => {
+                                sc.sc_flags.port_powered = 1;
+                                if (sc.sc_mode == DWC_MODE_HOST || sc.sc_mode == DWC_MODE_OTG) {
+                                    sc.sc_hprt_val |= HPRT_PRTPWR;
+                                    write_volatile(HPRT, sc.sc_hprt_val);
+                                }
+                                if (sc.sc_mode == DWC_MODE_DEVICE || sc.sc_mode == DWC_MODE_OTG) {
+                                    /* pull up D+, if any */
+                                    dwc_otg_pull_up(sc);
+                                }
+                            }
+                            _ => {
+                                err = usb_error_t::USB_ERR_IOERROR;
+                            }
+                        }
+                    }
+                }
+                UR_CLEAR_TT_BUFFER => {
+                    /* nop */
+                }
+                UR_RESET_TT => {
+                    /* nop */
+                }
+                UR_STOP_TT => {
+                    /* nop */
+                }  
+                _ => {
+                    err = usb_error_t::USB_ERR_STALLED;
+                }
+            }
+        }
+        UT_READ_CLASS_OTHER => {
+            match req.bRequest {
+                UR_GET_TT_STATE => {
+                    len = 2;
+                    unsafe { usetw(&mut sc.sc_hub_temp.wValue, 0) };
+                }
+                UR_GET_STATUS => {
+                    println!("| UR_GET_PORT_STATUS:");
+
+                    if index != 1 {
+                        err = usb_error_t::USB_ERR_STALLED;
+                    } else {
+                        if sc.sc_flags.status_vbus != 0 {
+                            dwc_otg_clocks_on(sc);
+                        } else {
+                            dwc_otg_clocks_off(sc);
+                        }
+
+                        /* Select Device Side Mode */
+                        if sc.sc_flags.status_device_mode != 0 {
+                            value = UPS_PORT_MODE_DEVICE;
+                            dwc_otg_timer_stop(sc);
+                        } else {
+                            value = 0;
+                            dwc_otg_timer_start(sc);
+                        }
+                    
+                        if sc.sc_flags.status_high_speed != 0 {
+                            value |= UPS_HIGH_SPEED;
+                        }
+                        else if sc.sc_flags.status_low_speed != 0 {
+                            value |= UPS_LOW_SPEED;
+                        }
+
+                        if sc.sc_flags.port_powered != 0 {
+                            value |= UPS_PORT_POWER;
+                        }
+
+                        if sc.sc_flags.port_enabled != 0 {
+                            value |= UPS_PORT_ENABLED;
+                        }
+
+                        if sc.sc_flags.port_over_current != 0 {
+                            value |= UPS_OVERCURRENT_INDICATOR;
+                        }
+
+                        if sc.sc_flags.status_vbus != 0 && sc.sc_flags.status_bus_reset != 0 {
+                            value |= UPS_CURRENT_CONNECT_STATUS;
+                        }
+
+                        if sc.sc_flags.status_suspend != 0 {
+                            value |= UPS_SUSPEND;
+                        }
+
+                        unsafe { usetw(&mut sc.sc_hub_temp.ps.wPortStatus, value) };
+                        value = 0;
+
+                        if sc.sc_flags.change_enabled != 0 {
+                            value |= UPS_C_PORT_ENABLED;
+                        }
+                        if sc.sc_flags.change_connect != 0 {
+                            value |= UPS_C_CONNECT_STATUS;
+                        }
+                        if sc.sc_flags.change_suspend != 0 {
+                            value |= UPS_C_SUSPEND;
+                        }
+                        if sc.sc_flags.change_reset != 0 {
+                            value |= UPS_C_PORT_RESET;
+                        }
+                        if sc.sc_flags.change_over_current != 0 {
+                            value |= UPS_C_OVERCURRENT_INDICATOR;
+                        }
+
+                        unsafe { usetw(&mut sc.sc_hub_temp.ps.wPortChange, value) };
+                        // len = sizeof(sc->sc_hub_temp.ps);
+                        len = core::mem::size_of::<usb_port_status>() as u16;
+                    }
+                }
+                _ => {
+                    err = usb_error_t::USB_ERR_STALLED;
+                }
+            }
+        }
+        UT_READ_CLASS_DEVICE => {
+            match req.bRequest {
+                UR_GET_DESCRIPTOR => {
+                    if (value & 0xFF) != 0 {
+                        err = usb_error_t::USB_ERR_STALLED;
+                    } else {
+                        len = core::mem::size_of::<usb_hub_descriptor_min>() as u16;
+                        ptr = &dwc_otg_hubd as *const _ as *const core::ffi::c_void;
+                    }
+                }
+                UR_GET_STATUS => {
+                    len = 2;
+                    unsafe { usetw(&mut sc.sc_hub_temp.wValue, 0) };
+                }
+                _ => {
+                    err = usb_error_t::USB_ERR_STALLED;
+                }
+            }
+        }
+        _ => {
+            println!("| dwc_otg_roothub_exec: default error");
+            err = usb_error_t::USB_ERR_STALLED;
+        }
+    }
+
+    return (err, ptr, len);
+}
+
+fn dwc_otg_timer_start(sc: &mut dwc_otg_softc)
+{
+	if sc.sc_timer_active != 0 {
+		return;
+    }
+
+	sc.sc_timer_active = 1;
+
+	/* restart timer */
+	// usb_callout_reset(&sc->sc_timer,
+	//     hz / (1000 / DWC_OTG_HOST_TIMER_RATE),
+	//     &dwc_otg_timer, sc);
+    usb_callout_reset();
+}
+
+fn dwc_otg_timer_stop(sc: &mut dwc_otg_softc)
+{
+	if sc.sc_timer_active == 0 {
+		return;
+    }
+
+	sc.sc_timer_active = 0;
+
+	/* stop timer */
+	// usb_callout_stop(sc);
+    usb_callout_stop();
+}
+
 //TODO: This should run at high priority, even overriding disabled interrupts
 fn dwc_otg_filter_interrupt(_ctx: &Context) -> u32 {
     let mut retval = FILTER_HANDLED;
@@ -98,7 +598,7 @@ fn dwc_otg_filter_interrupt(_ctx: &Context) -> u32 {
     }
 
     /* clear FIFO empty interrupts */
-    if (status & sc.sc_irq_mask & (GINTSTS_PTXFEMP | GINTSTS_NPTXFEMP) != 0) {
+    if status & sc.sc_irq_mask & (GINTSTS_PTXFEMP | GINTSTS_NPTXFEMP) != 0 {
         sc.sc_irq_mask &= !(GINTSTS_PTXFEMP | GINTSTS_NPTXFEMP);
         write_volatile(GINTMSK, sc.sc_irq_mask);
     }
@@ -644,7 +1144,7 @@ fn dwc_otg_vbus_interrupt(sc: &mut dwc_otg_softc, is_on: u8) {
 			dwc_otg_root_intr(sc);
 		}
 	} else {
-		if (sc.sc_flags.status_vbus == 0) {
+		if sc.sc_flags.status_vbus == 0 {
 			sc.sc_flags.status_vbus = 0;
 			sc.sc_flags.status_bus_reset = 0;
 			sc.sc_flags.status_suspend = 0;
@@ -661,6 +1161,8 @@ fn dwc_otg_vbus_interrupt(sc: &mut dwc_otg_softc, is_on: u8) {
 
 pub fn dwc_otg_init(sc: &mut dwc_otg_softc) -> u32 {
     println!("| dwc_otg_init");
+
+    sc.sc_mode = DWC_MODE_HOST;
 
     //TODO: Implement getting DMA memory -> 3854
     // if (usb_bus_mem_alloc_all(&sc->sc_bus,
@@ -682,9 +1184,7 @@ pub fn dwc_otg_init(sc: &mut dwc_otg_softc) -> u32 {
 	//     &sc->sc_bus.bus_mtx, 0);
 
 
-    ///* turn on clocks */
-	// dwc_otg_clocks_on(sc);
-    //TOOD: Turn on the clock
+	dwc_otg_clocks_on(sc);
 
     let ver = read_volatile(GSNPSID);
     println!("| DTC_OTG Version: 0x{:08x}", ver);
@@ -776,8 +1276,8 @@ pub fn dwc_otg_init(sc: &mut dwc_otg_softc) -> u32 {
     println!("| Interrupts enabling");
     write_volatile(GAHBCFG, 1 << 0);
     println!("| Interrupts enabled");
-    //TODO: turn off the clocks
-	// dwc_otg_clocks_off(sc);
+
+	dwc_otg_clocks_off(sc);
 
     //read initial VBUS state
     let temp = read_volatile(GOTGCTL);
@@ -798,6 +1298,14 @@ pub fn dwc_otg_init(sc: &mut dwc_otg_softc) -> u32 {
 
     return 0;
 }
+
+
+//time = 1000 for 1 second //Maybe
+fn usb_pause_mtx(time: usize) {
+    let start_time = system_timer::get_time();
+    while(((system_timer::get_time() - start_time) * 1000) / (system_timer::get_freq())) < (time as u64) {}
+}
+
 
 //time = 1000 for 1 second //Maybe
 //TODO: Add a usb lock on this
@@ -873,11 +1381,29 @@ impl dwc_otg_flags {
     }
 }
 
+
+
 #[repr(C)]
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Clone, Copy)]
+pub union dwc_otg_hub_temp {
+    pub wValue: u16,
+    pub ps: usb_port_status,
+}
+
+impl dwc_otg_hub_temp {
+    pub const fn new() -> Self {
+        dwc_otg_hub_temp {
+            wValue: 0
+        }
+    }
+}
+
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct dwc_otg_softc {
     // struct usb_bus sc_bus;
-    // union dwc_otg_hub_temp sc_hub_temp;
+    pub sc_hub_temp: dwc_otg_hub_temp,
     // struct dwc_otg_profile sc_hw_ep_profile[DWC_OTG_MAX_ENDPOINTS];
     // struct dwc_otg_tt_info sc_tt_info[DWC_OTG_MAX_DEVICES];
     // struct usb_callout sc_timer;
@@ -927,6 +1453,7 @@ pub struct dwc_otg_softc {
 impl dwc_otg_softc {
     pub const fn new() ->  Self {
         let mut this = dwc_otg_softc {
+            sc_hub_temp: dwc_otg_hub_temp::new(),
             sc_fifo_size: 0,
             sc_irq_mask: 0,
             sc_last_rx_status: 0,
@@ -984,6 +1511,86 @@ impl dwc_otg_softc {
         self.sc_flags = dwc_otg_flags::new();
     }
 }
+
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+pub struct dwc_otg_config_desc {
+    pub confd: usb_config_descriptor,
+    pub ifcd: usb_interface_descriptor,
+    pub endpd: usb_endpoint_descriptor,
+}
+
+
+/*------------------------------------------------------------------------*
+ * DWC OTG root control support
+ *------------------------------------------------------------------------*
+ * Simulate a hardware HUB by handling all the necessary requests.
+ *------------------------------------------------------------------------*/
+
+pub static dwc_otg_devd: usb_device_descriptor = usb_device_descriptor {
+    bLength: core::mem::size_of::<usb_device_descriptor>() as u8,
+    bDescriptorType: UDESC_DEVICE,
+    bcdUSB: 0x0200, // Equivalent to {0x00, 0x02} in little-endian
+    bDeviceClass: UDCLASS_HUB,
+    bDeviceSubClass: UDSUBCLASS_HUB,
+    bDeviceProtocol: UDPROTO_HSHUBSTT,
+    bMaxPacketSize: 64,
+    idVendor: 0,
+    idProduct: 0,
+    bcdDevice: 0x0100, // Equivalent to {0x00, 0x01} in little-endian
+    iManufacturer: 1,
+    iProduct: 2,
+    iSerialNumber: 0, 
+    bNumConfigurations: 1,
+};
+
+pub static dwc_otg_confd: dwc_otg_config_desc = dwc_otg_config_desc {
+    confd: usb_config_descriptor {
+        bLength: core::mem::size_of::<usb_config_descriptor>() as u8,
+        bDescriptorType: UDESC_CONFIG,
+        wTotalLength: core::mem::size_of::<dwc_otg_config_desc>() as u16, // Equivalent to HSETW
+        bNumInterface: 1,
+        bConfigurationValue: 1,
+        iConfiguration: 0,
+        bmAttributes: UC_SELF_POWERED,
+        bMaxPower: 0,
+    },
+    ifcd: usb_interface_descriptor {
+        bLength: core::mem::size_of::<usb_interface_descriptor>() as u8,
+        bDescriptorType: UDESC_INTERFACE,
+        bNumEndpoints: 1,
+        bInterfaceClass: UICLASS_HUB,
+        bInterfaceSubClass: UISUBCLASS_HUB,
+        bInterfaceNumber: 0,
+        bAlternateSetting: 0,
+        bInterfaceProtocol: 0,
+        iInterface: 0, // Missing in original C structure, initialized to 0
+    },
+    endpd: usb_endpoint_descriptor {
+        bLength: core::mem::size_of::<usb_endpoint_descriptor>() as u8,
+        bDescriptorType: UDESC_ENDPOINT,
+        bEndpointAddress: UE_DIR_IN | DWC_OTG_INTR_ENDPT,
+        bmAttributes: UE_INTERRUPT,
+        wMaxPacketSize: 8, // Equivalent to HSETW
+        bInterval: 255,
+    },
+};
+
+// Helper function to replace HSETW macro
+pub const fn hsetw(value: u16) -> u16 {
+    value // Rust handles endian conversions automatically if needed
+}
+
+pub static dwc_otg_hubd: usb_hub_descriptor_min = usb_hub_descriptor_min {
+    bDescLength: core::mem::size_of::<usb_hub_descriptor_min>() as u8,
+    bDescriptorType: UDESC_HUB,
+    bNbrPorts: 1,
+    wHubCharacteristics: hsetw(UHD_PWR_NO_SWITCH | UHD_OC_INDIVIDUAL), // Equivalent to HSETW
+    bPwrOn2PwrGood: 50,
+    bHubContrCurrent: 0,
+    DeviceRemovable: [0], // Port is removable
+    PortPowerCtrlMask: [0], // No power switching
+};
 
 
 pub const DWC_OTG_MAX_ENDPOINTS: usize = 16; // Update as needed

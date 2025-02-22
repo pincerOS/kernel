@@ -134,6 +134,18 @@ pub const fn GRXSTSRD_BCNT_GET(x: u32) -> u32 { (x >> 4) & 0x7FF}
 pub const GOTGCTL_BSESVLD: u32 = 1 << 19;
 pub const GOTGCTL_ASESVLD: u32 = 1 << 18;
 
+pub const DCTL_PWRONPRGDONE: u32 = 1 << 11;
+pub const DCTL_CGOUTNAK: u32 = 1 << 10;
+pub const DCTL_SGOUTNAK: u32 = 1 << 9;
+pub const DCTL_CGNPINNAK: u32 = 1 << 8;
+pub const DCTL_SGNPINNAK: u32 = 1 << 7;
+pub const DCTL_TSTCTL_SHIFT: u32 = 4;
+pub const DCTL_TSTCTL_MASK: u32 = 0x00000070;
+pub const DCTL_GOUTNAKSTS: u32 = 1 << 3;
+pub const DCTL_GNPINNAKSTS: u32 = 1 << 2;
+pub const DCTL_SFTDISCON: u32 = 1 << 1;
+pub const DCTL_RMTWKUPSIG: u32 = 1 << 0;
+
 pub const HPRT_PRTSPD_SHIFT: u32      = 17;
 pub const HPRT_PRTSPD_MASK: u32       = 0x00060000;
 pub const HPRT_PRTSPD_HIGH: u32       = 0;

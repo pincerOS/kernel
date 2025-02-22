@@ -9,6 +9,7 @@ pub mod watchdog;
 pub mod dwc_otg;
 pub mod dwc_otgreg;
 pub mod usb;
+pub mod usbreg;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -193,45 +194,6 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let mut sc = unsafe { &mut *dwc_otg::dwc_otg_sc };
         dwc_otg::dwc_otg_init(&mut sc);
 
-
-        // shutdown();
-        //read from usb_base
-        let val = unsafe { core::ptr::read_volatile(usb_base as *mut u32) };
-        println!("| USB controller value 0x0: {:#010x}", val);
-
-        let val= unsafe { core::ptr::read_volatile((usb_base as usize + 0x4) as *mut u32) };
-        println!("| USB controller value 0x4: {:#010x}", val);
-
-        let val = unsafe { core::ptr::read_volatile((usb_base as usize + 0x8) as *mut u32) };
-        println!("| USB controller value 0x8: {:#010x}", val);
-
-        let val = unsafe { core::ptr::read_volatile((usb_base as usize + 0xc) as *mut u32) };
-        println!("| USB controller value 0xc: {:#010x}", val);
-
-        let val = unsafe { core::ptr::read_volatile((usb_base as usize + 0x10) as *mut u32) };
-        println!("| USB controller value 0x10: {:#010x}", val);
-
-        //Synopsys ID Register (GSNPSID)
-        let val = unsafe { core::ptr::read_volatile((usb_base as usize + 0x40) as *mut u32) };
-        println!("| USB controller value 0x40: {:#010x}", val);
-
-        let val = unsafe { core::ptr::read_volatile((usb_base as usize + 0x48) as *mut u32) };
-        println!("| USB controller value 0x48: {:#010x}", val);
-
-        let val = unsafe { core::ptr::read_volatile((usb_base as usize + 0x400) as *mut u32) };
-        println!("| USB controller value 0x400: {:#010x}", val);
-
-        unsafe { core::ptr::write_volatile((usb_base as usize) as *mut u32, 0x80000000) };
-        //dsb
-        unsafe { println!("| USB controller value1: {:#010x}", core::ptr::read_volatile((usb_base as *mut u32))) };
-
-        //read usb_base + 0x80
-        let val = unsafe { core::ptr::read_volatile((usb_base as usize + 0x80) as *mut u32) };
-        println!("| USB controller value2: {:#010x}", val);
-
-        //read usb_base + 0x88
-        let val = unsafe { core::ptr::read_volatile((usb_base as usize + 0x88) as *mut u32) };
-        println!("| USB controller value3: {:#010x}", val);
     }
 
     // Set up the interrupt controllers to preempt on the arm generic
