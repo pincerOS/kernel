@@ -916,8 +916,7 @@ where
             name_characters[0..(new_dir_entry_wrapper.entry.name_length as usize)].
             copy_from_slice(name);
 
-        let current_inter_block_offset: usize = node.size() as usize % BLOCK_SIZE;
-        let remaining_bytes_in_block: usize = BLOCK_SIZE - current_inter_block_offset;
+        let mut current_inter_block_offset: usize = 0;
         let mut dir_entry_bytes_with_padding: Vec<u8> = Vec::new();
         let mut dir_entry_padding: usize = 0;
 
@@ -938,6 +937,8 @@ where
             if (prior_dir_entry_allocated_size % 4) != 0 {
                 dir_entry_padding = 4 - (prior_dir_entry_allocated_size % 4);
             }
+
+            current_inter_block_offset += dir_entry_wrapper.entry.entry_size as usize;
 
             if dir_entry_wrapper.entry.entry_size as usize >= 
                 prior_dir_entry_allocated_size + dir_entry_padding + new_dir_entry_wrapper.entry.entry_size as usize {
@@ -963,31 +964,21 @@ where
         }
 
         if !found_empty_dir_entry {
-            let new_dir_entry: DirectoryEntry = new_dir_entry_wrapper.entry;
+            // we will need to allocate a new block of dir entries
+            assert_eq!((node.size() as usize) % BLOCK_SIZE, 0);
+            assert!((BLOCK_SIZE - current_inter_block_offset) < new_dir_entry_wrapper.entry.entry_size as usize);
 
-            dir_entry_bytes_with_padding.resize(new_dir_entry.entry_size as usize, 0);
-
-            // dir entries need to be at 4-byte alignment
-            if (current_inter_block_offset % 4) > 0 {
-                let four_byte_padding: usize = 4 - (current_inter_block_offset % 4);
-                dir_entry_padding += four_byte_padding;
-
-                dir_entry_bytes_with_padding.resize(dir_entry_bytes_with_padding.len() + four_byte_padding,
-                                                    0);
-            }
-
-            // and they need to not cross block boundaries
-            if dir_entry_bytes_with_padding.len() >= remaining_bytes_in_block {
-                dir_entry_padding += remaining_bytes_in_block;
-
-                dir_entry_bytes_with_padding.resize(dir_entry_bytes_with_padding.len() + remaining_bytes_in_block, 0);
-            }
+            let mut new_dir_entry: DirectoryEntry = new_dir_entry_wrapper.entry;
+            let mut dir_entry_bytes_with_padding: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
 
             let actual_entry_size: usize = new_dir_entry.entry_size as usize;
-            let slice_end: usize = dir_entry_padding + actual_entry_size;
-            let dir_entry_bytes = bytemuck::bytes_of(&new_dir_entry);
 
-            dir_entry_bytes_with_padding[dir_entry_padding..slice_end].copy_from_slice(
+            new_dir_entry.entry_size = BLOCK_SIZE as u16;
+            
+            let dir_entry_bytes = bytemuck::bytes_of(&new_dir_entry);
+            let remaining_bytes_in_block: usize = BLOCK_SIZE - current_inter_block_offset;
+
+            dir_entry_bytes_with_padding[remaining_bytes_in_block..remaining_bytes_in_block + actual_entry_size].copy_from_slice(
                 &dir_entry_bytes[0..actual_entry_size]);
 
             node.append_file_no_writeback(self, dir_entry_bytes_with_padding.as_slice(),

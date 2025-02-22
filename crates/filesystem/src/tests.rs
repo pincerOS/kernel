@@ -486,7 +486,7 @@ fn file_creation_within_created_dir_test() {
 }
 
 #[test]
-fn mass_file_creation_test() {
+fn file_mass_creation_test() {
     let image_path = "rw_mass_file_creation.img";
     let mut ext2 =
         create_ext2_fs("../../test/example_1.dir", 1024, image_path, false);
