@@ -1119,10 +1119,6 @@ impl INodeWrapper
     pub fn update_size<D: BlockDevice>(&mut self, new_size: u64, ext2: &Ext2<D>) {
         self.inode.i_size = ((new_size << 32) >> 32) as u32;
         self.inode.i_dir_acl = (new_size >> 32) as u32;
-
-        // use div_up here
-
-        self.set_block_allocated_count(ext2, Self::div_up(new_size as usize, BLOCK_SIZE));
     }
     
     pub fn get_deferred_write_inode<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>,
@@ -1738,6 +1734,7 @@ impl INodeWrapper
 
         let base_allocated_block_offset: usize = (self.size() as usize) % BLOCK_SIZE;
         let mut new_blocks_allocated: Vec<usize> = Vec::new();
+        let mut new_block_storage_blocks_allocated: usize = 0;
         let mut bytes_written: usize = 0;
 
         if base_allocated_block_offset > 0 {
@@ -1764,6 +1761,9 @@ impl INodeWrapper
             self.write_new_blocks_to_inode(ext2, new_blocks_slice, true, deferred_writes)?;
         }
 
+        let new_data_block_allocated_num: usize =
+            allocated_block_count + new_blocks_allocated.len();
+
         for new_block in new_blocks_allocated {
             let write_base = if base_allocated_block.is_some() && new_block == base_allocated_block.unwrap() {
                 base_allocated_block_offset
@@ -1785,6 +1785,7 @@ impl INodeWrapper
         }
 
         self.update_size(self.size() + (bytes_written as u64), ext2);
+        self.set_block_allocated_count(ext2, new_data_block_allocated_num);
         self.get_deferred_write_inode(ext2, deferred_writes)?;
 
         Ok(bytes_written)
