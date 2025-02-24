@@ -41,5 +41,5 @@ qemu-system-aarch64 \
     -serial "${SERIAL_ALT}" \
     -display "${QEMU_DISPLAY}" \
     "${QEMU_DEBUG_PFX}" "${QEMU_DEBUG}" \
-    -device usb-kbd \
+    # -device usb-kbd \
     ${DEBUG_ARGS}

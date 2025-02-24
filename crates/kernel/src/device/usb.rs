@@ -31,6 +31,39 @@ use crate::{device::dwc_otg::dwc_otg_roothub_exec, shutdown, SpinLock};
 use crate::device::dwc_otg::*;
 use crate::device::usbreg::*;
 
+pub fn uhub_attach(sc: &mut dwc_otg_softc)  {
+    /* assuming that there is one port */
+    let req = usb_device_request {
+        bmRequestType: UT_READ_CLASS_OTHER,
+        bRequest: UR_GET_STATUS,
+        wValue: 0,
+        wIndex: 1,
+        wLength: (8 + 8 * 8) / 8,
+    };
+
+    let (error, ptr, len) = dwc_otg_roothub_exec(sc, req);
+
+    println!("| USB: uhub_attach: error: {:?}, ptr: {:?}, len: {:?}", error, ptr, len);
+    unsafe { println!("| USB: uhub_attach: sc_hub_temp wValue: {:?}", sc.sc_hub_temp.wValue); }
+    unsafe { println!("| USB: uhub_attach: sc_hub_temp usb_hub_descriptor_min: {:?}", sc.sc_hub_temp.ps); }
+
+    println!("Enable power on port");
+    let mut wValue: u16 = 0;
+    usetw2(&mut wValue, UHF_PORT_POWER as u8, 0);
+    let req = usb_device_request {
+        bmRequestType: UT_WRITE_CLASS_OTHER,
+        bRequest: UR_SET_FEATURE,
+        wValue: UHF_PORT_POWER,
+        wIndex: 1,
+        wLength: 0,
+    };
+
+    let (error, ptr, len) = dwc_otg_roothub_exec(sc, req);
+    println!("| USB: power uhub_attach: error: {:?}, ptr: {:?}, len: {:?}", error, ptr, len);
+    unsafe { println!("| USB: power uhub_attach: sc_hub_temp wValue: {:?}", sc.sc_hub_temp.wValue); }
+    unsafe { println!("| USB: power uhub_attach: sc_hub_temp usb_hub_descriptor_min: {:?}", sc.sc_hub_temp.ps); }
+}
+
 
 //https://elixir.bootlin.com/freebsd/v14.2/source/sys/dev/usb/usb_hub.c#L957
 pub fn uhub_root_intr() {
@@ -38,7 +71,8 @@ pub fn uhub_root_intr() {
     println!("| FUnction not implemented");
 
     let mut sc = unsafe { &mut *dwc_otg_sc };
-    let mut status = usb_port_status::default();
+
+    uhub_attach(sc);
 
     let req = usb_device_request {
 
@@ -50,11 +84,11 @@ pub fn uhub_root_intr() {
     };
     let (error, ptr, len) = dwc_otg_roothub_exec(sc, req);
 
-    println!("| USB: uhub_root_intr: error: {:?}, ptr: {:?}, len: {:?}", error, ptr, len);
+    println!("| USB: get uhub_root_intr: error: {:?}, ptr: {:?}, len: {:?}", error, ptr, len);
 
     //print sc_hub_temp
-    unsafe { println!("| USB: uhub_root_intr: sc_hub_temp wValue: {:?}", sc.sc_hub_temp.wValue); }
-    unsafe { println!("| USB: uhub_root_intr: sc_hub_temp usb_port_status: {:?}", sc.sc_hub_temp.ps); }
+    unsafe { println!("| USB: get uhub_root_intr: sc_hub_temp wValue: {:?}", sc.sc_hub_temp.wValue); }
+    unsafe { println!("| USB:  get uhub_root_intr: sc_hub_temp usb_port_status: {:?}", sc.sc_hub_temp.ps); }
 
     let port = unsafe { sc.sc_hub_temp.ps.wPortStatus };
     if port == 256 {
@@ -67,11 +101,11 @@ pub fn uhub_root_intr() {
             wLength: 0,
         };
         let (error, ptr, len) = dwc_otg_roothub_exec(sc, req);
-        println!("| USB: uhub_root_intr: error: {:?}, ptr: {:?}, len: {:?}", error, ptr, len);
+        println!("| USB: reset uhub_root_intr: error: {:?}, ptr: {:?}, len: {:?}", error, ptr, len);
     
         //print sc_hub_temp
-        unsafe { println!("| USB: uhub_root_intr: sc_hub_temp wValue: {:?}", sc.sc_hub_temp.wValue); }
-        unsafe { println!("| USB: uhub_root_intr: sc_hub_temp usb_port_status: {:?}", sc.sc_hub_temp.ps); }
+        unsafe { println!("| USB: reset uhub_root_intr: sc_hub_temp wValue: {:?}", sc.sc_hub_temp.wValue); }
+        unsafe { println!("| USB: reset uhub_root_intr: sc_hub_temp usb_port_status: {:?}", sc.sc_hub_temp.ps); }
     }
 
     
@@ -91,6 +125,9 @@ pub fn usb_callout_stop() {
     //not too sure what this does, TODO: implement
 }
 
+pub fn usetw2(w: &mut u16, v: u8, v2: u8) {
+    *w = ((v2 as u16) << 8) | (v as u16);
+}
 
 pub fn usetw(w: &mut u16, v: u16) {
     // w[0] = v as u8;
