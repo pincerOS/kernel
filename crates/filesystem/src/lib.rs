@@ -1414,12 +1414,12 @@ impl INodeWrapper
 
                     for i in 0..8 {
                         if (*block_buffer_byte & (1 << i)) == 0 {
+                            let new_block = base_block_index + (i + 1);
+                            
                             *block_buffer_byte |= 1 << i;
                             block_buffer_dirty = true;
                             byte_writes.insert(index, *block_buffer_byte);
                             blocks_allocated_from_block_group += 1;
-
-                            let new_block = base_block_index + i;
 
                             return_value.push(new_block);
 
