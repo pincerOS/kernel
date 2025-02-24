@@ -5,10 +5,9 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::borrow::Cow;
 use alloc::rc::Rc;
-use std::fs::DirEntry;
-use std::prelude::v1::{String, Vec};
+use alloc::string::String;
+use alloc::vec::Vec;
 
 #[cfg(test)]
 mod tests;
@@ -130,61 +129,61 @@ impl Superblock {
 }
 
 pub mod s_state {
-    const EXT2_VALID_FS: u16 = 1;
-    const EXT2_ERROR_FS: u16 = 2;
+    pub const EXT2_VALID_FS: u16 = 1;
+    pub const EXT2_ERROR_FS: u16 = 2;
 }
 
 pub mod s_errors {
-    const EXT2_ERRORS_CONTINUE: u16 = 1;
-    const EXT2_ERRORS_RO: u16 = 2;
-    const EXT2_ERRORS_PANIC: u16 = 3;
+    pub const EXT2_ERRORS_CONTINUE: u16 = 1;
+    pub const EXT2_ERRORS_RO: u16 = 2;
+    pub const EXT2_ERRORS_PANIC: u16 = 3;
 }
 
 pub mod s_creator_os {
-    const EXT2_OS_LINUX: u32 = 0;
-    const EXT2_OS_HURD: u32 = 1;
-    const EXT2_OS_MASIX: u32 = 2;
-    const EXT2_OS_FREEBSD: u32 = 3;
-    const EXT2_OS_LITES: u32 = 4;
+    pub const EXT2_OS_LINUX: u32 = 0;
+    pub const EXT2_OS_HURD: u32 = 1;
+    pub const EXT2_OS_MASIX: u32 = 2;
+    pub const EXT2_OS_FREEBSD: u32 = 3;
+    pub const EXT2_OS_LITES: u32 = 4;
 }
 
 pub mod s_rev_level {
-    const EXT2_GOOD_OLD_REV: u32 = 0;
-    const EXT2_DYNAMIC_REV: u32 = 1;
+    pub const EXT2_GOOD_OLD_REV: u32 = 0;
+    pub const EXT2_DYNAMIC_REV: u32 = 1;
 }
 
 pub mod s_feature_compat {
-    const EXT2_FEATURE_COMPAT_DIR_PREALLOC: u32 = 0x0001;
-    const EXT2_FEATURE_COMPAT_IMAGIC_INODES: u32 = 0x0002;
-    const EXT3_FEATURE_COMPAT_HAS_JOURNAL: u32 = 0x0004;
-    const EXT2_FEATURE_COMPAT_EXT_ATTR: u32 = 0x0008;
-    const EXT2_FEATURE_COMPAT_RESIZE_INO: u32 = 0x0010;
-    const EXT2_FEATURE_COMPAT_DIR_INDEX: u32 = 0x0020;
+    pub const EXT2_FEATURE_COMPAT_DIR_PREALLOC: u32 = 0x0001;
+    pub const EXT2_FEATURE_COMPAT_IMAGIC_INODES: u32 = 0x0002;
+    pub const EXT3_FEATURE_COMPAT_HAS_JOURNAL: u32 = 0x0004;
+    pub const EXT2_FEATURE_COMPAT_EXT_ATTR: u32 = 0x0008;
+    pub const EXT2_FEATURE_COMPAT_RESIZE_INO: u32 = 0x0010;
+    pub const EXT2_FEATURE_COMPAT_DIR_INDEX: u32 = 0x0020;
 }
 
 pub mod s_feature_incompat {
-    const EXT2_FEATURE_INCOMPAT_COMPRESSION: u32 = 0x0001;
-    const EXT2_FEATURE_INCOMPAT_FILETYPE: u32 = 0x0002;
-    const EXT3_FEATURE_INCOMPAT_RECOVER: u32 = 0x0004;
-    const EXT3_FEATURE_INCOMPAT_JOURNAL_DEV: u32 = 0x0008;
-    const EXT2_FEATURE_INCOMPAT_META_BG: u32 = 0x0010;
+    pub const EXT2_FEATURE_INCOMPAT_COMPRESSION: u32 = 0x0001;
+    pub const EXT2_FEATURE_INCOMPAT_FILETYPE: u32 = 0x0002;
+    pub const EXT3_FEATURE_INCOMPAT_RECOVER: u32 = 0x0004;
+    pub const EXT3_FEATURE_INCOMPAT_JOURNAL_DEV: u32 = 0x0008;
+    pub const EXT2_FEATURE_INCOMPAT_META_BG: u32 = 0x0010;
 }
 
 pub mod s_feature_ro_compat {
-    const EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER: u32 = 0x0001;
-    const EXT2_FEATURE_RO_COMPAT_LARGE_FILE: u32 = 0x0002;
-    const EXT2_FEATURE_RO_COMPAT_BTREE_DIR: u32 = 0x0004;
+    pub const EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER: u32 = 0x0001;
+    pub const EXT2_FEATURE_RO_COMPAT_LARGE_FILE: u32 = 0x0002;
+    pub const EXT2_FEATURE_RO_COMPAT_BTREE_DIR: u32 = 0x0004;
 }
 
 pub mod s_algo_bitmap {
-    const EXT2_LZV1_ALG: u32 = 0x0001;
-    const EXT2_LZRW3A_ALG: u32 = 0x0002;
-    const EXT2_GZIP_ALG: u32 = 0x0004;
-    const EXT2_BZIP2_ALG: u32 = 0x0008;
-    const EXT2_LZO_ALG: u32 = 0x0010;
+    pub const EXT2_LZV1_ALG: u32 = 0x0001;
+    pub const EXT2_LZRW3A_ALG: u32 = 0x0002;
+    pub const EXT2_GZIP_ALG: u32 = 0x0004;
+    pub const EXT2_BZIP2_ALG: u32 = 0x0008;
+    pub const EXT2_LZO_ALG: u32 = 0x0010;
 }
 
-const _: () = assert!(size_of::<Superblock>() == 1024);
+pub const _: () = assert!(size_of::<Superblock>() == 1024);
 
 #[repr(C)]
 #[derive(Clone)]
@@ -199,7 +198,7 @@ pub struct BGD {
     bg_reserved: [u8; 12],
 }
 
-const _: () = assert!(size_of::<BGD>() == 32);
+pub const _: () = assert!(size_of::<BGD>() == 32);
 
 #[repr(C)]
 pub struct INode {
@@ -224,67 +223,67 @@ pub struct INode {
 }
 
 pub mod reserved_inodes {
-    const EXT2_BAD_INO: u32 = 1;
-    const EXT2_ROOT_INO: u32 = 2;
-    const EXT2_ACL_IDX_INO: u32 = 3;
-    const EXT2_ACL_DATA_INO: u32 = 4;
-    const EXT2_BOOT_LOADER_INO: u32 = 5;
-    const EXT2_UNDEL_DIR_INO: u32 = 6;
+    pub const EXT2_BAD_INO: u32 = 1;
+    pub const EXT2_ROOT_INO: u32 = 2;
+    pub const EXT2_ACL_IDX_INO: u32 = 3;
+    pub const EXT2_ACL_DATA_INO: u32 = 4;
+    pub const EXT2_BOOT_LOADER_INO: u32 = 5;
+    pub const EXT2_UNDEL_DIR_INO: u32 = 6;
 }
 
 pub mod i_mode {
-    const EXT2_S_IFSOCK: u16 = 0xC000;
-    pub(crate) const EXT2_S_IFLNK: u16 = 0xA000;
-    const EXT2_S_IFREG: u16 = 0x8000;
-    const EXT2_S_IFBLK: u16 = 0x6000;
+    pub const EXT2_S_IFSOCK: u16 = 0xC000;
+    pub const EXT2_S_IFLNK: u16 = 0xA000;
+    pub const EXT2_S_IFREG: u16 = 0x8000;
+    pub const EXT2_S_IFBLK: u16 = 0x6000;
     pub const EXT2_S_IFDIR: u16 = 0x4000;
-    const EXT2_S_IFCHR: u16 = 0x2000;
-    const EXT2_S_IFIFO: u16 = 0x1000;
-    const EXT2_S_ISUID: u16 = 0x0800;
-    const EXT2_S_ISGID: u16 = 0x0400;
-    const EXT2_S_ISVTX: u16 = 0x0200;
-    const EXT2_S_IRUSR: u16 = 0x0100;
-    const EXT2_S_IWUSR: u16 = 0x0080;
-    const EXT2_S_IXUSR: u16 = 0x0040;
-    const EXT2_S_IRGRP: u16 = 0x0020;
-    const EXT2_S_IWGRP: u16 = 0x0010;
-    const EXT2_S_IXGRP: u16 = 0x0008;
-    const EXT2_S_IROTH: u16 = 0x0004;
-    const EXT2_S_IWOTH: u16 = 0x0002;
-    const EXT2_S_IXOTH: u16 = 0x0001;
+    pub const EXT2_S_IFCHR: u16 = 0x2000;
+    pub const EXT2_S_IFIFO: u16 = 0x1000;
+    pub const EXT2_S_ISUID: u16 = 0x0800;
+    pub const EXT2_S_ISGID: u16 = 0x0400;
+    pub const EXT2_S_ISVTX: u16 = 0x0200;
+    pub const EXT2_S_IRUSR: u16 = 0x0100;
+    pub const EXT2_S_IWUSR: u16 = 0x0080;
+    pub const EXT2_S_IXUSR: u16 = 0x0040;
+    pub const EXT2_S_IRGRP: u16 = 0x0020;
+    pub const EXT2_S_IWGRP: u16 = 0x0010;
+    pub const EXT2_S_IXGRP: u16 = 0x0008;
+    pub const EXT2_S_IROTH: u16 = 0x0004;
+    pub const EXT2_S_IWOTH: u16 = 0x0002;
+    pub const EXT2_S_IXOTH: u16 = 0x0001;
 }
 
 pub mod i_flags {
-    const EXT2_SECRM_FL: u32 = 0x00000001;
-    const EXT2_UNRM_FL: u32 = 0x00000002;
-    const EXT2_COMPR_FL: u32 = 0x00000004;
-    const EXT2_SYNC_FL: u32 = 0x00000008;
-    const EXT2_IMMUTABLE_FL: u32 = 0x00000010;
-    const EXT2_APPEND_FL: u32 = 0x00000020;
-    const EXT2_NODUMP_FL: u32 = 0x00000040;
-    const EXT2_NOATIME_FL: u32 = 0x00000080;
-    const EXT2_DIRTY_FL: u32 = 0x00000100;
-    const EXT2_COMPRBLK_FL: u32 = 0x00000200;
-    const EXT2_NOCOMPR_FL: u32 = 0x00000400;
-    const EXT2_ECOMPR_FL: u32 = 0x00000800;
-    const EXT2_BTREE_FL: u32 = 0x00001000;
-    const EXT2_INDEX_FL: u32 = 0x00001000;
-    const EXT2_IMAGIC_FL: u32 = 0x00002000;
-    const EXT3_JOURNAL_DATA_FL: u32 = 0x00004000;
-    const EXT2_RESERVED_FL: u32 = 0x80000000;
+    pub const EXT2_SECRM_FL: u32 = 0x00000001;
+    pub const EXT2_UNRM_FL: u32 = 0x00000002;
+    pub const EXT2_COMPR_FL: u32 = 0x00000004;
+    pub const EXT2_SYNC_FL: u32 = 0x00000008;
+    pub const EXT2_IMMUTABLE_FL: u32 = 0x00000010;
+    pub const EXT2_APPEND_FL: u32 = 0x00000020;
+    pub const EXT2_NODUMP_FL: u32 = 0x00000040;
+    pub const EXT2_NOATIME_FL: u32 = 0x00000080;
+    pub const EXT2_DIRTY_FL: u32 = 0x00000100;
+    pub const EXT2_COMPRBLK_FL: u32 = 0x00000200;
+    pub const EXT2_NOCOMPR_FL: u32 = 0x00000400;
+    pub const EXT2_ECOMPR_FL: u32 = 0x00000800;
+    pub const EXT2_BTREE_FL: u32 = 0x00001000;
+    pub const EXT2_INDEX_FL: u32 = 0x00001000;
+    pub const EXT2_IMAGIC_FL: u32 = 0x00002000;
+    pub const EXT3_JOURNAL_DATA_FL: u32 = 0x00004000;
+    pub const EXT2_RESERVED_FL: u32 = 0x80000000;
 }
 
-const _: () = assert!(size_of::<INode>() == 128);
+pub const _: () = assert!(size_of::<INode>() == 128);
 
 pub mod file_type {
-    const EXT2_FT_UNKNOWN: u8 = 0;
-    const EXT2_FT_REG_FILE: u8 = 1;
-    const EXT2_FT_DIR: u8 = 2;
-    const EXT2_FT_CHRDEV: u8 = 3;
-    const EXT2_FT_BLKDEV: u8 = 4;
-    const EXT2_FT_FIFO: u8 = 5;
-    const EXT2_FT_SOCK: u8 = 6;
-    const EXT2_FT_SYMLINK: u8 = 7;
+    pub const EXT2_FT_UNKNOWN: u8 = 0;
+    pub const EXT2_FT_REG_FILE: u8 = 1;
+    pub const EXT2_FT_DIR: u8 = 2;
+    pub const EXT2_FT_CHRDEV: u8 = 3;
+    pub const EXT2_FT_BLKDEV: u8 = 4;
+    pub const EXT2_FT_FIFO: u8 = 5;
+    pub const EXT2_FT_SOCK: u8 = 6;
+    pub const EXT2_FT_SYMLINK: u8 = 7;
 }
 
 pub struct INodeWrapper {
@@ -494,9 +493,9 @@ impl INodeWrapper {
         let mut logical_block_number: u32 = 0;
         let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
 
-        const TRIPLE_LINK_BLOCK_PTR_INDEX: usize = 14;
-        const DOUBLE_LINK_BLOCK_PTR_INDEX: usize = 13;
-        const SINGLE_LINK_BLOCK_PTR_INDEX: usize = 12;
+        pub const TRIPLE_LINK_BLOCK_PTR_INDEX: usize = 14;
+        pub const DOUBLE_LINK_BLOCK_PTR_INDEX: usize = 13;
+        pub const SINGLE_LINK_BLOCK_PTR_INDEX: usize = 12;
 
         if (number >= (12 + block_inode_list_size + block_inode_list_size_squared)) {
             // hard mode: go through link to list of link of list of links to list of direct
