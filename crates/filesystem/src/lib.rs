@@ -77,7 +77,7 @@ struct DirectoryEntry {
     entry_size: u16,
     name_length: u16,
 
-    name_characters: String,
+    name_characters: [u8; 256]
 }
 // https://www.nongnu.org/ext2-doc/ext2.html
 
@@ -463,7 +463,10 @@ where
 
         if node.is_dir() {
             for dir_entry in dir_entries {
-                if (dir_entry.name_characters == name) {
+                let dir_entry_str_slice: &str =
+                    std::str::from_utf8(&dir_entry.name_characters[0..dir_entry.name_length as usize]).unwrap();
+
+                if dir_entry_str_slice == name {
                     // TODO: find out how to do operator overloading in rust and convert this into
                     // TODO: a mut self method
                     let inode: INode = Self::get_inode(
@@ -685,14 +688,18 @@ impl INodeWrapper {
             )
             .into_owned();
 
-            entries.push(DirectoryEntry {
+            let mut dir_entry = DirectoryEntry {
                 // all part of the spec
                 inode_number: directory_entry_inode_num,
                 entry_size: directory_entry_size as u16,
                 name_length: directory_entry_name_length as u16,
-
-                name_characters: directory_entry_name,
-            });
+                
+                name_characters: [0; 256]
+            };
+            
+            dir_entry.name_characters[0..dir_entry.name_length as usize].copy_from_slice(directory_entry_name.as_bytes());
+            
+            entries.push(dir_entry);
 
             i += directory_entry_size as usize;
         }
