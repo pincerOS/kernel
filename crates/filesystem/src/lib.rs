@@ -310,7 +310,7 @@ impl<D> Ext2<D>
 where
     D: BlockDevice,
 {
-    fn read_logical_block(
+    fn read_logical_block_inner(
         device: &mut D,
         superblock: &Superblock,
         logical_block_start: usize,
@@ -333,13 +333,13 @@ where
         }
     }
 
-    pub fn read_logical_block_self(
+    pub fn read_logical_block(
         &mut self,
         logical_block_start: usize,
         logical_block_length: usize,
         buffer: &mut [u8],
     ) -> Result<(), Ext2Error> {
-        Self::read_logical_block(
+        Self::read_logical_block_inner(
             &mut self.device,
             &self.superblock,
             logical_block_start,
@@ -369,7 +369,7 @@ where
         let mut block_buffer: Vec<u8> = Vec::new();
         block_buffer.resize(superblock.get_block_size(), 0);
 
-        Self::read_logical_block(device, superblock, inode_table_block_with_offset,
+        Self::read_logical_block_inner(device, superblock, inode_table_block_with_offset,
                                  1, block_buffer.as_mut_slice())?;
 
         let mut inode_data: [u8; size_of::<INode>()] = [0x00; size_of::<INode>()];
@@ -429,7 +429,7 @@ where
             )
         };
 
-        Self::read_logical_block(
+        Self::read_logical_block_inner(
             &mut device, &superblock,
             block_group_descriptor_block,
             block_group_descriptor_length,
@@ -536,7 +536,7 @@ impl INodeWrapper {
             // hard mode: go through link to list of link of list of links to list of direct
             // block ptrs
 
-            ext2.read_logical_block_self(
+            ext2.read_logical_block(
                 self.inode.i_block[TRIPLE_LINK_BLOCK_PTR_INDEX] as usize,
                 1,
                 &mut block_buffer,
@@ -548,7 +548,7 @@ impl INodeWrapper {
                 (second_level_base_num / block_inode_list_size_squared) * size_of::<u32>();
             let block_second_level_index: u32 = Self::get_word(&block_buffer[index..index + 4]);
 
-            ext2.read_logical_block_self(block_second_level_index as usize, 1, &mut block_buffer);
+            ext2.read_logical_block(block_second_level_index as usize, 1, &mut block_buffer);
 
             let first_level_base_num: usize = second_level_base_num % block_inode_list_size_squared;
             let block_buffer_second_index: usize =
@@ -557,7 +557,7 @@ impl INodeWrapper {
                 &block_buffer[block_buffer_second_index..block_buffer_second_index + 4],
             );
 
-            ext2.read_logical_block_self(block_first_level_index as usize, 1, &mut block_buffer);
+            ext2.read_logical_block(block_first_level_index as usize, 1, &mut block_buffer);
 
             let block_buffer_first_index: usize =
                 (first_level_base_num % block_inode_list_size) * size_of::<u32>();
@@ -567,7 +567,7 @@ impl INodeWrapper {
             );
         } else if number >= 12 + block_inode_list_size {
             // medium: go through link to list of links to list of direct block ptrs
-            ext2.read_logical_block_self(
+            ext2.read_logical_block(
                 self.inode.i_block[DOUBLE_LINK_BLOCK_PTR_INDEX] as usize,
                 1,
                 &mut block_buffer,
@@ -580,13 +580,13 @@ impl INodeWrapper {
             let block_final_level_index: usize =
                 (first_level_base_num % block_inode_list_size) * size_of::<u32>();
 
-            ext2.read_logical_block_self(block_first_level_index, 1, &mut block_buffer);
+            ext2.read_logical_block(block_first_level_index, 1, &mut block_buffer);
 
             logical_block_number =
                 Self::get_word(&block_buffer[block_final_level_index..block_final_level_index + 4]);
         } else if number >= 12 {
             // fairly easy: go through link to list of direct block ptrs
-            ext2.read_logical_block_self(
+            ext2.read_logical_block(
                 self.inode.i_block[SINGLE_LINK_BLOCK_PTR_INDEX] as usize,
                 1,
                 &mut block_buffer,
@@ -621,7 +621,7 @@ impl INodeWrapper {
             let cur_file_block: usize = logical_block_start + (i as usize);
             let logical_block_num: usize = self.get_inode_block_num(cur_file_block, ext2)? as usize;
 
-            ext2.read_logical_block_self(logical_block_num, 1, &mut block_tmp_buffer);
+            ext2.read_logical_block(logical_block_num, 1, &mut block_tmp_buffer);
 
             for j in 0..logical_block_size {
                 buffer[(i * logical_block_size) + j] = block_tmp_buffer[j];
@@ -693,12 +693,12 @@ impl INodeWrapper {
                 inode_number: directory_entry_inode_num,
                 entry_size: directory_entry_size as u16,
                 name_length: directory_entry_name_length as u16,
-                
+
                 name_characters: [0; 256]
             };
-            
+
             dir_entry.name_characters[0..dir_entry.name_length as usize].copy_from_slice(directory_entry_name.as_bytes());
-            
+
             entries.push(dir_entry);
 
             i += directory_entry_size as usize;
