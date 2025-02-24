@@ -1500,6 +1500,7 @@ impl INodeWrapper
     fn allocate_blocks_for_block_list<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>,
                                                       start_of_list: usize, end_of_list: usize,
                                                       block_list_buffer: &mut AlignedBlock<BLOCK_SIZE>,
+                                                      new_block_storage_blocks_allocated: &mut usize,
                                                       all_blocks_or_fail: bool, deferred_writes: &mut DeferredWriteMap) -> Result<Vec<usize>, Ext2Error> {
         let mut new_blocks_needed_for_block_list_count: usize = 0;
 
@@ -1515,8 +1516,17 @@ impl INodeWrapper
             }
         }
 
-        self.find_new_blocks(ext2, new_blocks_needed_for_block_list_count,
-                             all_blocks_or_fail, deferred_writes)
+        let result: Result<Vec<usize>, Ext2Error> = self.find_new_blocks(ext2, new_blocks_needed_for_block_list_count,
+                                                                         all_blocks_or_fail, deferred_writes);
+        if result.is_ok() {
+            let result_val = result.unwrap();
+
+            *new_block_storage_blocks_allocated += result_val.len();
+
+            Ok(result_val)
+        } else {
+            result
+        }
     }
 
     fn write_doublely_indirect_blocks_to_inode<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>,
@@ -1524,6 +1534,7 @@ impl INodeWrapper
                                                              num_of_blocks_allocated: &mut usize,
                                                              all_blocks_or_fail: bool,
                                                              blocks_newly_allocated: &mut usize,
+                                                             new_block_storage_blocks_allocated: &mut usize,
                                                              new_blocks: &[usize],
                                                              deferred_writes: &mut DeferredWriteMap) -> Result<(), Ext2Error> {
         let count_of_doubly_linked_blocks: usize = *num_of_blocks_allocated -
@@ -1540,6 +1551,7 @@ impl INodeWrapper
         let new_block_list_blocks =
             self.allocate_blocks_for_block_list(ext2, starting_doubly_linked_block,
                                                 ending_doubly_linked_block, &mut block_list_buffer,
+                                                new_block_storage_blocks_allocated,
                                                 all_blocks_or_fail, deferred_writes)?;
         let mut new_block_list_index: usize = 0;
 
@@ -1584,8 +1596,10 @@ impl INodeWrapper
                                                                all_blocks_or_fail: bool,
                                                                blocks_newly_allocated: &mut usize,
                                                                new_blocks: &[usize],
+                                                               new_block_storage_blocks_allocated: &mut usize,
                                                                deferred_writes: &mut DeferredWriteMap) -> Result<(), Ext2Error>  {
         self.allocate_indirect_list_block_if_needed(ext2, Self::TRIPLE_LINK_BLOCK_PTR_INDEX,
+                                                    new_block_storage_blocks_allocated,
                                                     all_blocks_or_fail, deferred_writes)?;
 
         let mut block_list_buffer = AlignedBlock([0; BLOCK_SIZE]);
@@ -1604,8 +1618,9 @@ impl INodeWrapper
         let new_block_list_blocks: Vec<usize> =
             self.allocate_blocks_for_block_list(ext2, starting_triply_directed_list_block,
                                                 ending_triply_directed_list_block,
-                                                &mut block_list_buffer, all_blocks_or_fail,
-                                                deferred_writes)?;
+                                                &mut block_list_buffer,
+                                                new_block_storage_blocks_allocated,
+                                                all_blocks_or_fail, deferred_writes)?;
         let mut new_block_list_index: usize = 0;
         let triply_indirect_block_list: &mut[u32] = 
             bytemuck::cast_slice_mut::<u8, u32>(&mut block_list_buffer.0);
@@ -1621,6 +1636,7 @@ impl INodeWrapper
                                                          triply_indirect_block_list[i] as usize,
                                                          num_of_blocks_allocated,
                                                          all_blocks_or_fail, blocks_newly_allocated,
+                                                         new_block_storage_blocks_allocated,
                                                          new_blocks, deferred_writes)?;
         }
 
@@ -1629,6 +1645,7 @@ impl INodeWrapper
 
     fn allocate_indirect_list_block_if_needed<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>,
                                                               indirect_index: usize,
+                                                              new_block_storage_blocks_allocated: &mut usize,
                                                               all_blocks_or_fail: bool,
                                                               deferred_writes: &mut DeferredWriteMap) -> Result<(), Ext2Error>  {
         if self.inode.i_block[indirect_index] == UNALLOCATED_BLOCK_SLOT {
@@ -1641,12 +1658,15 @@ impl INodeWrapper
             }
 
             self.inode.i_block[indirect_index] = new_blocks_allocated[0] as u32;
+
+            *new_block_storage_blocks_allocated += 1;
         }
         Ok(())
     }
 
     fn write_new_blocks_to_inode<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>,
                                                  new_blocks: &[usize],
+                                                 new_block_storage_blocks_allocated: &mut usize,
                                                  all_blocks_or_fail: bool,
                                                  deferred_writes: &mut DeferredWriteMap)
                                                  -> Result<usize, Ext2Error> {
@@ -1686,6 +1706,7 @@ impl INodeWrapper
                 num_of_blocks_allocated - ext2.get_inline_block_capacity();
 
             self.allocate_indirect_list_block_if_needed(ext2, Self::SINGLE_LINK_BLOCK_PTR_INDEX,
+                                                        new_block_storage_blocks_allocated,
                                                         all_blocks_or_fail, deferred_writes)?;
 
             self.write_indirected_block_to_inode(ext2,
@@ -1700,19 +1721,23 @@ impl INodeWrapper
             num_of_blocks_allocated < double_block_limit {
             // find all blocks needed to complete the write
             self.allocate_indirect_list_block_if_needed(ext2, Self::DOUBLE_LINK_BLOCK_PTR_INDEX,
+                                                        new_block_storage_blocks_allocated,
                                                         all_blocks_or_fail, deferred_writes)?;
 
             self.write_doublely_indirect_blocks_to_inode(ext2,
                                                          self.inode.i_block[Self::DOUBLE_LINK_BLOCK_PTR_INDEX] as usize,
                                                          &mut num_of_blocks_allocated,
-                                                         all_blocks_or_fail, &mut blocks_newly_allocated,
+                                                         all_blocks_or_fail,
+                                                         &mut blocks_newly_allocated,
+                                                         new_block_storage_blocks_allocated,
                                                          new_blocks, deferred_writes)?;
         }
 
         if blocks_newly_allocated < new_blocks.len() {
             self.write_triplely_indirect_blocks_to_inode(ext2, &mut num_of_blocks_allocated,
                                                          all_blocks_or_fail, &mut blocks_newly_allocated,
-                                                         new_blocks, deferred_writes)?;
+                                                         new_blocks, new_block_storage_blocks_allocated,
+                                                         deferred_writes)?;
         }
 
         Ok(blocks_newly_allocated)
@@ -1758,7 +1783,9 @@ impl INodeWrapper
             let new_blocks_slice: &[usize] =
                 &new_blocks_allocated[old_new_blocks_allocated_size..];
             
-            self.write_new_blocks_to_inode(ext2, new_blocks_slice, true, deferred_writes)?;
+            self.write_new_blocks_to_inode(ext2, new_blocks_slice,
+                                           &mut new_block_storage_blocks_allocated,
+                                           true, deferred_writes)?;
         }
 
         let new_data_block_allocated_num: usize =
@@ -1785,7 +1812,8 @@ impl INodeWrapper
         }
 
         self.update_size(self.size() + (bytes_written as u64), ext2);
-        self.set_block_allocated_count(ext2, new_data_block_allocated_num);
+        self.set_block_allocated_count(ext2,
+                                       new_data_block_allocated_num + new_block_storage_blocks_allocated);
         self.get_deferred_write_inode(ext2, deferred_writes)?;
 
         Ok(bytes_written)
