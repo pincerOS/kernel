@@ -323,31 +323,13 @@ pub const UE_ISO_USAGE_IMPLICT_FB: u8 = 0x20;
 
 pub const UE_ZERO_MPS: u16 = 0xFFFF; // Internal use only
 
-// Functions to replace C macros
-impl usb_endpoint_descriptor {
-    pub fn ue_get_dir(a: u8) -> u8 {
-        a & 0x80
-    }
 
-    pub fn ue_set_dir(a: u8, d: u8) -> u8 {
-        a | ((d & 1) << 7)
-    }
-
-    pub fn ue_get_addr(a: u8) -> u8 {
-        a & UE_ADDR
-    }
-
-    pub fn ue_get_xfertype(a: u8) -> u8 {
-        a & UE_XFERTYPE
-    }
-
-    pub fn ue_get_iso_type(a: u8) -> u8 {
-        a & UE_ISO_TYPE
-    }
-
-    pub fn ue_get_iso_usage(a: u8) -> u8 {
-        a & UE_ISO_USAGE
-    }
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone)]
+pub struct usb_endpoint_ss_comp_descriptor {
+    pub bLength: u8,
+    pub bDescriptorType: u8,
+    pub bMaxBurst: u8,
+    pub bmAttributes: u8,
+    pub wBytesPerInterval: u16,
 }
-
-

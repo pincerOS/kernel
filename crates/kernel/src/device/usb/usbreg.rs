@@ -27,6 +27,26 @@
  * SUCH DAMAGE.
  */
 
+
+
+pub const USB_FS_ISOC_UFRAME_MAX: u32 = 4; // exclusive unit
+pub const USB_BUS_MAX: u32 = 256; // units
+pub const USB_MAX_DEVICES: u32 = 128; // units
+pub const USB_CONFIG_MAX: u32 = 65535; // bytes
+pub const USB_IFACE_MAX: u32 = 32; // units
+pub const USB_FIFO_MAX: u32 = 128; // units
+pub const USB_MAX_EP_STREAMS: u32 = 8; // units
+pub const USB_MAX_EP_UNITS: u32 = 32; // units
+pub const USB_MAX_PORTS: u32 = 255; // units
+
+pub const USB_MAX_FS_ISOC_FRAMES_PER_XFER: u32 = 120; // units
+pub const USB_MAX_HS_ISOC_FRAMES_PER_XFER: u32 = 8 * 120; // units
+
+pub const USB_HUB_MAX_DEPTH: u32 = 5;
+pub const USB_EP0_BUFSIZE: u32 = 1024; // bytes
+pub const USB_CS_RESET_LIMIT: u32 = 20; // failures = 20 * 50 ms = 1sec
+
+
 /* Device status flags */
 pub const UDS_SELF_POWERED: u16 = 0x0001;
 pub const UDS_REMOTE_WAKEUP: u16 = 0x0002;
