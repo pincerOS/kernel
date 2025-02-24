@@ -1276,10 +1276,6 @@ impl INodeWrapper
 
         return_value.resize(blocks_to_read * BLOCK_SIZE,0);
 
-        let blocks_allocated = self.block_allocated_count(ext2);
-
-        //assert_eq!(blocks_to_read, blocks_allocated);
-
         self.read_block(0, blocks_to_read, return_value.as_mut_slice(), ext2, None)?;
         
         return_value.resize(self.size() as usize, 0);
@@ -1303,7 +1299,7 @@ impl INodeWrapper
 
         entries_raw_bytes.resize(dir_size / 9, 0);
 
-        let directory_entry_size_blocks: usize = self.block_allocated_count(ext2);
+        let directory_entry_size_blocks: usize = Self::div_up(self.size() as usize, BLOCK_SIZE);
 
         entries_raw_bytes.resize(directory_entry_size_blocks * BLOCK_SIZE,
                                  0);
@@ -1663,7 +1659,7 @@ impl INodeWrapper
         // TODO: write new block num to inode
         // need to handle unallocated blocks containing doubly linked inode blocks
         // and singly linked inode block
-        let mut num_of_blocks_allocated: usize = self.block_allocated_count::<D>(ext2);
+        let mut num_of_blocks_allocated: usize = Self::div_up(self.size() as usize, BLOCK_SIZE);
 
         let mut blocks_newly_allocated: usize = 0;
 
@@ -1733,7 +1729,7 @@ impl INodeWrapper
     fn append_file_no_writeback<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>, new_data: &[u8],
                                 all_bytes_or_fail: bool,
                                 deferred_writes: &mut DeferredWriteMap) -> Result<usize, Ext2Error> {
-        let allocated_block_count: usize = self.block_allocated_count(ext2);
+        let allocated_block_count: usize = Self::div_up(self.size() as usize, BLOCK_SIZE);
         let base_allocated_block: Option<usize> =
             if allocated_block_count == 0 { None } else {
                 Some(self.get_inode_block_num(allocated_block_count - 1, ext2,
@@ -1810,7 +1806,7 @@ impl INodeWrapper
     pub fn overwrite_file<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>, new_data: &[u8],
                                           all_bytes_or_fail: bool) -> Result<usize, Ext2Error> {
         // TODO(Sasha): Handle partial writes, properly report bytes written
-        let allocated_block_count = self.block_allocated_count(ext2);
+        let allocated_block_count = Self::div_up(self.size() as usize, BLOCK_SIZE);
         let mut deferred_writes: DeferredWriteMap = BTreeMap::new();
         let mut bytes_written: u64 = 0;
         if allocated_block_count == Self::div_up(new_data.len(), BLOCK_SIZE) {
