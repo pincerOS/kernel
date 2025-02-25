@@ -1,3 +1,4 @@
+pub mod async_handler;
 pub mod context;
 pub mod exceptions;
 pub mod scheduler;
@@ -36,21 +37,25 @@ pub unsafe extern "C" fn run_event_loop() -> ! {
                 unsafe { thread.enter_thread() };
             }
             Event::AsyncTask(task_id) => {
-                let waker = task::create_waker(task_id);
-                let mut context = core::task::Context::from_waker(&waker);
+                run_async_task(task_id);
+            }
+        }
+    }
+}
 
-                if let Some(mut task) = task::TASKS.take_task(task_id) {
-                    match task.poll(&mut context) {
-                        core::task::Poll::Ready(()) => {
-                            task::TASKS.remove_task(task_id);
-                        }
-                        core::task::Poll::Pending => {
-                            let woken = task::TASKS.return_task(task_id, task);
-                            if woken {
-                                SCHEDULER.add_task(Event::AsyncTask(task_id));
-                            }
-                        }
-                    }
+fn run_async_task(task_id: task::TaskId) {
+    let waker = task::create_waker(task_id);
+    let mut context = core::task::Context::from_waker(&waker);
+
+    if let Some(mut task) = task::TASKS.take_task(task_id) {
+        match task.poll(&mut context) {
+            core::task::Poll::Ready(()) => {
+                task::TASKS.remove_task(task_id);
+            }
+            core::task::Poll::Pending => {
+                let woken = task::TASKS.return_task(task_id, task);
+                if woken {
+                    SCHEDULER.add_task(Event::AsyncTask(task_id));
                 }
             }
         }

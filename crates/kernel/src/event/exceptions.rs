@@ -132,36 +132,36 @@ extern "C" {
     static mut save_context_br_lowEL32_serr: u32;
 }
 
+fn encode_bl(addr: usize, caller_addr: u64) -> u32 {
+    let diff = addr as i64 - caller_addr as i64;
+    let shifted = diff >> 2;
+    assert!(
+        (diff & 0b11 == 0) && shifted >= (-1 << 25) && shifted < (1 << 25),
+        "offset out of range: {diff}"
+    );
+    ((0b100101 << 26) | (shifted & ((1 << 26) - 1))) as u32
+}
+
+fn overwrite_target(target: *mut u32, addr: usize) {
+    let value = encode_bl(addr, target as u64);
+    unsafe {
+        core::ptr::write_volatile(target, value.to_le());
+        // Magic sequence to flush instruction cache?
+        core::arch::asm!(
+            "dc cvau, {0}",
+            "dsb ish",
+            "ic ivau, {0}",
+            "dsb ish",
+            "isb",
+            in(reg) target,
+        );
+    }
+}
+
 pub unsafe fn override_irq_handler(handler: ExceptionHandler) {
     let addr = handler as usize;
-
-    let encode_bl = |caller_addr: u64| {
-        let diff = addr as i64 - caller_addr as i64;
-        let shifted = diff >> 2;
-        assert!(
-            (diff & 0b11 == 0) && shifted >= (-1 << 25) && shifted < (1 << 25),
-            "offset out of range: {diff}"
-        );
-        ((0b100101 << 26) | (shifted & ((1 << 26) - 1))) as u32
-    };
-    let overwrite_target = |target: *mut u32| {
-        let value = encode_bl(target as u64);
-        unsafe { core::ptr::write_volatile(target, value.to_le()) };
-        unsafe {
-            // Magic sequence to flush instruction cache?
-            core::arch::asm!(
-                "dc cvau, {0}",
-                "dsb ish",
-                "ic ivau, {0}",
-                "dsb ish",
-                "isb",
-                in(reg) target,
-            );
-        }
-    };
-
-    overwrite_target(&raw mut save_context_br_curEL_sp1_irq);
-    overwrite_target(&raw mut save_context_br_lowEL64_irq);
+    overwrite_target(&raw mut save_context_br_curEL_sp1_irq, addr);
+    overwrite_target(&raw mut save_context_br_lowEL64_irq, addr);
 }
 
 // Docs: Armv8-A ARM - D23.2.41 ESR_EL2, Exception Syndrome Register (EL2)
@@ -193,7 +193,7 @@ static EXCEPTION_CLASS: [&str; 64] = {
     arr[0b100101] = "data abort (same EL)";
     arr[0b100110] = "SP alignment fault";
     arr[0b101000] = "FPE (32 bit)";
-    arr[0b101100] = "FPE (364 bit)";
+    arr[0b101100] = "FPE (64 bit)";
     arr[0b101101] = "GCS exception";
     arr[0b101111] = "SError exception";
     arr[0b110000] = "breakpoint (lower EL)";
@@ -284,9 +284,6 @@ unsafe extern "C" fn exception_handler_user(
         .get(exception_class as usize)
         .unwrap_or(&"unspecified");
     let _insn_len = if ((esr >> 25) & 1) != 0 { 4 } else { 2 };
-
-    // let insn = unsafe { core::ptr::read_volatile(elr as *const u32) };
-    // println!("Len: {:?}, insn {:#010x}", insn_len, insn);
 
     match exception_class {
         0x15 => {
