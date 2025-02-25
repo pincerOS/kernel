@@ -59,7 +59,8 @@ pub enum Ext2Error {
     TooLongFileName,
     InvalidMode,
     FileNotFound,
-    NotEnoughDeviceSpace
+    NotEnoughDeviceSpace,
+    FileSizeMismatch
 }
 
 pub trait BlockDevice {
@@ -1831,6 +1832,51 @@ impl INodeWrapper
         Ok(bytes_written)
     }
 
+    pub fn truncate_file<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>, num_bytes: u64) -> Result<u64, Ext2Error> {
+        // TODO: 
+        let mut deferred_writes = BTreeMap::new();
+        let block_info: INodeBlockInfo = Ext2::get_block_that_has_inode(&mut ext2.device, &ext2.superblock, &ext2.block_group_descriptor_tables, self.inode_num as usize);
+        if self.size() > num_bytes {
+            return Err(Ext2Error::FileSizeMismatch);
+        } else if (self.size() - num_bytes) / BLOCK_SIZE as u64 == self.size() / BLOCK_SIZE as u64 {
+            // easy case
+            self.update_size(self.size() - num_bytes, ext2);
+            self.get_deferred_write_inode(ext2, &mut deferred_writes)?;
+        } else {
+            let num_blocks_remaining = Self::div_up(self.size() as usize - num_bytes as usize, BLOCK_SIZE);
+            let num_blocks_removed = Self::div_up(self.size() as usize, BLOCK_SIZE) - num_blocks_remaining;
+            let num_bytes_remaining_removed = num_bytes as usize - num_blocks_removed * BLOCK_SIZE; 
+            
+            // unallocate num_blocks_removed blocks
+            for i in (num_blocks_remaining..Self::div_up(self.size() as usize, BLOCK_SIZE)).rev() {
+                let logical_block_num = self.get_inode_block_num(i, ext2, Some(&deferred_writes))?;
+                // update block bitmap
+                let block_group_num = logical_block_num / ext2.superblock.s_blocks_per_group;
+                let index = logical_block_num % ext2.superblock.s_blocks_per_group;
+
+                let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+
+                ext2.read_logical_block_self(ext2.block_group_descriptor_tables[block_group_num as usize].bg_block_bitmap as usize, 1,
+                    &mut block_buffer, Some(&deferred_writes))?;
+                let mut block_buffer_byte = block_buffer[index as usize / 8];
+                block_buffer_byte &= 0b11111111 - (1 << (index % 8));
+                ext2.add_write_to_deferred_writes_map(&mut deferred_writes, ext2.block_group_descriptor_tables[block_group_num as usize].bg_block_bitmap as usize, index as usize, slice::from_ref(&block_buffer_byte), Some(block_buffer))?;
+
+                // increment free blocks count
+                ext2.block_group_descriptor_tables[block_group_num as usize].bg_free_blocks_count += 1;
+                ext2.superblock.s_free_blocks_count += 1;
+
+                ext2.add_block_group_deferred_write(&mut deferred_writes, block_group_num as usize)?;
+            }
+            ext2.add_super_block_deferred_write(&mut deferred_writes)?;
+
+            self.update_size(self.size() - num_bytes_remaining_removed as u64, ext2);
+            self.get_deferred_write_inode(ext2, &mut deferred_writes)?;
+        }
+        ext2.write_back_deferred_writes(deferred_writes)?;
+        Ok(num_bytes)
+    }
+
     // overwrite over file, with the new file size being the size of new_data
     pub fn overwrite_file<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>, new_data: &[u8],
                                           all_bytes_or_fail: bool) -> Result<usize, Ext2Error> {
@@ -1865,9 +1911,41 @@ impl INodeWrapper
             let new_slice: &[u8] = &new_data[allocated_block_count*BLOCK_SIZE..new_data.len()];
             bytes_written += self.append_file(ext2, new_slice, all_bytes_or_fail)? as u64;
         } else {
-            // TODO(Sasha): come back to this when deletion is implemented
-            todo!();
+            self.truncate_file(ext2, new_data.len() as u64 - self.size() as u64);
+            for i in 0..allocated_block_count {
+                let cur_block = self.get_inode_block_num(i, ext2, Some(&deferred_writes))? as usize;
+                let current_byte_slice: &[u8] = &new_data[i*BLOCK_SIZE..std::cmp::min((i+1)*BLOCK_SIZE, new_data.len())];
+                ext2.add_write_to_deferred_writes_map(&mut deferred_writes, cur_block, 0,
+                    current_byte_slice, None)?;
+                bytes_written += (std::cmp::min((i+1)*BLOCK_SIZE, new_data.len()) - i*BLOCK_SIZE) as u64;
+            }
+            self.update_size(bytes_written, ext2);
+            self.get_deferred_write_inode(ext2, &mut deferred_writes)?;
+            ext2.write_back_deferred_writes(deferred_writes)?;
         }
         Ok(new_data.len())
+    }
+
+    pub fn delete_file<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>) -> Result<usize, Ext2Error> {
+        self.truncate_file(ext2, self.size());
+        let actual_inode_num = self.inode_num - 1; // inodes are 1 indexed
+        let block_group_num = actual_inode_num as usize / ext2.superblock.s_blocks_per_group as usize;
+        let index = actual_inode_num as usize % ext2.superblock.s_blocks_per_group as usize;
+        let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+
+        let mut deferred_writes: DeferredWriteMap = BTreeMap::new();
+
+        ext2.read_logical_block_self(ext2.block_group_descriptor_tables[block_group_num as usize].bg_inode_bitmap as usize, 1,
+            &mut block_buffer, Some(&deferred_writes))?;
+        let mut block_buffer_byte = block_buffer[index as usize / 8];
+        block_buffer_byte &= 0b11111111 - (1 << (index % 8));
+        ext2.add_write_to_deferred_writes_map(&mut deferred_writes, ext2.block_group_descriptor_tables[block_group_num as usize].bg_inode_bitmap as usize, index as usize, slice::from_ref(&block_buffer_byte), Some(block_buffer))?;
+
+        ext2.block_group_descriptor_tables[block_group_num].bg_free_inodes_count -= 1;
+        ext2.superblock.s_free_inodes_count += 1;
+        //TODO: if this is the last inode in this block, should we deallocate the block?
+        ext2.add_block_group_deferred_write(&mut deferred_writes, block_group_num as usize)?;
+        ext2.add_super_block_deferred_write(&mut deferred_writes)?;
+        //TODO: probably want to delete myself
     }
 }

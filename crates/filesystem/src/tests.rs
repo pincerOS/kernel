@@ -391,6 +391,25 @@ fn file_overwrite_moreblocks_test() {
 }
 
 #[test]
+fn file_overwrite_lessblocks_test() {
+    let image_path = "rw_file_overwrite_lessblocks.img";
+    let mut ext2 =
+        create_ext2_fs("../../test/example_1.dir", 1024, image_path, false);
+
+    let verify_requests = vec![
+        VerifyRequest {
+            file_path: b"folder/asdf.txt",
+            data: b"Hi",
+            expect_data: Some(b"Hi"),
+            write_mode: WriteMode::Write,
+            create_dirs_if_nonexistent: false
+        }
+    ];
+
+    write_and_verify_test(&mut ext2, &verify_requests, image_path);
+}
+
+#[test]
 fn file_creation_test() {
     let image_path = "rw_file_creation.img";
     let mut ext2 =
