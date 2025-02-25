@@ -1927,6 +1927,7 @@ impl INodeWrapper
     }
 
     pub fn delete_file<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>) -> Result<usize, Ext2Error> {
+        let size = self.size() as usize;
         self.truncate_file(ext2, self.size());
         let actual_inode_num = self.inode_num - 1; // inodes are 1 indexed
         let block_group_num = actual_inode_num as usize / ext2.superblock.s_blocks_per_group as usize;
@@ -1947,5 +1948,6 @@ impl INodeWrapper
         ext2.add_block_group_deferred_write(&mut deferred_writes, block_group_num as usize)?;
         ext2.add_super_block_deferred_write(&mut deferred_writes)?;
         //TODO: probably want to delete myself
+        Ok(size)
     }
 }
