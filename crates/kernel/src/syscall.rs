@@ -4,7 +4,7 @@ use core::task::Poll;
 
 use alloc::boxed::Box;
 
-use crate::event::context::{deschedule_thread, Context, DescheduleAction, CORES};
+use crate::event::context::{enter_event_loop, Context, CORES};
 use crate::event::exceptions::register_syscall_handler;
 use crate::event::{self, task, thread};
 
@@ -72,7 +72,7 @@ where
             }
 
             // Switch back to the event loop.
-            unsafe { deschedule_thread(DescheduleAction::FreeThread, None) }
+            unsafe { enter_event_loop() };
         }
     }
 }
