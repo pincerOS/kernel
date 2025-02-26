@@ -1,5 +1,10 @@
 
-use usb_core::usb_xfer;
+use super::usb_core::*;
+use super::usb_device::*;
+use super::usb_bus::*;
+use super::usb::*;
+use super::usbreg::*;
+use super::usb_controller::*;
 
 pub struct usb_interface {
     pub idesc: *mut usb_interface_descriptor,

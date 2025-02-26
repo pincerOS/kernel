@@ -36,7 +36,7 @@ pub const USB_CONFIG_MAX: u32 = 65535; // bytes
 pub const USB_IFACE_MAX: u32 = 32; // units
 pub const USB_FIFO_MAX: u32 = 128; // units
 pub const USB_MAX_EP_STREAMS: u32 = 8; // units
-pub const USB_MAX_EP_UNITS: u32 = 32; // units
+pub const USB_MAX_EP_UNITS: usize = 32; // units
 pub const USB_MAX_PORTS: u32 = 255; // units
 
 pub const USB_MAX_FS_ISOC_FRAMES_PER_XFER: u32 = 120; // units
@@ -93,11 +93,11 @@ pub const UPS_RESET: u16 = 0x0010;
 pub const UPS_PORT_L1: u16 = 0x0020; // USB 2.0 only
 // The link-state bits are valid for Super-Speed USB HUBs
 pub const fn UPS_PORT_LINK_STATE_GET(x: u16) -> u16 {
-    ((x >> 5) & 0xF)
+    (x >> 5) & 0xF
 }
 
 pub const fn UPS_PORT_LINK_STATE_SET(x: u16) -> u16 {
-    ((x & 0xF) << 5)
+    (x & 0xF) << 5
 }
 pub const UPS_PORT_LS_U0: u16 = 0x00;
 pub const UPS_PORT_LS_U1: u16 = 0x01;

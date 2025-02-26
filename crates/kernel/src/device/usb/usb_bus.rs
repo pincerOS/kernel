@@ -1,13 +1,19 @@
 
+use super::usb_controller::*;
 
+pub fn usb_bus_init(bus: *mut usb_bus) {
+}
+
+pub fn usb_bus_lock(bus: *mut usb_bus) {
+}
+
+pub fn usb_bus_unlock(bus: *mut usb_bus) {
+}
 
 
 pub struct usb_bus {
-    //add a lock
-    methods: *mut usb_bus_methods,
 
+    pub methods: Option<*mut usb_bus_methods>,
+    pub hw_power_state: u16,
 }
 
-pub struct usb_bus_methods {
-    roothub_exec: fn(*mut usb_device, *mut usb_device_request) -> (usb_error_t, *const core::ffi::c_void, u16),
-}

@@ -1,5 +1,6 @@
 
-
+use super::usb::*;
+use super::usbdi::*;
 
 
 pub struct usb_xfer {
@@ -20,7 +21,7 @@ pub struct usb_xfer {
 	// void   *td_transfer_last;	/* used by HC driver */
 	// void   *td_transfer_cache;	/* used by HC driver */
 	// void   *priv_sc;		/* device driver data pointer 1 */
-	// void   *priv_fifo;		/* device driver data pointer 2 */
+	// void   *priv_fifo;		/* device drive	r data pointer 2 */
 	// void   *local_buffer;
 	// usb_frlength_t *frlengths;
 	// struct usb_page_cache *frbuffers;

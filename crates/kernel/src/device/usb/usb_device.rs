@@ -1,16 +1,36 @@
+use super::usb::usb_error_t;
+use super::usbdi::*;
+use super::usbreg::*;
+use super::usb_bus::*;
+use super::usb_hub::*;
+use super::usb_core::*;
+use super::usb::*;
 
 
+
+pub fn usb_alloc_device() -> *mut usb_device {
+    // let dev = kmalloc(size_of::<usb_device>(), GFP_KERNEL) as *mut usb_device;
+    // if dev.is_null() {
+    //     return core::ptr::null_mut();
+    // }
+    // dev
+    core::ptr::null_mut()
+}
+
+pub fn usb_probe_and_attach() -> usb_error_t {
+    usb_error_t::USB_ERR_NORMAL_COMPLETION
+}
 
 pub struct usb_device {
     pub iface: *mut usb_interface,
     pub ctrl_ep: *mut usb_endpoint,
-    pub ep: [*mut usb_endpoint; USB_MAX_ENDPOINTS],
+    pub endpoints: [*mut usb_endpoint; USB_MAX_EP_UNITS],
     
-    pub bus: *mut usb_bus,
+    pub bus: usb_bus,
     pub parent_hub: *mut usb_hub,
     pub cdesc: *mut usb_config_descriptor,
     pub hub: *mut usb_hub,
-    pub ctrl_xfer: [*mut usb_xfer; USB_MAX_ENDPOINTS],
+    pub ctrl_xfer: [*mut usb_xfer; USB_MAX_EP_UNITS],
 
     pub ep_curr: *mut usb_endpoint,
 

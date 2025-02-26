@@ -1,25 +1,35 @@
 
+use super::usb_bus::*;
+use super::usb_device::*;
+use super::usb::*;
+
+pub fn usb_needs_explore(bus: *mut usb_bus) {
+
+}
 
 fn uhub_explore(udev: *mut usb_device) -> usb_error_t {
-
-    let hub = udev.hub;
-    let sc = hub.hubsoftc;
+    let hub = unsafe { (*udev).hub };
+    let sc = unsafe { (*hub).hubsoftc };
 
     //do_unlock = usbd_enum_lock(udev);
 
-    let mut retval = USB_ERR_NORMAL_COMPLETION;
+    let mut retval = usb_error_t::USB_ERR_NORMAL_COMPLETION;
 
-    for x in 0..hub.nports {
+    let nports = unsafe { (*hub).nports };
+
+    for x in 0..nports {
         let portno = x + 1;
-        let up = &hub.ports[x as usize];
+        let up = unsafe { &(*hub).ports[x as usize] };
 
-        let err = uhub_read_port_status(sc, portno);
+        let err = uhub_read_port_status(sc as *mut uhub_softsc, portno);
     }
+
+    retval
 }
 
 
 fn uhub_read_port_status(sc: *mut uhub_softsc, portno: u8) -> usb_error_t {
-
+    usb_error_t::USB_ERR_NORMAL_COMPLETION
 }   
 
 
