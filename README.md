@@ -60,16 +60,6 @@ Currently, the project can be tested on QEMU version 9.0 or higher. If your pack
 - Rust toolchain (https://www.rust-lang.org/tools/install)
 - QEMU >= 9.0 (https://www.qemu.org/download/)
 
-<!--
-- llvm (https://llvm.org/docs/GettingStarted.html):
-```brew install llvm``` or ```sudo apt-get install llvm```
-
-**MacOS**
-For a temporary fix on MacOS for issues related to llvm-objcopy:
-```brew install binutils```
-```sudo ln -s $(which gobjcopy) /usr/local/bin/llvm-objcopy```
--->
-
 ## Setup
 1. Install Rust target:
 ```rustup target add aarch64-unknown-none-softfloat```

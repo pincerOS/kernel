@@ -26,4 +26,4 @@ else
 fi
 
 cp "${BINARY}" init.elf
-objcopy -I elf32-little -O binary "${BINARY}" init.bin
+objcopy -I elf64-little -O binary "${BINARY}" init.bin

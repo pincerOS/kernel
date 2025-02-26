@@ -18,4 +18,4 @@ else
 fi
 
 cp "${BINARY}" kernel.elf
-llvm-objcopy -O binary "${BINARY}" kernel.bin
+objcopy -I elf64-little -O binary "${BINARY}" kernel.bin
