@@ -1,0 +1,249 @@
+# Kernel build and run justfile
+
+# Default: build and run the kernel
+default: build-and-run
+
+# Default configuration values
+example := "main"
+target := "aarch64-unknown-none-softfloat"
+profile := "release"
+qemu_target := "-M raspi4b -dtb bcm2711-rpi-4-b.dtb"
+qemu_debug := "mmu,guest_errors"
+qemu_display := "none"
+debug_args := "-s"
+min_rust_version := "1.84.0"
+llvmbox_dir := ".llvmbox"
+
+# Color definitions for terminal output
+red := "\\033[0;31m"
+green := "\\033[0;32m"
+yellow := "\\033[0;33m"
+blue := "\\033[0;34m"
+magenta := "\\033[0;35m"
+cyan := "\\033[0;36m"
+bold := "\\033[1m"
+reset := "\\033[0m"
+
+# Check if a command exists
+_command-exists command:
+    #!/usr/bin/env bash
+    command -v {{command}} &> /dev/null
+
+# Check Rust version
+_check-rust-version:
+    #!/usr/bin/env bash
+    set -e
+    if ! command -v rustc &> /dev/null; then
+        echo -e "{{red}}{{bold}}Error:{{reset}} rustc not found. Please install Rust."
+        exit 1
+    fi
+
+    RUSTC_VERSION=$(rustc --version | cut -d ' ' -f 2)
+    REQUIRED_VERSION="{{min_rust_version}}"
+
+    if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$RUSTC_VERSION" | sort -V | head -n1)" != "$REQUIRED_VERSION" ]; then
+        echo -e "{{yellow}}{{bold}}Warning:{{reset}} Rust version $RUSTC_VERSION is lower than the required version $REQUIRED_VERSION."
+        read -p "$(echo -e "{{cyan}}Would you like to update the Rust toolchain now? (y/n) {{reset}}")" -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            echo -e "{{blue}}Updating Rust...{{reset}}"
+            rustup update
+            # Check version again after update
+            RUSTC_VERSION=$(rustc --version | cut -d ' ' -f 2)
+            if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$RUSTC_VERSION" | sort -V | head -n1)" != "$REQUIRED_VERSION" ]; then
+                echo -e "{{red}}{{bold}}Error:{{reset}} Rust version is still $RUSTC_VERSION, which is lower than the required $REQUIRED_VERSION."
+                echo -e "{{yellow}}Please update manually or investigate why the update didn't work.{{reset}}"
+                exit 1
+            fi
+            echo -e "{{green}}{{bold}}Success:{{reset}} Rust updated successfully to $RUSTC_VERSION."
+        else
+            echo -e "{{red}}{{bold}}Error:{{reset}} Rust version $REQUIRED_VERSION or higher is required to build the kernel."
+            exit 1
+        fi
+    fi
+
+# Check if target is installed
+_check-target:
+    #!/usr/bin/env bash
+    set -e
+    if ! rustup target list --installed | grep -q "{{target}}"; then
+        echo -e "{{yellow}}{{bold}}Warning:{{reset}} Target {{target}} is not installed."
+        read -p "$(echo -e "{{cyan}}Would you like to install it now? (y/n) {{reset}}")" -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            echo -e "{{blue}}Installing target {{target}}...{{reset}}"
+            rustup target add {{target}}
+            echo -e "{{green}}Target {{target}} installed successfully.{{reset}}"
+        else
+            echo -e "{{red}}{{bold}}Error:{{reset}} Target {{target}} is required to build the kernel."
+            exit 1
+        fi
+    fi
+
+# Install llvmbox if needed
+_install-llvmbox:
+    #!/usr/bin/env bash
+    set -e
+
+    export PATH="$(pwd)/{{llvmbox_dir}}/bin:$PATH"
+
+    # Check if llvm-objcopy exists in PATH or in our llvmbox directory
+    if command -v llvm-objcopy &> /dev/null; then
+        exit 0
+    fi
+
+    echo -e "{{yellow}}{{bold}}Warning:{{reset}} llvm-objcopy not found."
+    read -p "$(echo -e "{{cyan}}Would you like to download llvmbox (contains llvm tools)? (y/n) {{reset}}")" -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        # Determine OS and architecture
+        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+        ARCH=$(uname -m)
+
+        # Map architecture names
+        if [ "$ARCH" = "x86_64" ]; then
+            ARCH_NAME="x86_64"
+        elif [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
+            ARCH_NAME="aarch64"
+        else
+            echo -e "{{red}}{{bold}}Error:{{reset}} Unsupported architecture: $ARCH"
+            exit 1
+        fi
+
+        # Map OS names
+        if [ "$OS" = "darwin" ]; then
+            OS_NAME="macos"
+        elif [ "$OS" = "linux" ]; then
+            OS_NAME="linux"
+        else
+            echo -e "{{red}}{{bold}}Error:{{reset}} Unsupported OS: $OS"
+            exit 1
+        fi
+
+        # Create the llvmbox directory if it doesn't exist
+        mkdir -p "{{llvmbox_dir}}"
+
+        echo -e "{{blue}}Downloading llvmbox for $ARCH_NAME-$OS_NAME...{{reset}}"
+        DOWNLOAD_URL=$(curl -s https://api.github.com/repos/rsms/llvmbox/releases/latest |
+                      grep "browser_download_url.*llvmbox-[^-]*-$ARCH_NAME-$OS_NAME.tar.xz" |
+                      cut -d '"' -f 4)
+
+        if [ -z "$DOWNLOAD_URL" ]; then
+            echo -e "{{red}}{{bold}}Error:{{reset}} Could not find llvmbox download for $ARCH_NAME-$OS_NAME"
+            exit 1
+        fi
+
+        echo -e "{{blue}}Downloading from $DOWNLOAD_URL{{reset}}"
+        curl -L --progress-bar "$DOWNLOAD_URL" -o "{{llvmbox_dir}}/llvmbox.tar.xz"
+
+        echo -e "{{blue}}Extracting llvmbox...{{reset}}"
+        tar -xf "{{llvmbox_dir}}/llvmbox.tar.xz" -C "{{llvmbox_dir}}" --strip-components=1
+        rm "{{llvmbox_dir}}/llvmbox.tar.xz"
+
+        echo -e "{{green}}{{bold}}Success:{{reset}} llvmbox installed to {{llvmbox_dir}}"
+    else
+        echo -e "{{red}}{{bold}}Error:{{reset}} llvm-objcopy is required to build the kernel."
+        exit 1
+    fi
+
+# Build the kernel
+build example=example profile=profile target=target: _check-rust-version _check-target _install-llvmbox
+    #!/usr/bin/env bash
+    set -e
+
+    # Add llvmbox to PATH if it exists
+    LLVMBOX_PATH="$(pwd)/{{llvmbox_dir}}/bin"
+    if [ -d "$LLVMBOX_PATH" ]; then
+        export PATH="$LLVMBOX_PATH:$PATH"
+    fi
+
+    # Verify llvm-objcopy is available
+    if ! command -v llvm-objcopy &> /dev/null; then
+        echo -e "{{red}}{{bold}}Error:{{reset}} llvm-objcopy not found in PATH or in {{llvmbox_dir}}/bin"
+        echo -e "{{yellow}}PATH=$PATH{{reset}}"
+        exit 1
+    fi
+
+    echo -e "{{blue}}{{bold}}Building kernel...{{reset}}"
+    set -x
+
+    # Build the kernel
+    cargo rustc --profile="{{profile}}" --example="{{example}}" \
+        --target={{target}} -- \
+        -C relocation-model=static
+
+    # Get binary path
+    if test "{{profile}}" = "dev" ; then
+        BINARY=../../target/{{target}}/debug/examples/{{example}}
+    else
+        BINARY=../../target/{{target}}/{{profile}}/examples/{{example}}
+    fi
+
+    # Create kernel files
+    cp "${BINARY}" kernel.elf
+    llvm-objcopy -O binary "${BINARY}" kernel.bin
+
+    set +x
+    echo -e "{{green}}{{bold}}Build successful!{{reset}}"
+
+# Build with debug profile
+build-debug example=example target=target:
+    just build {{example}} dev {{target}}
+
+# Run the kernel in QEMU
+run qemu_target=qemu_target qemu_debug=qemu_debug qemu_display=qemu_display debug_args=debug_args:
+    #!/usr/bin/env bash
+    set -e
+
+    # Set debug prefix if needed
+    QEMU_DEBUG_PFX=$([ -z "{{qemu_debug}}" ] && echo "" || echo "-d")
+
+    # Show debugger instructions if waiting for debugger
+    if [ "{{debug_args}}" = "-s -S" ]; then
+        echo -e "{{magenta}}# Waiting for debugger; run:{{reset}}"
+        echo -e "{{cyan}}gdb kernel.elf -ex \"target remote localhost:1234\"{{reset}}"
+    fi
+
+    # Setup UART pipe
+    UART_PIPE="uart2"
+    if [ ! -p "$UART_PIPE" ]; then
+        mkfifo "$UART_PIPE"
+    fi
+    SERIAL_ALT="pipe:$UART_PIPE"
+
+    echo -e "{{blue}}{{bold}}Starting QEMU...{{reset}}"
+    # Run QEMU
+    qemu-system-aarch64 \
+        {{qemu_target}} \
+        -kernel kernel.bin \
+        -serial stdio \
+        -serial "${SERIAL_ALT}" \
+        -display "{{qemu_display}}" \
+        ${QEMU_DEBUG_PFX} "{{qemu_debug}}" \
+        {{debug_args}}
+
+# Run with UI display
+run-ui:
+    just run "{{qemu_target}}" "{{qemu_debug}}" "default" "{{debug_args}}"
+
+# Run with debug mode (wait for debugger)
+debug:
+    just run "{{qemu_target}}" "{{qemu_debug}}" "{{qemu_display}}" "-s -S"
+
+# Run with debug mode and UI display
+debug-ui:
+    just run "{{qemu_target}}" "{{qemu_debug}}" "default" "-s -S"
+
+# Run on Raspberry Pi 3B
+run-rpi3b:
+    just run "-M raspi3b -dtb bcm2710-rpi-3-b-plus.dtb" "{{qemu_debug}}" "{{qemu_display}}" "{{debug_args}}"
+
+# Build and run in one command
+build-and-run example=example profile=profile:
+    just build {{example}} {{profile}}
+    just run
+
+# Build and run with debug profile
+build-and-run-debug example=example:
+    just build {{example}} dev
+    just run
