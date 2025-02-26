@@ -6,13 +6,22 @@ use super::usb::*;
 use super::usb_hub::*;
 use super::usb_request::*;
 use super::usb_core::*;
+use super::usbdi::*;
 
 
 fn usb_attach() -> u32 {
     //set up the entirity of the usb stack
 
     let mut bus = usb_bus {
-        methods: None,
+        devices: [core::ptr::null_mut(); USB_MAX_DEVICES as usize],
+        methods: usb_bus_methods {
+            roothub_exec: None,
+            set_hw_power: None,
+            endpoint_init: None,
+            clear_stall: None,
+            device_init: None,
+            device_state_change: None,
+        },
         hw_power_state: 0,
     };
 
@@ -28,8 +37,11 @@ fn usb_attach() -> u32 {
     bus.hw_power_state = USB_HW_POWER_CONTROL | USB_HW_POWER_BULK | USB_HW_POWER_INTERRUPT | USB_HW_POWER_ISOC | USB_HW_POWER_NON_ROOT_HUB;
     usb_bus_unlock(&mut bus);
 
-    //TODO: check set_hw_power is not null
-    unsafe { ((*bus.methods.unwrap()).set_hw_power) (&mut bus) };
+    if let Some(set_hw_power) = bus.methods.set_hw_power {
+        set_hw_power(&mut bus);
+    } else {
+        println!("| usb_attach: set_hw_power not implemented");
+    }
 
     //allocate the root usb device
     let child = usb_alloc_device();
@@ -61,8 +73,12 @@ pub struct usb_pipe_methods {
 }
 
 pub struct usb_bus_methods {
-    pub roothub_exec: fn(*mut usb_device, *mut usb_device_request) -> (usb_error_t, *const core::ffi::c_void, u16),
-    pub set_hw_power: fn(*mut usb_bus),
+    pub roothub_exec: Option<fn(*mut usb_device, *mut usb_device_request) -> (usb_error_t, *const core::ffi::c_void, u16)>,
+    pub set_hw_power: Option<fn(*mut usb_bus)>,
+    pub endpoint_init: Option<fn(*mut usb_device)>,
+    pub clear_stall: Option<fn(*mut usb_endpoint)>,
+    pub device_init: Option<fn(&mut usb_device)>,
+    pub device_state_change: Option<fn(&mut usb_device)>,
 }
 
 pub const USB_HW_POWER_CONTROL: u16 = 0x0001;

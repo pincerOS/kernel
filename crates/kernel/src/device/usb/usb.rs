@@ -180,6 +180,10 @@ pub fn usetw2(w: &mut u16, v: u8, v2: u8) {
     *w = ((v2 as u16) << 8) | (v as u16);
 }
 
+pub fn usetw3(v: u8, v2: u8) -> u16 {
+    return ((v2 as u16) << 8) | (v as u16);
+}
+
 pub fn usetw(w: &mut u16, v: u16) {
     // w[0] = v as u8;
     // w[1] = (v >> 8) as u8;
@@ -229,12 +233,30 @@ pub enum usb_error_t {
 }
 
 pub enum usb_dev_speed {
-    USB_SPEED_VARIABLE = 0,
+    USB_SPEED_VARIABLE,
     USB_SPEED_LOW,
     USB_SPEED_FULL,
     USB_SPEED_HIGH,
     USB_SPEED_SUPER,
 }
+
+pub enum usb_dev_state {
+	USB_STATE_DETACHED,
+	USB_STATE_ATTACHED,
+	USB_STATE_POWERED,
+	USB_STATE_ADDRESSED,
+	USB_STATE_CONFIGURED,
+};
+
+pub enum usb_ep_mode {
+	USB_EP_MODE_DEFAULT,
+	USB_EP_MODE_STREAMS,	/* USB3.0 specific */
+	USB_EP_MODE_HW_MASS_STORAGE,
+	USB_EP_MODE_HW_SERIAL,
+	USB_EP_MODE_HW_ETHERNET_CDC,
+	USB_EP_MODE_HW_ETHERNET_NCM,
+	USB_EP_MODE_MAX
+};
 
 #[allow(non_camel_case_types)]
 #[repr(C, packed)]

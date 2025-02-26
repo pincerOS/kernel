@@ -22,7 +22,7 @@ pub struct usb_xfer_queue {
 
 pub struct usb_endpoint {
     /* queue of USB transfers */
-    pub endpoint_q: [usb_xfer_queue; USB_MAX_EP_STREAMS as usize],
+    pub endpoint_q: [*mut usb_xfer_queue; USB_MAX_EP_STREAMS as usize],
 
     pub edesc: *mut usb_endpoint_descriptor,
     pub ecomp: *mut usb_endpoint_ss_comp_descriptor,
@@ -46,7 +46,7 @@ pub struct usb_endpoint {
     pub usb_uframe: u8, /* USB microframe */
 
     /* USB endpoint mode, see USB_EP_MODE_XXX */
-    pub ep_mode: u8,
+    pub ep_mode: usb_ep_mode,
 }
 
 pub const USB_EP_REF_MAX: u8 = 0x3F;

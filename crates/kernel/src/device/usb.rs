@@ -8,3 +8,4 @@ pub mod usbreg;
 pub mod usb_core;
 pub mod usb_request;
 pub mod usb_hub;
+pub mod usb_transfer;

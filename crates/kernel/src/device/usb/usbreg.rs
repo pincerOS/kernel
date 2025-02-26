@@ -27,6 +27,22 @@
  * SUCH DAMAGE.
  */
 
+pub const USB_MAX_IPACKET: u8 = 8; // initial USB packet size
+pub const USB_EP_MAX: u32 = 2 * 16; // hardcoded
+pub const USB_ROOT_HUB_ADDR: u32 = 1; // index
+pub const USB_MIN_DEVICES: u32 = 2; // unused + root HUB
+pub const USB_UNCONFIG_INDEX: u8 = 0xFF; // internal use only
+pub const USB_IFACE_INDEX_ANY: u8 = 0xFF; // internal use only
+pub const USB_START_ADDR: u8 = 0; // default USB device BUS address after USB bus reset
+pub const USB_CONTROL_ENDPOINT: u8 = 0; // default control endpoint
+
+pub const USB_FRAMES_PER_SECOND_FS: u32 = 1000; // full speed
+pub const USB_FRAMES_PER_SECOND_HS: u32 = 8000; // high speed
+
+pub const USB_FS_BYTES_PER_HS_UFRAME: u32 = 188; // bytes
+pub const USB_HS_MICRO_FRAMES_MAX: u32 = 8; // units
+
+pub const USB_ISOC_TIME_MAX: u32 = 128; // ms
 
 
 pub const USB_FS_ISOC_UFRAME_MAX: u32 = 4; // exclusive unit
@@ -35,7 +51,7 @@ pub const USB_MAX_DEVICES: u32 = 128; // units
 pub const USB_CONFIG_MAX: u32 = 65535; // bytes
 pub const USB_IFACE_MAX: u32 = 32; // units
 pub const USB_FIFO_MAX: u32 = 128; // units
-pub const USB_MAX_EP_STREAMS: u32 = 8; // units
+pub const USB_MAX_EP_STREAMS: usize = 8; // units
 pub const USB_MAX_EP_UNITS: usize = 32; // units
 pub const USB_MAX_PORTS: u32 = 255; // units
 
