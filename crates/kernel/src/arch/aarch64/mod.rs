@@ -15,7 +15,7 @@ pub fn get_freq_ticks() -> usize {
     freq
 }
 
-extern "C" {
+unsafe extern "C" {
     fn _debug_get_sp() -> usize;
 }
 global_asm!("_debug_get_sp: mov x0, sp; ret");

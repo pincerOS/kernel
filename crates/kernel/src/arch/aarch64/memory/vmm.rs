@@ -38,7 +38,7 @@ fn virt_addr_base() -> NonNull<()> {
 }
 
 #[allow(improper_ctypes)]
-extern "C" {
+unsafe extern "C" {
     static __rpi_phys_binary_end_addr: ();
 }
 
@@ -432,11 +432,11 @@ pub unsafe fn map_physical_noncacheable(pa_start: usize, size: usize) -> NonNull
 }
 
 //This is two adjacent pages all filled with leaf descriptors
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut KERNEL_LEAF_TABLE: KernelLeafTable =
     KernelLeafTable([LeafDescriptor::empty(); PG_SZ / 8 * 2]);
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut KERNEL_TRANSLATION_TABLE: KernelTranslationTable = KernelTranslationTable(
     [TranslationDescriptor {
         table: TableDescriptor::empty(),

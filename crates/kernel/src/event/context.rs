@@ -127,7 +127,7 @@ pub unsafe fn enter_event_loop() -> ! {
 }
 
 #[allow(improper_ctypes)]
-extern "C" {
+unsafe extern "C" {
     fn asm_context_switch(
         src_thread: Option<Box<Thread>>,
         action: Option<&mut SwitchAction>,
@@ -238,7 +238,7 @@ asm_deschedule_thread:
 /// Run by [`asm_context_switch`] after it saves the context and switches
 /// to the per-core stack; it then moves the passed [`SwitchAction`] onto
 /// the local stack, and calls [`context_switch_inner`].
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn context_switch_callback(
     thread: Option<Box<Thread>>,
     action: Option<&mut SwitchAction>,
@@ -252,7 +252,7 @@ unsafe extern "C" fn context_switch_callback(
 
 /// Run by [`asm_deschedule_thread`] after it switches to the per-core
 /// stack; runs [`context_switch_inner`] with a translated action.
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn deschedule_thread_callback(
     thread: Option<Box<Thread>>,
     action: DescheduleAction,

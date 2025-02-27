@@ -163,7 +163,9 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         unsafe { bcm2836_intc::LOCAL_INTC.init(intc) };
 
         unsafe {
-            crate::event::exceptions::override_irq_handler(bcm2836_intc::exception_handler_irq)
+            crate::event::exceptions::override_irq_handler(
+                bcm2836_intc::exception_handler_bcm2836_intc_irq,
+            )
         }
     }
 

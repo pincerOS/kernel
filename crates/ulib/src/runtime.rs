@@ -1,8 +1,8 @@
-extern "Rust" {
+unsafe extern "Rust" {
     fn main(chan: crate::sys::ChannelDesc);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn _start(x0: usize) -> ! {
     unsafe { main(crate::sys::ChannelDesc(x0 as u32)) };
     unsafe { crate::sys::exit() };

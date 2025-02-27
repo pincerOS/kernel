@@ -7,7 +7,7 @@ macro_rules! syscall {
             name = sym $ident,
             num = const $num,
         );
-        extern "C" {
+        unsafe extern "C" {
             $vis fn $ident( $($arg: $ty,)* ) $(-> $ret)?;
         }
     };

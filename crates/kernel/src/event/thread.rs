@@ -211,7 +211,7 @@ where
     SCHEDULER.add_task(Event::ScheduleThread(thread));
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn init_thread() {
     let func = CORES.with_current(|core| {
         let mut thread = core.thread.take().unwrap();

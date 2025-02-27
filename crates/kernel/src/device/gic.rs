@@ -118,7 +118,6 @@ pub fn irq_not_handled(_ctx: &mut Context) {
 
 /// Handles the interrupt and asks handler to handle it
 /// Level-triggered interrupts must be cleared by associaetd irq handler or else it will be called again
-#[no_mangle]
 pub unsafe extern "C" fn gic_irq_handler(
     ctx: &mut Context,
     _elr: u64,

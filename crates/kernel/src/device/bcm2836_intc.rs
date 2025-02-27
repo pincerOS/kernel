@@ -186,8 +186,7 @@ fn local_timer_handler(ctx: &mut Context) {
 unsafe impl Sync for bcm2836_l1_intc_driver {}
 unsafe impl Send for bcm2836_l1_intc_driver {}
 
-#[no_mangle]
-pub unsafe extern "C" fn exception_handler_irq(
+pub unsafe extern "C" fn exception_handler_bcm2836_intc_irq(
     ctx: &mut Context,
     _elr: u64,
     _spsr: u64,

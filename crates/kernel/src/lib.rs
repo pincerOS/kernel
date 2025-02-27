@@ -1,6 +1,7 @@
 #![no_main]
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
+#![warn(unsafe_attr_outside_unsafe, missing_unsafe_on_extern, static_mut_refs)]
 
 extern crate alloc;
 
@@ -29,11 +30,11 @@ static INIT_WAIT: AtomicBool = AtomicBool::new(false);
 
 const FLAG_MULTICORE: bool = true;
 
-extern "Rust" {
+unsafe extern "Rust" {
     fn kernel_main(device_tree: device_tree::DeviceTree);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64, x4: u32) -> ! {
     unsafe { memory::init() };
     let id = arch::core_id() & 3;
@@ -79,7 +80,7 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     unsafe { event::run_event_loop() }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kernel_entry_rust_alt(_x0: u32, _x1: u64, _x2: u64, _x3: u64) -> ! {
     let id = arch::core_id() & 3;
     let sp = arch::debug_get_sp();

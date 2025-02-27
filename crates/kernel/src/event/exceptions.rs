@@ -113,7 +113,7 @@ type ExceptionHandler = unsafe extern "C" fn(
 ) -> *mut Context;
 
 #[allow(dead_code)]
-extern "C" {
+unsafe extern "C" {
     static mut save_context_br_curEL_sp0_sync: u32;
     static mut save_context_br_curEL_sp0_irq: u32;
     static mut save_context_br_curEL_sp0_fiq: u32;
@@ -232,7 +232,7 @@ unsafe fn read_ttbr0_el1() -> usize {
     ttbr0
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn exception_handler_example(
     _ctx: &mut Context,
     elr: u64,
@@ -257,7 +257,7 @@ unsafe extern "C" fn exception_handler_example(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn exception_handler_unhandled(
     _ctx: &mut Context,
     _elr: u64,
@@ -268,7 +268,7 @@ unsafe extern "C" fn exception_handler_unhandled(
     halt();
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn exception_handler_user(
     ctx: &mut Context,
     elr: u64,
