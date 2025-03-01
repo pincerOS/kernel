@@ -1,4 +1,4 @@
-use alloc::alloc::{GlobalAlloc, Layout};
+use alloc::alloc::{handle_alloc_error, GlobalAlloc, Layout};
 use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
 // TODO: implement a proper allocator
@@ -10,6 +10,7 @@ pub static ALLOCATOR: BumpAllocator = unsafe { BumpAllocator::new_uninit() };
 pub struct BumpAllocator {
     base: AtomicPtr<()>,
     offset: AtomicUsize,
+    max: AtomicUsize,
 }
 unsafe impl Sync for BumpAllocator {}
 
@@ -18,11 +19,13 @@ impl BumpAllocator {
         BumpAllocator {
             base: AtomicPtr::new(core::ptr::null_mut()),
             offset: AtomicUsize::new(0),
+            max: AtomicUsize::new(0),
         }
     }
     // TODO: safety requirements of initialization?
-    pub unsafe fn init(&self, base: *mut ()) {
+    pub unsafe fn init(&self, base: *mut (), max: usize) {
         self.base.store(base, Ordering::SeqCst);
+        self.max.store(max, Ordering::SeqCst);
     }
 }
 
@@ -32,6 +35,8 @@ unsafe impl GlobalAlloc for BumpAllocator {
         let align = layout.align();
 
         let base = self.base.load(Ordering::Relaxed).cast::<u8>();
+        assert!(!base.is_null());
+
         let mut cur = self.offset.load(Ordering::Relaxed);
 
         let start = loop {
@@ -46,6 +51,11 @@ unsafe impl GlobalAlloc for BumpAllocator {
                 Err(new) => cur = new,
             }
         };
+
+        let max = self.max.load(Ordering::SeqCst);
+        if start.next_multiple_of(align) + size >= max {
+            handle_alloc_error(layout);
+        }
 
         let alloc_offset = start.next_multiple_of(align);
         unsafe { base.byte_add(alloc_offset) }

@@ -1,11 +1,10 @@
-use core::arch::asm;
-use core::panic::PanicInfo;
-use core::sync::atomic;
+#[cfg_attr(not(any(test, doc)), panic_handler)]
+#[allow(dead_code)]
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+    use crate::arch::halt;
+    use crate::uart;
+    use core::sync::atomic;
 
-use crate::{halt, uart};
-
-#[panic_handler]
-fn panic_handler(info: &PanicInfo) -> ! {
     static PANICKING: atomic::AtomicBool = atomic::AtomicBool::new(false);
 
     if PANICKING.swap(true, atomic::Ordering::Relaxed) {
@@ -23,8 +22,5 @@ fn panic_handler(info: &PanicInfo) -> ! {
         );
     }
     // TODO: write error message to a fixed location in memory and reset?
-
-    unsafe {
-        asm!("udf #0", options(noreturn));
-    }
+    halt();
 }

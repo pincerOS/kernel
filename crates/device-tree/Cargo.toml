@@ -1,0 +1,8 @@
+[package]
+name = "device-tree"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bytemuck = { version = "1.19.0", default-features = false }
+endian = { path = "../endian" }

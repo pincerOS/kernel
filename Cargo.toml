@@ -1,8 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/device-tree",
+    "crates/elf",
+    "crates/endian",
     "crates/filesystem",
+    "crates/init",
+    "crates/initfs",
     "crates/kernel",
+    "crates/lz4",
+    "crates/ulib",
 ]
 
 [profile.release]
@@ -10,6 +17,9 @@ opt-level = 2
 strip = false
 incremental = false
 debug = 2
+panic = "abort"
+debug-assertions = true
 
 [profile.dev]
 incremental = false
+panic = "abort"
