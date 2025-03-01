@@ -148,7 +148,7 @@ struct DirectoryEntryWrapper {
 
 // https://www.nongnu.org/ext2-doc/ext2.html
 
-#[repr(C)]
+#[repr(C, packed(4))]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Superblock {
     s_inodes_count: u32,
@@ -158,9 +158,9 @@ pub struct Superblock {
 	s_free_inodes_count: u32,
 	s_first_data_block: u32,
 	s_log_block_size: u32,
-	s_log_frag_size: u32,
+    s_log_cluster_size: u32,
 	s_blocks_per_group: u32,
-	s_frags_per_group: u32,
+    s_clusters_per_group: u32,
 	s_inodes_per_group: u32,
 	s_mtime: u32,
 	s_wtime: u32,
@@ -182,30 +182,76 @@ pub struct Superblock {
 	s_feature_compat: u32,
 	s_feature_incompat: u32,
 	s_feature_ro_compat: u32,
-	s_uuid: [u8;16],
-    s_volume_name: [u8;16],
-    s_last_mounted: [u8;64],
-    s_algo_bitmap: u32,
+	s_uuid: [u32;4],
+    s_volume_name: [u32;4],
+    s_last_mounted: [u32;16],
+    s_algorithm_usage_bitmap: u32,
 	s_prealloc_blocks: u8,
 	s_prealloc_dir_blocks: u8,
-    unused_alignment_1: [u8;2],
-    s_journal_uuid: [u8;16],
+    s_reserved_gdt_blocks: u16,
+    s_journal_uuid: [u32;4],
 	s_journal_inum: u32,
 	s_journal_dev: u32,
 	s_last_orphan: u32,
     s_hash_seed: [u32;4],
     s_def_hash_version: u8,
-    unused_alignment_2: [u8;3],
+    s_jnl_backup_type: u8,
+    s_desc_size: u16,
     s_default_mount_options: u32,
     s_first_meta_bg: u32,
-    // for some reason (padding?) unused_alignment_4: [u8; 760] causes
-    // issues with bytemuck::Zeroable so I did this garbage instead
-    unused_alignment_4: [u8; 512],
-    unused_alignment_5: [u8; 128],
-    unused_alignment_6: [u8; 64],
-    unused_alignment_7: [u8; 32],
-    unused_alignment_8: [u8; 16],
-    unused_alignment_9: [u8; 8]
+
+    // new fancy ext4 flags wow
+    s_mkfs_time: u32,
+    s_jnl_blocks: [u32;17],
+    s_blocks_count_hi: u32,
+    s_r_blocks_count_hi: u32,
+    s_free_blocks_count_hi: u32,
+    s_min_extra_isize: u16,
+    s_want_extra_isize: u16,
+    s_flags: u32,
+    s_raid_stride: u16,
+    s_mmp_interval: u16,
+    s_mmp_block: u64,
+    s_raid_stripe_width: u32,
+    s_log_groups_per_flex: u8,
+    s_checksum_type: u8,
+    s_reserved_pad: u16,
+    s_kbytes_written: u64,
+    s_snapshot_inum: u32,
+    s_snapshot_id: u32,
+    s_snapshot_r_blocks_count: u64,
+    s_snapshot_list: u32,
+    s_error_count: u32,
+    s_first_error_time: u32,
+    s_first_error_ino: u32,
+    s_first_error_block: u32,
+    s_first_error_func: [u32; 8],
+    s_first_error_line: u32,
+    s_last_error_time: u32,
+    s_last_error_ino: u32,
+    s_last_error_line: u32,
+    s_last_error_block: u64,
+    s_last_error_func: [u32; 8],
+    s_mount_opts: [u32; 16],
+    s_usr_quota_inum: u32,
+    s_grp_quota_inum: u32,
+    s_overhead_blocks: u32,
+    s_backup_bgs: [u32; 2],
+    s_encrypt_algos: u32,
+    s_encrypt_pw_salt: [u32; 4],
+    s_lpf_ino: u32,
+    s_prj_quota_inum: u32,
+    s_checksum_seed: u32,
+    s_wtime_hi: u8,
+    s_mtime_hi: u8,
+    s_mkfs_time_hi: u8,
+    s_lastcheck_hi: u8,
+    s_first_error_time_hi: u8,
+    s_last_error_time_hi: u8,
+    s_pad: u16,
+    s_reserved: [u32; 96],
+    s_checksum: u32,
+    s_pad_2: u32
 }
 
 impl Superblock {
@@ -243,8 +289,12 @@ pub mod s_feature_compat {
     const EXT2_FEATURE_COMPAT_IMAGIC_INODES: u32 = 0x0002;
     const EXT3_FEATURE_COMPAT_HAS_JOURNAL: u32 = 0x0004;
     const EXT2_FEATURE_COMPAT_EXT_ATTR: u32 = 0x0008;
-    const EXT2_FEATURE_COMPAT_RESIZE_INO: u32 = 0x0010;
+    const EXT2_FEATURE_COMPAT_RESIZE_INODE: u32 = 0x0010;
     const EXT2_FEATURE_COMPAT_DIR_INDEX: u32 = 0x0020;
+    const EXT4_FEATURE_COMPAT_COMPAT_LAZY_BG: u32 = 0x0040; // this could be ext3
+    const EXT4_FEATURE_COMPAT_EXCLUDE_INODE: u32 = 0x0080; // this could be ext3
+    const EXT4_FEATURE_COMPAT_EXCLUDE_BITMAP: u32 = 0x0100;
+    const EXT4_FEATURE_COMPAT_SPARSE_SUPER2: u32 = 0x0200;
 }
 
 pub mod s_feature_incompat {
@@ -253,12 +303,32 @@ pub mod s_feature_incompat {
     const EXT3_FEATURE_INCOMPAT_RECOVER: u32 = 0x0004;
     const EXT3_FEATURE_INCOMPAT_JOURNAL_DEV: u32 = 0x0008;
     const EXT2_FEATURE_INCOMPAT_META_BG: u32 = 0x0010;
+    const EXT4_FEATURE_INCOMPAT_EXTENTS: u32 = 0x0040;
+    const EXT4_FEATURE_INCOMPAT_64BIT: u32 = 0x0080;
+    const EXT4_FEATURE_INCOMPAT_MMP: u32 = 0x0100;
+    const EXT4_FEATURE_INCOMPAT_FLEX_BG: u32 = 0x0200;
+    const EXT4_FEATURE_INCOMPAT_EA_INODE: u32 = 0x0400;
+    const EXT4_FEATURE_INCOMPAT_DIRDATA: u32 = 0x1000;
+    const EXT4_FEATURE_INCOMPAT_CSUM_SEED: u32 = 0x2000;
+    const EXT4_FEATURE_INCOMPAT_LARGEDIR: u32 = 0x4000;
+    const EXT4_FEATURE_INCOMPAT_INLINE_DATA: u32 = 0x8000;
+    const EXT4_FEATURE_INCOMPAT_ENCRYPT: u32 = 0x10000;
 }
 
 pub mod s_feature_ro_compat {
     const EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER: u32 = 0x0001;
     const EXT2_FEATURE_RO_COMPAT_LARGE_FILE: u32 = 0x0002;
     const EXT2_FEATURE_RO_COMPAT_BTREE_DIR: u32 = 0x0004;
+    const EXT4_RO_COMPAT_HUGE_FILE: u32 = 0x0008;
+    const EXT4_RO_COMPAT_GDT_CSUM: u32 = 0x0010;
+    const EXT4_RO_COMPAT_DIR_NLINK: u32 = 0x0020;
+    const EXT4_RO_COMPAT_EXTRA_ISIZE: u32 = 0x0040;
+    const EXT4_RO_COMPAT_HAS_SNAPSHOT: u32 = 0x0080;
+    const EXT4_RO_COMPAT_QUOTA: u32 = 0x0100;
+    const EXT4_RO_COMPAT_METADATA_CSUM: u32 = 0x0200;
+    const EXT4_RO_COMPAT_REPLICA: u32 = 0x0800;
+    const EXT4_RO_COMPAT_READONLY: u32 = 0x1000;
+    const EXT4_RO_COMPAT_PROJECT: u32 = 0x2000;
 }
 
 pub mod s_algo_bitmap {
@@ -267,6 +337,43 @@ pub mod s_algo_bitmap {
     const EXT2_GZIP_ALG: u32 = 0x0004;
     const EXT2_BZIP2_ALG: u32 = 0x0008;
     const EXT2_LZO_ALG: u32 = 0x0010;
+}
+
+pub mod s_def_hash_version {
+    const EXT4_LEGACY_HASH: u8 = 0x0;
+    const EXT4_HALF_MD4_HASH: u8 = 0x1;
+    const EXT4_TEA_HASH: u8 = 0x2;
+    const EXT4_LEGACY_UNSIGNED_HASH: u8 = 0x3;
+    const EXT4_HALF_MD4_UNSIGNED_HASH: u8 = 0x4;
+    const EXT4_TEA_UNSIGNED_HASH: u8 = 0x5;
+}
+
+pub mod s_default_mount_options {
+    const EXT4_DEFM_DEBUG: u32 = 0x0001;
+    const EXT4_DEFM_BSDGROUPS: u32 = 0x0002;
+    const EXT4_DEFM_XATTR_USER: u32 = 0x0004;
+    const EXT4_DEFM_ACL: u32 = 0x0008;
+    const EXT4_DEFM_UID16: u32 = 0x0010;
+    const EXT4_DEFM_JMODE_DATA: u32 = 0x0020;
+    const EXT4_DEFM_JMODE_ORDERED: u32 = 0x0040;
+    const EXT4_DEFM_JMODE_WBACK: u32 = 0x0060;
+    const EXT4_DEFM_NOBARRIER: u32 = 0x0100;
+    const EXT4_DEFM_BLOCK_VALIDITY: u32 = 0x0200;
+    const EXT4_DEFM_DISCARD: u32 = 0x0400;
+    const EXT4_DEFM_NODELALLOC: u32 = 0x0800;
+}
+
+pub mod s_flags {
+    const EXT4_FLAGS_SIGNED_DIR_HASH: u32 = 0x0001;
+    const EXT4_FLAGS_UNSIGNED_DIR_HASH: u32 = 0x0002;
+    const EXT4_FLAGS_TESTING_DEV_CODE: u32 = 0x0004;
+}
+
+pub mod s_encrypt_algos {
+    const EXT4_ENCRYPTION_MODE_INVALID: u32 = 0x0000;
+    const EXT4_ENCRYPTION_MODE_AES_256_XTS: u32 = 0x0001;
+    const EXT4_ENCRYPTION_MODE_AES_256_GCM: u32 = 0x0002;
+    const EXT4_ENCRYPTION_MODE_AES_256_CBC: u32 = 0x0003;
 }
 
 const _: () = assert!(size_of::<Superblock>() == 1024);
@@ -279,12 +386,32 @@ pub struct BGD {
     bg_inode_table: u32, 
     bg_free_blocks_count: u16, 
     bg_free_inodes_count: u16,
-    bg_used_dirs_count: u16, 
-    bg_pad: u16, 
-    bg_reserved: [u8;12], 
+    bg_used_dirs_count: u16,
+    bg_flags: u16,
+    bg_exclude_bitmap_lo: u32,
+    bg_block_bitmap_csum_lo: u16,
+    bg_inode_bitmap_csum_lo: u16,
+    bg_itable_unused_lo: u16,
+    bg_checksum: u16,
+    bg_block_bitmap_hi: u32,
+    bg_inode_bitmap_hi: u32,
+    bg_free_blocks_count_hi: u16,
+    bg_free_inodes_count_hi: u16,
+    bg_used_dirs_count_hi: u16,
+    bg_itable_unused_hi: u16,
+    bg_exclude_bitmap_hi: u32,
+    bg_block_bitmap_csum_hi: u16,
+    bg_inode_bitmap_csum_hi: u16,
+    bg_pad: u32,
 }
 
-const _: () = assert!(size_of::<BGD>() == 32);
+pub mod bg_flags {
+    const EXT4_BG_INODE_UNINIT: u16 = 0x1;
+    const EXT4_BG_BLOCK_UNINIT: u16 = 0x2;
+    const EXT4_BG_INODE_ZEROED: u16 = 0x4;
+}
+
+//const _: () = assert!(size_of::<BGD>() == 32);
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -304,8 +431,8 @@ pub struct INode {
     i_block: [u32;15], // 12 direct, single, double, triple
     i_generation: u32,
     i_file_acl: u32,
-    i_dir_acl: u32,
-    i_faddr: u32,
+    i_size_high: u32,
+    i_obso_faddr: u32, // obsolete
     i_osd2: [u8;12],
 }
 
@@ -604,8 +731,19 @@ where
         block_group_descriptor_tables.resize(num_of_descriptor_tables,
                                              BGD{ bg_block_bitmap: 0, bg_inode_bitmap: 0, 
                                                         bg_inode_table: 0, bg_free_blocks_count: 0, 
-                                                        bg_free_inodes_count: 0, bg_used_dirs_count: 0, 
-                                                        bg_pad: 0,  bg_reserved: [0;12] });
+                                                        bg_free_inodes_count: 0, bg_used_dirs_count: 0,
+                                                        bg_flags: 0, bg_exclude_bitmap_lo: 0,
+                                                        bg_block_bitmap_csum_lo: 0,
+                                                        bg_inode_bitmap_csum_lo: 0,
+                                                        bg_itable_unused_lo: 0, bg_checksum: 0,
+                                                        bg_block_bitmap_hi: 0, bg_inode_bitmap_hi: 0,
+                                                        bg_free_blocks_count_hi: 0,
+                                                        bg_free_inodes_count_hi: 0,
+                                                        bg_used_dirs_count_hi: 0,
+                                                        bg_itable_unused_hi: 0,
+                                                        bg_exclude_bitmap_hi: 0,
+                                                        bg_block_bitmap_csum_hi: 0,
+                                                        bg_inode_bitmap_csum_hi: 0, bg_pad: 0 });
 
         let descriptor_table_bytes_ptr: *mut u8 =
             block_group_descriptor_tables.as_mut_ptr() as *mut u8;
@@ -880,8 +1018,8 @@ where
             i_block: [0; 15],
             i_generation: 0,
             i_file_acl: 0,
-            i_dir_acl: 0,
-            i_faddr: 0,
+            i_size_high: 0,
+            i_obso_faddr: 0,
             i_osd2: [0; 12]
         };
 
@@ -1114,12 +1252,12 @@ impl INodeWrapper
         // technically, i_dir_acl only has the upper 32 bits
         // for regular files, but it will just be zero for others
         // so it doesn't really matter
-        (self.inode.i_size as u64) | ((self.inode.i_dir_acl as u64) << 32)
+        (self.inode.i_size as u64) | ((self.inode.i_size_high as u64) << 32)
     }
     
     pub fn update_size<D: BlockDevice>(&mut self, new_size: u64, ext2: &Ext2<D>) {
         self.inode.i_size = ((new_size << 32) >> 32) as u32;
-        self.inode.i_dir_acl = (new_size >> 32) as u32;
+        self.inode.i_size_high = (new_size >> 32) as u32;
     }
     
     pub fn get_deferred_write_inode<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>,
