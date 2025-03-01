@@ -1,8 +1,9 @@
-use crate::{linux::FileBlockDevice, INodeWrapper, Superblock};
+#[cfg(feature = "std")]
+extern crate std;
+
+use crate::{linux::FileBlockDevice, Ext2, INodeWrapper};
 use alloc::rc::Rc;
 use std::fs::File;
-
-use crate::{BlockDevice, Ext2};
 
 #[test]
 fn example_1() {
@@ -17,14 +18,15 @@ fn example_1() {
     let root_node: Rc<INodeWrapper> = ext2.get_root_inode_wrapper();
 
     let test_node: Rc<INodeWrapper> = ext2.find(&root_node, "test.txt").unwrap();
-    let test_node_text: std::string::String = test_node.read_text_file_as_str(&mut ext2);
+    let test_node_text = test_node.read_text_file_as_str(&mut ext2).unwrap();
 
     assert_eq!(test_node_text, "asldfalsjdkfvnlasdfvnka,dsfvmna");
 
     let test_folder: Rc<INodeWrapper> = ext2.find(&root_node, "folder").unwrap();
     let test_file_in_folder = ext2.find(&test_folder, "asdf.txt").unwrap();
-    let test_file_in_folder_text: std::string::String =
-        test_file_in_folder.read_text_file_as_str(&mut ext2);
+    let test_file_in_folder_text = test_file_in_folder
+        .read_text_file_as_str(&mut ext2)
+        .unwrap();
 
     assert_eq!(test_file_in_folder_text, "Hi");
 }
