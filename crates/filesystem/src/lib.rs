@@ -1,4 +1,5 @@
 #![no_std]
+#![warn(clippy::large_stack_arrays)]
 
 // initial alex suggestions:
 // want to move away from strings and use bytes
@@ -24,12 +25,10 @@ extern crate alloc;
 extern crate std;
 
 use alloc::borrow::Cow;
-use alloc::rc::{Rc, Weak};
 use std::cell::RefCell;
 use std::cmp::PartialEq;
 use std::collections::BTreeMap;
 use std::fs::DirEntry;
-use std::prelude::v1::{String, Vec};
 use std::{print, slice};
 use std::ptr::{read, write};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -37,6 +36,12 @@ use bytemuck::bytes_of;
 use crate::Ext2Error::NotEnoughDeviceSpace;
 use crate::i_mode::{EXT2_S_IFDIR, EXT2_S_IFREG};
 use crate::linux::FileBlockDevice;
+use alloc::rc::{Rc, Weak};
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::ops::ControlFlow;
+use std::ops::Div;
 
 #[cfg(test)]
 mod tests;
@@ -45,7 +50,6 @@ mod tests;
 pub mod linux;
 
 pub const SECTOR_SIZE: usize = 512;
-pub const BLOCK_SIZE: usize = 1024;
 
 #[derive(Debug, PartialEq)]
 pub enum BlockDeviceError {
@@ -60,7 +64,15 @@ pub enum Ext2Error {
     InvalidMode,
     FileNotFound,
     NotEnoughDeviceSpace,
-    FileSizeMismatch
+    FileSizeMismatch,,
+    NotUtf8,
+    NotADirectory,
+}
+
+impl From<BlockDeviceError> for Ext2Error {
+    fn from(err: BlockDeviceError) -> Self {
+        Ext2Error::BlockDeviceError(err)
+    }
 }
 
 pub trait BlockDevice {
@@ -69,6 +81,7 @@ pub trait BlockDevice {
         index: u64,
         buffer: &mut [u8; SECTOR_SIZE],
     ) -> Result<(), BlockDeviceError>;
+
     fn write_sector(
         &mut self,
         index: u64,
@@ -78,16 +91,12 @@ pub trait BlockDevice {
     fn read_sectors(
         &mut self,
         start_index: u64,
-        sectors: usize,
         buffer: &mut [u8],
     ) -> Result<(), BlockDeviceError> {
-        let mut tmp_buf: [u8; 512] = [0; 512];
-        for i in 0..sectors {
-            let cur_sector = start_index + (i as u64);
-            self.read_sector(cur_sector, &mut tmp_buf)?;
-            for j in 0..SECTOR_SIZE {
-                buffer[(i*SECTOR_SIZE)+j] = tmp_buf[j];
-            }
+        assert!(buffer.len() % SECTOR_SIZE == 0);
+        for (buf_segment, sector) in buffer.chunks_exact_mut(SECTOR_SIZE).zip(start_index..) {
+            let array: &mut [u8; SECTOR_SIZE] = buf_segment.try_into().unwrap();
+            self.read_sector(sector, array)?;
         }
         Ok(())
     }
@@ -96,7 +105,7 @@ pub trait BlockDevice {
         &mut self,
         start_index: u64,
         sectors: usize,
-        buffer: &mut [u8],
+        buffer: &[u8],
     ) -> Result<(), BlockDeviceError> {
         let mut tmp_buf: [u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
         for i in 0..sectors {
@@ -118,10 +127,7 @@ pub struct Ext2<Device> {
     inode_map: BTreeMap<usize, Weak<RefCell<INodeWrapper>>>
 }
 
-type DeferredWriteMap = BTreeMap<usize, [u8; BLOCK_SIZE]>;
-
-#[repr(C, align(4))]
-struct AlignedBlock<const N:usize>(pub [u8;N]);
+type DeferredWriteMap = BTreeMap<usize, Vec<u8>>;
 
 mod DirectoryEntryConstants {
     pub const MAX_FILE_NAME_LEN: usize = 255;
@@ -135,7 +141,9 @@ struct DirectoryEntry {
     // all part of the spec
     inode_number: u32,
     entry_size: u16,
-    name_length: u16,
+    rec_len: u16,
+    name_len: u8,
+    file_type: u8,
 
     name_characters: [u8; 256]
 }
@@ -146,127 +154,131 @@ struct DirectoryEntryWrapper {
     offset: usize
 }
 
+pub struct DirEntry<'a> {
+    pub inode_num: u32,
+    pub name_length: u8,
+    pub file_type: u8,
+    pub name: &'a [u8]
+}
+
 // https://www.nongnu.org/ext2-doc/ext2.html
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Superblock {
     s_inodes_count: u32,
-	s_blocks_count: u32,
-	s_r_blocks_count: u32,
-	s_free_blocks_count: u32,
-	s_free_inodes_count: u32,
-	s_first_data_block: u32,
-	s_log_block_size: u32,
-	s_log_frag_size: u32,
-	s_blocks_per_group: u32,
-	s_frags_per_group: u32,
-	s_inodes_per_group: u32,
-	s_mtime: u32,
-	s_wtime: u32,
-	s_mnt_count: u16,
-	s_max_mnt_count: u16,
-	s_magic: u16,
-	s_state: u16,
-	s_errors: u16,
-	s_minor_rev_level: u16,
-	s_lastcheck: u32,
-	s_checkinterval: u32,
-	s_creator_os: u32,
-	s_rev_level: u32,
-	s_def_resuid: u16,
-	s_def_resgid: u16,
-	s_first_ino: u32,
-	s_inode_size: u16,
-	s_block_group_nr: u16,
-	s_feature_compat: u32,
-	s_feature_incompat: u32,
-	s_feature_ro_compat: u32,
-	s_uuid: [u8;16],
-    s_volume_name: [u8;16],
-    s_last_mounted: [u8;64],
+    s_blocks_count: u32,
+    s_r_blocks_count: u32,
+    s_free_blocks_count: u32,
+    s_free_inodes_count: u32,
+    s_first_data_block: u32,
+    s_log_block_size: u32,
+    s_log_frag_size: u32,
+    s_blocks_per_group: u32,
+    s_frags_per_group: u32,
+    s_inodes_per_group: u32,
+    s_mtime: u32,
+    s_wtime: u32,
+    s_mnt_count: u16,
+    s_max_mnt_count: u16,
+    s_magic: u16,
+    s_state: u16,
+    s_errors: u16,
+    s_minor_rev_level: u16,
+    s_lastcheck: u32,
+    s_checkinterval: u32,
+    s_creator_os: u32,
+    s_rev_level: u32,
+    s_def_resuid: u16,
+    s_def_resgid: u16,
+    s_first_ino: u32,
+    s_inode_size: u16,
+    s_block_group_nr: u16,
+    s_feature_compat: u32,
+    s_feature_incompat: u32,
+    s_feature_ro_compat: u32,
+    s_uuid: [u8; 16],
+    s_volume_name: [u8; 16],
+    s_last_mounted: [u8; 64],
     s_algo_bitmap: u32,
-	s_prealloc_blocks: u8,
-	s_prealloc_dir_blocks: u8,
-    unused_alignment_1: [u8;2],
-    s_journal_uuid: [u8;16],
-	s_journal_inum: u32,
-	s_journal_dev: u32,
-	s_last_orphan: u32,
-    s_hash_seed: [u32;4],
+    s_prealloc_blocks: u8,
+    s_prealloc_dir_blocks: u8,
+    unused_alignment_1: [u8; 2],
+    s_journal_uuid: [u8; 16],
+    s_journal_inum: u32,
+    s_journal_dev: u32,
+    s_last_orphan: u32,
+    s_hash_seed: [u32; 4],
     s_def_hash_version: u8,
-    unused_alignment_2: [u8;3],
+    unused_alignment_2: [u8; 3],
     s_default_mount_options: u32,
     s_first_meta_bg: u32,
-    // for some reason (padding?) unused_alignment_4: [u8; 760] causes
-    // issues with bytemuck::Zeroable so I did this garbage instead
-    unused_alignment_4: [u8; 512],
-    unused_alignment_5: [u8; 128],
-    unused_alignment_6: [u8; 64],
-    unused_alignment_7: [u8; 32],
-    unused_alignment_8: [u8; 16],
-    unused_alignment_9: [u8; 8]
+    unused_alignment_3: [u8; 760]
 }
 
 impl Superblock {
     fn get_num_of_block_groups(&self) -> u32 {
         self.s_inodes_count / self.s_inodes_per_group
     }
+
+    fn get_block_size(&self) -> usize {
+        1024 << self.s_log_block_size
+    }
 }
 
 pub mod s_state {
-    const EXT2_VALID_FS: u16 = 1;
-    const EXT2_ERROR_FS: u16 = 2;
+    pub const EXT2_VALID_FS: u16 = 1;
+    pub const EXT2_ERROR_FS: u16 = 2;
 }
 
 pub mod s_errors {
-    const EXT2_ERRORS_CONTINUE: u16 = 1;
-    const EXT2_ERRORS_RO: u16 = 2;
-    const EXT2_ERRORS_PANIC: u16 = 3;
+    pub const EXT2_ERRORS_CONTINUE: u16 = 1;
+    pub const EXT2_ERRORS_RO: u16 = 2;
+    pub const EXT2_ERRORS_PANIC: u16 = 3;
 }
 
 pub mod s_creator_os {
-    const EXT2_OS_LINUX: u32 = 0;
-    const EXT2_OS_HURD: u32 = 1;
-    const EXT2_OS_MASIX: u32 = 2;
-    const EXT2_OS_FREEBSD: u32 = 3;
-    const EXT2_OS_LITES: u32 = 4;
+    pub const EXT2_OS_LINUX: u32 = 0;
+    pub const EXT2_OS_HURD: u32 = 1;
+    pub const EXT2_OS_MASIX: u32 = 2;
+    pub const EXT2_OS_FREEBSD: u32 = 3;
+    pub const EXT2_OS_LITES: u32 = 4;
 }
 
 pub mod s_rev_level {
-    const EXT2_GOOD_OLD_REV: u32 = 0;
-    const EXT2_DYNAMIC_REV: u32 = 1;
+    pub const EXT2_GOOD_OLD_REV: u32 = 0;
+    pub const EXT2_DYNAMIC_REV: u32 = 1;
 }
 
 pub mod s_feature_compat {
-    const EXT2_FEATURE_COMPAT_DIR_PREALLOC: u32 = 0x0001;
-    const EXT2_FEATURE_COMPAT_IMAGIC_INODES: u32 = 0x0002;
-    const EXT3_FEATURE_COMPAT_HAS_JOURNAL: u32 = 0x0004;
-    const EXT2_FEATURE_COMPAT_EXT_ATTR: u32 = 0x0008;
-    const EXT2_FEATURE_COMPAT_RESIZE_INO: u32 = 0x0010;
-    const EXT2_FEATURE_COMPAT_DIR_INDEX: u32 = 0x0020;
+    pub const EXT2_FEATURE_COMPAT_DIR_PREALLOC: u32 = 0x0001;
+    pub const EXT2_FEATURE_COMPAT_IMAGIC_INODES: u32 = 0x0002;
+    pub const EXT3_FEATURE_COMPAT_HAS_JOURNAL: u32 = 0x0004;
+    pub const EXT2_FEATURE_COMPAT_EXT_ATTR: u32 = 0x0008;
+    pub const EXT2_FEATURE_COMPAT_RESIZE_INO: u32 = 0x0010;
+    pub const EXT2_FEATURE_COMPAT_DIR_INDEX: u32 = 0x0020;
 }
 
 pub mod s_feature_incompat {
-    const EXT2_FEATURE_INCOMPAT_COMPRESSION: u32 = 0x0001;
-    const EXT2_FEATURE_INCOMPAT_FILETYPE: u32 = 0x0002;
-    const EXT3_FEATURE_INCOMPAT_RECOVER: u32 = 0x0004;
-    const EXT3_FEATURE_INCOMPAT_JOURNAL_DEV: u32 = 0x0008;
-    const EXT2_FEATURE_INCOMPAT_META_BG: u32 = 0x0010;
+    pub const EXT2_FEATURE_INCOMPAT_COMPRESSION: u32 = 0x0001;
+    pub const EXT2_FEATURE_INCOMPAT_FILETYPE: u32 = 0x0002;
+    pub const EXT3_FEATURE_INCOMPAT_RECOVER: u32 = 0x0004;
+    pub const EXT3_FEATURE_INCOMPAT_JOURNAL_DEV: u32 = 0x0008;
+    pub const EXT2_FEATURE_INCOMPAT_META_BG: u32 = 0x0010;
 }
 
 pub mod s_feature_ro_compat {
-    const EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER: u32 = 0x0001;
-    const EXT2_FEATURE_RO_COMPAT_LARGE_FILE: u32 = 0x0002;
-    const EXT2_FEATURE_RO_COMPAT_BTREE_DIR: u32 = 0x0004;
+    pub const EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER: u32 = 0x0001;
+    pub const EXT2_FEATURE_RO_COMPAT_LARGE_FILE: u32 = 0x0002;
+    pub const EXT2_FEATURE_RO_COMPAT_BTREE_DIR: u32 = 0x0004;
 }
 
 pub mod s_algo_bitmap {
-    const EXT2_LZV1_ALG: u32 = 0x0001;
-    const EXT2_LZRW3A_ALG: u32 = 0x0002;
-    const EXT2_GZIP_ALG: u32 = 0x0004;
-    const EXT2_BZIP2_ALG: u32 = 0x0008;
-    const EXT2_LZO_ALG: u32 = 0x0010;
+    pub const EXT2_LZV1_ALG: u32 = 0x0001;
+    pub const EXT2_LZRW3A_ALG: u32 = 0x0002;
+    pub const EXT2_GZIP_ALG: u32 = 0x0004;
+    pub const EXT2_BZIP2_ALG: u32 = 0x0008;
+    pub const EXT2_LZO_ALG: u32 = 0x0010;
 }
 
 const _: () = assert!(size_of::<Superblock>() == 1024);
@@ -274,14 +286,14 @@ const _: () = assert!(size_of::<Superblock>() == 1024);
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct BGD {
-    bg_block_bitmap: u32, 
-    bg_inode_bitmap: u32, 
-    bg_inode_table: u32, 
-    bg_free_blocks_count: u16, 
+    bg_block_bitmap: u32,
+    bg_inode_bitmap: u32,
+    bg_inode_table: u32,
+    bg_free_blocks_count: u16,
     bg_free_inodes_count: u16,
-    bg_used_dirs_count: u16, 
-    bg_pad: u16, 
-    bg_reserved: [u8;12], 
+    bg_used_dirs_count: u16,
+    bg_pad: u16,
+    bg_reserved: [u8; 12]
 }
 
 const _: () = assert!(size_of::<BGD>() == 32);
@@ -301,12 +313,12 @@ pub struct INode {
     i_blocks: u32,
     i_flags: u32,
     i_osd1: u32,
-    i_block: [u32;15], // 12 direct, single, double, triple
+    i_block: [u32; 15], // 12 direct, single, double, triple
     i_generation: u32,
     i_file_acl: u32,
     i_dir_acl: u32,
     i_faddr: u32,
-    i_osd2: [u8;12],
+    i_osd2: [u8; 12],
 }
 
 struct INodeBlockInfo {
@@ -315,12 +327,12 @@ struct INodeBlockInfo {
 }
 
 pub mod reserved_inodes {
-    const EXT2_BAD_INO: u32 = 1;
-    const EXT2_ROOT_INO: u32 = 2;
-    const EXT2_ACL_IDX_INO: u32 = 3;
-    const EXT2_ACL_DATA_INO: u32 = 4;
-    const EXT2_BOOT_LOADER_INO: u32 = 5;
-    const EXT2_UNDEL_DIR_INO: u32 = 6;
+    pub const EXT2_BAD_INO: u32 = 1;
+    pub const EXT2_ROOT_INO: u32 = 2;
+    pub const EXT2_ACL_IDX_INO: u32 = 3;
+    pub const EXT2_ACL_DATA_INO: u32 = 4;
+    pub const EXT2_BOOT_LOADER_INO: u32 = 5;
+    pub const EXT2_UNDEL_DIR_INO: u32 = 6;
 }
 
 pub mod i_mode {
@@ -383,7 +395,7 @@ const UNALLOCATED_BLOCK_SLOT: u32 = 0;
 #[derive(Debug)]
 pub struct INodeWrapper {
     inode: INode,
-    inode_num: u32
+    _inode_num: u32
 }
 
 // TODO(Bobby): replace this with how we get time without std
@@ -398,7 +410,7 @@ impl DirectoryEntryWrapper {
         // we shouldn't write self.entry.entry_size because that contains padding bytes
         // which can be larger than the maximum directory entry size without padding
         let dir_entry_size_to_write =
-            (self.entry.name_length as usize) + DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE ;
+            (self.entry.name_len as usize) + DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE;
         let entry_slice: &[u8] = &entry_bytes[0..dir_entry_size_to_write];
         
         if use_offset {
@@ -417,7 +429,7 @@ impl DirectoryEntryWrapper {
         // we shouldn't write self.entry.entry_size because that contains padding bytes
         // which can be larger than the maximum directory entry size without padding
         let dir_entry_size_to_write =
-            (self.entry.name_length as usize) + DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE ;
+            (self.entry.name_len as usize) + DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE ;
         let entry_slice: &[u8] = &entry_bytes[0..dir_entry_size_to_write];
 
         let block_num = dir_node.get_inode_block_num(self.inode_block_num, ext2,
@@ -432,46 +444,49 @@ impl<D> Ext2<D>
 where
     D: BlockDevice,
 {
-
-    fn read_logical_block(device: &mut D, logical_block_start: usize, logical_block_length: usize,
-                          buffer: &mut [u8], deferred_writes: Option<&DeferredWriteMap>) -> Result<(), Ext2Error> {
-        assert!(logical_block_length > 0);
-
-        let start_sector_numerator: usize = logical_block_start * BLOCK_SIZE;
+    fn read_logical_block_inner(device: &mut D, superblock: &Superblock, logical_block_start: usize,
+                                buffer: &mut [u8],
+                                deferred_writes: Option<&DeferredWriteMap>) -> Result<(), Ext2Error> {
+        assert_eq!(buffer.len(), superblock.get_block_size());
+        let start_sector_numerator: usize = logical_block_start * superblock.get_block_size();
         let start_sector: usize = start_sector_numerator / SECTOR_SIZE;
-        let sectors: usize = (logical_block_length * BLOCK_SIZE) / SECTOR_SIZE;
-        // TODO(Bobby): Make this only read stuff that is not already in deferred_writes
-        let read_result: Result<(), BlockDeviceError> =
-            device.read_sectors(start_sector as u64, sectors, buffer);
 
         if deferred_writes.is_some() {
             let deferred_writes_unwrapped: &DeferredWriteMap = deferred_writes.unwrap();
 
-            for i in logical_block_start..(logical_block_start + logical_block_length) {
-                if deferred_writes_unwrapped.contains_key(&i) {
-                    let slice_start = (i - logical_block_start) * BLOCK_SIZE;
-                    let slice_end = slice_start + BLOCK_SIZE;
-
-                    buffer[slice_start..slice_end].copy_from_slice(
-                        &deferred_writes_unwrapped[&i]);
-                }
+            if deferred_writes_unwrapped.contains_key(&logical_block_start) {
+                buffer[0..superblock.get_block_size()].copy_from_slice(
+                    &deferred_writes_unwrapped[&logical_block_start]);
             }
+        } else {
+            device.read_sectors(start_sector as u64, buffer)?;
         }
 
-        if read_result.is_ok() {
-            Ok(())
-        } else {
-            Err(Ext2Error::BlockDeviceError(read_result.unwrap_err()))
-        }
+        Ok(())
     }
 
-    fn write_logical_block(device: &mut D, logical_block_start: usize, logical_block_length: usize,
-                           buffer: &mut [u8]) -> Result<(), Ext2Error> {
-        assert!(logical_block_length > 0);
+    pub fn read_logical_block(
+        &mut self,
+        logical_block_start: usize,
+        buffer: &mut [u8],
+        deferred_writes: Option<&DeferredWriteMap>,
+    ) -> Result<(), Ext2Error> {
+        Self::read_logical_block_inner(
+            &mut self.device,
+            &self.superblock,
+            logical_block_start,
+            buffer,
+            deferred_writes,
+        )
+    }
 
-        let start_sector_numerator: usize = logical_block_start * BLOCK_SIZE;
+    fn write_logical_block_inner(device: &mut D, superblock: &Superblock,
+                                 logical_block_start: usize, buffer: &[u8]) -> Result<(), Ext2Error> {
+        assert_eq!(buffer.len(), superblock.get_block_size());
+
+        let start_sector_numerator: usize = logical_block_start * superblock.get_block_size();
         let start_sector: usize = start_sector_numerator / SECTOR_SIZE;
-        let sectors: usize = (logical_block_length * BLOCK_SIZE) / SECTOR_SIZE;
+        let sectors: usize = superblock.get_block_size() / SECTOR_SIZE;
 
         let write_result: Result<(), BlockDeviceError> =
             device.write_sectors(start_sector as u64, sectors, buffer);
@@ -483,17 +498,54 @@ where
         }
     }
 
-    pub fn write_logical_block_self(&mut self, logical_block_start: usize,
-                                    logical_block_length: usize, buffer: &mut [u8]) -> Result<(), Ext2Error> {
-        Self::write_logical_block(&mut self.device, logical_block_start, logical_block_length,
-                                  buffer)
+    pub fn write_logical_block(&mut self, logical_block_start: usize,
+                               buffer: &[u8]) -> Result<(), Ext2Error> {
+        Self::write_logical_block(&mut self.device, logical_block_start, buffer)
     }
 
-    pub fn read_logical_block_self(&mut self, logical_block_start: usize, logical_block_length: usize,
-                                   buffer: &mut [u8],
-                                   deferred_writes: Option<&DeferredWriteMap>) -> Result<(), Ext2Error> {
-        Self::read_logical_block(&mut self.device, logical_block_start, logical_block_length, 
-                                 buffer, deferred_writes)
+    fn read_logical_blocks_inner(device: &mut D, superblock: &Superblock,
+                                 logical_block_start: usize, buffer: &mut [u8],
+                                 deferred_writes: Option<&DeferredWriteMap>) -> Result<(), Ext2Error> {
+        assert_eq!(buffer.len() % superblock.get_block_size(), 0);
+        let logical_block_length = buffer.len() / superblock.get_block_size();
+
+        for i in 0..logical_block_length {
+            let slice_start: usize = i * superblock.get_block_size();
+            let slice_end: usize = slice_start + superblock.get_block_size();
+
+            Self::read_logical_block_inner(device, superblock, logical_block_start+i,
+                                     &mut buffer[slice_start..slice_end], deferred_writes)?
+        }
+
+        Ok(())
+    }
+
+    fn write_logical_blocks_inner(device: &mut D, superblock: &Superblock,
+                                  logical_block_start: usize, buffer: &[u8]) -> Result<(), Ext2Error> {
+        assert_eq!(buffer.len() % superblock.get_block_size(), 0);
+        let logical_block_length = buffer.len() / superblock.get_block_size();
+
+        for i in 0..logical_block_length {
+            let slice_start: usize = i * superblock.get_block_size();
+            let slice_end: usize = slice_start + superblock.get_block_size();
+
+            Self::write_logical_block_inner(device, superblock, logical_block_start+i,
+                                            &buffer[slice_start..slice_end])?
+        }
+
+        Ok(())
+    }
+
+    fn read_logical_blocks(&mut self, logical_block_start: usize, buffer: &mut [u8],
+                           deferred_writes: Option<&DeferredWriteMap>) -> Result<(), Ext2Error> {
+        Self::read_logical_block_inner(&mut self.device, &self.superblock, logical_block_start,
+                                       buffer, deferred_writes)
+    }
+
+    fn write_logical_blocks(&mut self, logical_block_start: usize, buffer: &mut [u8])
+        -> Result<(), Ext2Error> {
+        Self::write_logical_block_inner(&mut self.device, &self.superblock, logical_block_start,
+                                        buffer)
     }
 
     fn get_block_that_has_inode(device: &mut D, superblock: &Superblock,
@@ -507,8 +559,9 @@ where
 
         let inode_table_index: usize = (inode_num - 1) % (superblock.s_inodes_per_group as usize);
         let inode_table_block_with_offset: usize =
-            ((inode_table_index * inode_size) / BLOCK_SIZE) + inode_table_block;
-        let inode_table_interblock_offset: usize = (inode_table_index * inode_size) % BLOCK_SIZE;
+            ((inode_table_index * inode_size) / superblock.get_block_size()) + inode_table_block;
+        let inode_table_interblock_offset: usize =
+            (inode_table_index * inode_size) % superblock.get_block_size();
 
         INodeBlockInfo{
             block_num: inode_table_block_with_offset,
@@ -520,10 +573,10 @@ where
                  inode_num: usize, deferred_writes: Option<&DeferredWriteMap>) -> Result<INode, Ext2Error> {
         let inode_block_info: INodeBlockInfo =
             Ext2::get_block_that_has_inode(device, superblock, block_group_descriptor_tables, inode_num);
-        let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+        let mut block_buffer: Vec<u8> = vec![0; superblock.get_block_size()];
 
-        Self::read_logical_block(device, inode_block_info.block_num, 1,
-                                 &mut block_buffer, deferred_writes)?;
+        Self::read_logical_block_inner(device, superblock, inode_block_info.block_num,
+                                       block_buffer.as_mut_slice(), deferred_writes)?;
 
         let mut inode_data: [u8; size_of::<INode>()] = [0x00; size_of::<INode>()];
 
@@ -531,7 +584,7 @@ where
             &block_buffer[inode_block_info.block_offset..inode_block_info.block_offset + size_of::<INode>()]);
 
         let inode: INode =
-            unsafe {std::mem::transmute::<[u8;size_of::<INode>()], INode>(inode_data)};
+            unsafe { core::mem::transmute::<[u8; size_of::<INode>()], INode>(inode_data) };
 
         Ok(inode)
     }
@@ -546,13 +599,15 @@ where
         self.root_inode.clone()
     }
 
+<<<<<<< HEAD
     pub fn add_block_group_deferred_write(&mut self,
                                           deferred_write_map: &mut DeferredWriteMap,
                                           block_group_num: usize) -> Result<(), Ext2Error> {
+        let block_size: usize = self.superblock.get_block_size();
         let block_group_descriptor_block: usize =
-            if BLOCK_SIZE == 1024 {2} else {1} + ((block_group_num * size_of::<BGD>()) / BLOCK_SIZE);
+            if block_size == 1024 {2} else {1} + ((block_group_num * size_of::<BGD>()) / block_size);
         let block_group_descriptor_offset: usize =
-            (block_group_num * size_of::<BGD>()) % BLOCK_SIZE;
+            (block_group_num * size_of::<BGD>()) % block_size;
 
         let mut block_group_copy: [u8; size_of::<BGD>()] = [0; size_of::<BGD>()];
         {
@@ -587,41 +642,58 @@ where
     }
 
     pub fn new(mut device: D) -> Result<Self, Ext2Error> {
-        let mut buffer: [u8; 1024] = [0; 1024];
-        // todo: error-handling device.read_sectors
-        device.read_sectors(2, 2, &mut buffer);
-        let superblock: Superblock = unsafe { std::mem::transmute::<[u8; 1024], Superblock>(buffer) };
+        // TODO: avoid putting this buffer on the stack, and avoid storing
+        // superblock padding in the Ext2 struct
+        let mut buffer = [0; 1024];
+
+        device.read_sectors(2, &mut buffer)?;
+
+        let superblock: Superblock =
+            unsafe { core::mem::transmute::<[u8; 1024], Superblock>(buffer) };
+        let block_size = superblock.get_block_size();
+
+        let block_group_descriptor_block: usize = if block_size == 1024 { 2 } else { 1 };
+
+        let descriptor_count = superblock.get_num_of_block_groups() as usize;
+        let block_group_descriptor_blocks: usize =
+            1 + (descriptor_count * size_of::<BGD>()).div_ceil(block_size);
+
+        let max_block_group_descriptors: usize =
+            block_group_descriptor_blocks * (block_size / size_of::<BGD>());
 
         let mut block_group_descriptor_tables: Vec<BGD> = Vec::new();
 
-        let block_group_descriptor_block: usize = if BLOCK_SIZE == 1024 {2} else {1};
-        let block_group_descriptor_length: usize =
-            1 + (((superblock.get_num_of_block_groups() as usize) * size_of::<BGD>()) / BLOCK_SIZE);
-
-        let num_of_descriptor_tables: usize =
-            block_group_descriptor_length * (BLOCK_SIZE / size_of::<BGD>());
-
-        block_group_descriptor_tables.resize(num_of_descriptor_tables,
-                                             BGD{ bg_block_bitmap: 0, bg_inode_bitmap: 0, 
-                                                        bg_inode_table: 0, bg_free_blocks_count: 0, 
-                                                        bg_free_inodes_count: 0, bg_used_dirs_count: 0, 
-                                                        bg_pad: 0,  bg_reserved: [0;12] });
+        block_group_descriptor_tables.resize(
+            max_block_group_descriptors,
+            BGD {
+                bg_block_bitmap: 0,
+                bg_inode_bitmap: 0,
+                bg_inode_table: 0,
+                bg_free_blocks_count: 0,
+                bg_free_inodes_count: 0,
+                bg_used_dirs_count: 0,
+                bg_pad: 0,
+                bg_reserved: [0; 12],
+            },
+        );
 
         let descriptor_table_bytes_ptr: *mut u8 =
             block_group_descriptor_tables.as_mut_ptr() as *mut u8;
-        let descriptor_table_bytes_slice: &mut[u8] = unsafe{
-            std::slice::from_raw_parts_mut(descriptor_table_bytes_ptr,
-                                           block_group_descriptor_length * BLOCK_SIZE)
+        let descriptor_table_bytes_slice: &mut [u8] = unsafe {
+            core::slice::from_raw_parts_mut(
+                descriptor_table_bytes_ptr,
+                block_group_descriptor_blocks * block_size,
+            )
         };
 
-        Self::read_logical_block(&mut device, block_group_descriptor_block,
-                                 block_group_descriptor_length, descriptor_table_bytes_slice, None)?;
+        Self::read_logical_blocks_inner(&mut device, &superblock, block_group_descriptor_block,
+                                        descriptor_table_bytes_slice, None)?;
 
         let root_inode: INode =
             Self::get_inode(&mut device, &superblock, &block_group_descriptor_tables, 2, None)?;
         let root_inode_wrapper: Rc<RefCell<INodeWrapper>> = Rc::new(RefCell::new(INodeWrapper{
             inode: root_inode,
-            inode_num: 2
+            _inode_num: 2
         }));
         let mut inode_map: BTreeMap<usize, Weak<RefCell<INodeWrapper>>> = BTreeMap::new();
         
@@ -631,50 +703,41 @@ where
                   root_inode: root_inode_wrapper, inode_map })
     }
 
-    pub fn get_block_size(&mut self) -> u32 {
-        1024 << self.superblock.s_log_block_size
+    pub fn get_block_size(&self) -> usize {
+        self.superblock.get_block_size()
     }
 
     pub fn get_inode_size(&mut self) -> u32 {
         self.superblock.s_inode_size as u32
     }
 
-    pub fn find(&mut self, node: &INodeWrapper, name: &[u8])
-            -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
-        let dir_entries: Vec<DirectoryEntryWrapper> = node.get_dir_entries(self, None)?;
-
-        if node.is_dir() {
-            for dir_entry_wrapper in dir_entries {
-                let dir_entry = dir_entry_wrapper.entry;
-
-                if dir_entry.name_length == name.len() as u16 &&
-                   &dir_entry.name_characters[0..name.len()] == name {
-                    // TODO: find out how to do operator overloading in rust and convert this into
-                    // TODO: a mut self method
-                    if self.inode_map.contains_key(&(dir_entry.inode_number as usize)) {
-                        let inode_strong_ref = 
-                            self.inode_map.get(&(dir_entry.inode_number as usize)).unwrap().upgrade();
-                        
-                        if inode_strong_ref.is_some() {
-                            return Ok(inode_strong_ref.unwrap());
-                        }
-                    }
-                    
-                    let inode: INode = Self::get_inode(&mut self.device, &self.superblock,
-                                                       &self.block_group_descriptor_tables,
-                                                       dir_entry.inode_number as usize, None)?;
-                    let return_value: Rc<RefCell<INodeWrapper>> = Rc::new(RefCell::new(INodeWrapper {
-                        inode,
-                        inode_num: dir_entry.inode_number
-                    }));
-
-                    self.inode_map.insert(dir_entry.inode_number as usize, 
-                                          Rc::downgrade(&return_value));
-                    
-                    return Ok(return_value);
-                }
-            }
+    pub fn find(
+        &mut self,
+        node: &INodeWrapper,
+        name: &[u8],
+    ) -> Result<Rc<INodeWrapper>, Ext2Error> {
+        if !node.is_dir() {
+            return Err(Ext2Error::NotADirectory);
         }
+        let inode_num = node.get_dir_entries(self, |dir_entry| {
+            if dir_entry.name == name {
+                ControlFlow::Break(dir_entry.inode_num)
+            } else {
+                ControlFlow::Continue(())
+            }
+        })?;
+        let inode_num = inode_num.ok_or(Ext2Error::FileNotFound)?;
+
+        let inode: INode = Self::get_inode(&mut self.device, &self.superblock,
+                                           &self.block_group_descriptor_tables,
+                                           dir_entry.inode_number as usize, None)?;
+        let return_value: Rc<RefCell<INodeWrapper>> = Rc::new(RefCell::new(INodeWrapper {
+            inode,
+            inode_num: dir_entry.inode_number
+        }));
+
+        self.inode_map.insert(dir_entry.inode_number as usize,
+                              Rc::downgrade(&return_value));
 
         Err(Ext2Error::FileNotFound)
     }
@@ -1100,8 +1163,7 @@ where
     }
 }
 
-impl INodeWrapper
-{
+impl INodeWrapper {
     pub fn is_dir(&self) -> bool {
         (self.inode.i_mode & i_mode::EXT2_S_IFDIR) != 0
     }
@@ -1128,7 +1190,7 @@ impl INodeWrapper
         let inode_block_info: INodeBlockInfo =
             Ext2::get_block_that_has_inode(&mut ext2.device, &ext2.superblock,
                                            &ext2.block_group_descriptor_tables,
-                                           self.inode_num as usize);
+                                           self._inode_num as usize);
         let inode_bytes = bytemuck::bytes_of(&self.inode);
 
         ext2.add_write_to_deferred_writes_map(deferred_write_map, inode_block_info.block_num,
@@ -1138,7 +1200,7 @@ impl INodeWrapper
     }
 
     pub fn get_block_group_index<D: BlockDevice>(&self, ext2: &Ext2<D>) -> usize {
-        (self.inode_num / ext2.superblock.s_inodes_per_group) as usize
+        (self._inode_num / ext2.superblock.s_inodes_per_group) as usize
     }
     
     pub fn block_allocated_count<D: BlockDevice>(&self, ext2: &Ext2<D>) -> usize {
@@ -1150,27 +1212,23 @@ impl INodeWrapper
     }
 
     fn get_word(byte_array: &[u8]) -> u32 {
-        (byte_array[0] as u32) | ((byte_array[1] as u32) << 8) | ((byte_array[2] as u32) << 16) |
-        ((byte_array[3] as u32) << 24)
+        u32::from_le_bytes(*byte_array.first_chunk().unwrap())
     }
 
-    fn get_half_word(byte_array: &[u8]) -> u32 {
-        (byte_array[0] as u32) | ((byte_array[1] as u32) << 8)
-    }
-
-    const TRIPLE_LINK_BLOCK_PTR_INDEX: usize = 14;
-    const DOUBLE_LINK_BLOCK_PTR_INDEX: usize = 13;
-    const SINGLE_LINK_BLOCK_PTR_INDEX: usize = 12;
+    pub const TRIPLE_LINK_BLOCK_PTR_INDEX: usize = 14;
+    pub const DOUBLE_LINK_BLOCK_PTR_INDEX: usize = 13;
+    pub const SINGLE_LINK_BLOCK_PTR_INDEX: usize = 12;
 
     pub fn get_inode_block_num<D: BlockDevice>(&self, number: usize, ext2: &mut Ext2<D>,
                                                deferred_writes: Option<&DeferredWriteMap>) -> Result<u32, Ext2Error> {
-        let block_inode_list_size: usize = BLOCK_SIZE / size_of::<u32>();
+        let block_size: usize = ext2.superblock.get_block_size();
+        let block_inode_list_size: usize = block_size / size_of::<u32>();
         let block_inode_list_size_squared: usize = block_inode_list_size * block_inode_list_size;
         let block_inode_list_size_cubed: usize = block_inode_list_size_squared * block_inode_list_size;
 
         let mut logical_block_number: u32 = 0;
-        let mut block_buffer = AlignedBlock([0; BLOCK_SIZE]);
-        
+        let mut block_buffer = vec![0; block_size];
+
         if number >= (Self::SINGLE_LINK_BLOCK_PTR_INDEX + block_inode_list_size + block_inode_list_size_squared) {
             // hard mode: go through link to list of link of list of links to list of direct
             // block ptrs
@@ -1183,26 +1241,26 @@ impl INodeWrapper
             let index: usize =
                 (second_level_base_num / block_inode_list_size_squared) * size_of::<u32>();
             let block_second_level_index: u32 =
-                Self::get_word(&block_buffer.0[index..index+4]);
+                Self::get_word(&block_buffer.0[index..index + 4]);
 
-            ext2.read_logical_block_self(block_second_level_index as usize, 1, 
+            ext2.read_logical_block_self(block_second_level_index as usize, 1,
                                          &mut block_buffer.0, deferred_writes)?;
 
             let first_level_base_num: usize = second_level_base_num % block_inode_list_size_squared;
             let block_buffer_second_index: usize =
                 (first_level_base_num / block_inode_list_size) * size_of::<u32>();
-            let block_first_level_index = 
+            let block_first_level_index =
                 Self::get_word(
-                    &block_buffer.0[block_buffer_second_index..block_buffer_second_index+4]);
+                    &block_buffer.0[block_buffer_second_index..block_buffer_second_index + 4]);
 
-            ext2.read_logical_block_self(block_first_level_index as usize, 1, 
+            ext2.read_logical_block_self(block_first_level_index as usize, 1,
                                          &mut block_buffer.0, deferred_writes)?;
 
             let block_buffer_first_index: usize =
                 (first_level_base_num % block_inode_list_size) * size_of::<u32>();
 
             logical_block_number = Self::get_word(
-                &block_buffer.0[block_buffer_first_index..block_buffer_first_index+4]);
+                &block_buffer.0[block_buffer_first_index..block_buffer_first_index + 4]);
         } else if number >= Self::SINGLE_LINK_BLOCK_PTR_INDEX + block_inode_list_size {
             // medium: go through link to list of links to list of direct block ptrs
             ext2.read_logical_block_self(self.inode.i_block[Self::DOUBLE_LINK_BLOCK_PTR_INDEX] as usize,
@@ -1211,15 +1269,15 @@ impl INodeWrapper
             let first_level_base_num: usize = number - (12 + block_inode_list_size);
             let index: usize = (first_level_base_num / block_inode_list_size) * size_of::<u32>();
             let block_first_level_index: usize =
-                Self::get_word(&block_buffer.0[index..index+4]) as usize;
+                Self::get_word(&block_buffer.0[index..index + 4]) as usize;
             let block_final_level_index: usize =
                 (first_level_base_num % block_inode_list_size) * size_of::<u32>();
 
-            ext2.read_logical_block_self(block_first_level_index, 1, 
+            ext2.read_logical_block_self(block_first_level_index, 1,
                                          &mut block_buffer.0, deferred_writes)?;
-            
-            logical_block_number = 
-                Self::get_word(&block_buffer.0[block_final_level_index..block_final_level_index+4]);
+
+            logical_block_number =
+                Self::get_word(&block_buffer.0[block_final_level_index..block_final_level_index + 4]);
         } else if number >= Self::SINGLE_LINK_BLOCK_PTR_INDEX {
             // fairly easy: go through link to list of direct block ptrs
             ext2.read_logical_block_self(self.inode.i_block[Self::SINGLE_LINK_BLOCK_PTR_INDEX] as usize,
@@ -1231,7 +1289,7 @@ impl INodeWrapper
             let block_buffer_u32_slice: &[u32] =
                 bytemuck::cast_slice::<_, u32>(&mut block_buffer.0);
 
-            logical_block_number = Self::get_word(&block_buffer.0[offset..offset+4]);
+            logical_block_number = Self::get_word(&block_buffer.0[offset..offset + 4]);
         } else {
             // easy: go through direct block ptrs
             logical_block_number = self.inode.i_block[number];
@@ -1240,107 +1298,94 @@ impl INodeWrapper
         Ok(logical_block_number)
     }
 
-    pub fn read_block<D: BlockDevice>(&self, logical_block_start: usize,
-                                      logical_block_length: usize, buffer: &mut [u8],
-                                      ext2: &mut Ext2<D>,
-                                      deferred_writes: Option<&DeferredWriteMap>) -> Result<(), Ext2Error> {
+    pub fn read_block<D: BlockDevice>(
+        &self,
+        logical_block_start: usize,
+        buffer: &mut [u8],
+        ext2: &mut Ext2<D>,
+        deferred_writes: Option<&DeferredWriteMap>,
+    ) -> Result<(), Ext2Error> {
         // TODO: caching
-        let mut block_tmp_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+        let block_size = ext2.superblock.get_block_size();
 
-        for i in 0..logical_block_length {
-            let cur_file_block: usize = logical_block_start + i;
-            let logical_block_num: usize = self.get_inode_block_num(cur_file_block, ext2,
-                                                                    deferred_writes)? as usize;
-
-            ext2.read_logical_block_self(logical_block_num, 1,
-                                         &mut block_tmp_buffer, deferred_writes)?;
-
-            for j in 0..BLOCK_SIZE {
-                buffer[(i*BLOCK_SIZE)+j] = block_tmp_buffer[j];
-            }
+        assert!(buffer.len() % block_size == 0);
+        for (buf_segment, block_idx) in buffer
+            .chunks_exact_mut(block_size)
+            .zip(logical_block_start..)
+        {
+            let logical_block_num: usize =
+                self.get_inode_block_num(block_idx, ext2, deferred_writes)? as usize;
+            ext2.read_logical_block(logical_block_num, buf_segment, deferred_writes)?;
         }
 
         Ok(())
     }
 
     pub fn read_file<D: BlockDevice>(&self, ext2: &mut Ext2<D>) -> Result<Vec<u8>, Ext2Error> {
+        let block_size: usize = ext2.superblock.get_block_size();
         let mut return_value: Vec<u8> = Vec::new();
-        let mut blocks_to_read: usize = (self.size() as usize) / BLOCK_SIZE;
+        let blocks_to_read: usize = (self.size() as usize).div_ceil(block_size);
+        return_value.resize(blocks_to_read * block_size, 0);
 
-        if (self.size() as usize) % BLOCK_SIZE > 0 {
-            blocks_to_read += 1;
-        }
+        self.read_block(0, return_value.as_mut_slice(), ext2)?;
 
-        return_value.resize(blocks_to_read * BLOCK_SIZE,0);
-
-        self.read_block(0, blocks_to_read, return_value.as_mut_slice(), ext2, None)?;
-        
         return_value.resize(self.size() as usize, 0);
 
         Ok(return_value)
     }
 
-    pub fn read_text_file_as_str<D: BlockDevice>(&self, ext2: &mut Ext2<D>) -> 
-                                                                         Result<String, Ext2Error> {
-        let mut bytes: Vec<u8> = self.read_file(ext2)?;
-
-        Ok(String::from_utf8_lossy(bytes.as_mut_slice()).into_owned())
-    }
-
-    pub fn get_dir_entries<D: BlockDevice>(&self, ext2: &mut Ext2<D>,
-                                           deferred_writes: Option<&DeferredWriteMap>) -> Result<Vec<DirectoryEntryWrapper>, Ext2Error> {
+    pub fn get_dir_entries<D: BlockDevice, F, O>(
+        &self,
+        ext2: &mut Ext2<D>,
+        mut callback: F,
+    ) -> Result<Option<O>, Ext2Error>
+    where
+        F: FnMut(&DirEntry<'_>) -> ControlFlow<O>,
+    {
         // TODO: caching
-        let mut entries: Vec<DirectoryEntryWrapper> = Vec::new();
-        let mut entries_raw_bytes: Vec<u8> = Vec::new();
+        let block_size: usize = ext2.superblock.get_block_size();
+        let mut buffer = alloc::vec![0; block_size];
+
         let dir_size: usize = self.size() as usize;
+        let dir_blocks: usize = dir_size.div_ceil(block_size);
 
-        entries_raw_bytes.resize(dir_size / 9, 0);
+        let mut i = 0;
+        let mut block_idx = 0;
 
-        let directory_entry_size_blocks: usize = Self::div_up(self.size() as usize, BLOCK_SIZE);
+        while block_idx < dir_blocks {
+            self.read_block(block_idx, buffer.as_mut_slice(), ext2)?;
 
-        entries_raw_bytes.resize(directory_entry_size_blocks * BLOCK_SIZE,
-                                 0);
+            while i < block_size {
+                // TODO: cleanly error on malformed directory entries
+                let entry_start = &buffer[i..];
+                assert!(entry_start.len() >= size_of::<DirEntryData>());
+                let entry_data =
+                    unsafe { entry_start.as_ptr().cast::<DirEntryData>().read_unaligned() };
+                let name_start = &entry_start[size_of::<DirEntryData>()..];
+                let name = &name_start[..entry_data.name_len as usize];
 
-        self.read_block(0, directory_entry_size_blocks,
-                        entries_raw_bytes.as_mut_slice(), ext2, deferred_writes)?;
+                let entry = DirEntry {
+                    inode_num: entry_data.inode,
+                    name_length: entry_data.name_len,
+                    file_type: entry_data.file_type,
+                    name,
+                };
 
-        let mut i: usize = 0;
+                match callback(&entry) {
+                    ControlFlow::Continue(()) => (),
+                    ControlFlow::Break(res) => return Ok(Some(res)),
+                }
 
-        while i < dir_size {
-            let directory_entry_inode_num = Self::get_word(&entries_raw_bytes[i..]);
-            let directory_entry_size = Self::get_half_word(&entries_raw_bytes[i+4..i+6]);
-            let directory_entry_name_length =
-                Self::get_half_word(&entries_raw_bytes[i+6..i+8]) as u16;
-            let directory_entry_name: &[u8] =
-                &entries_raw_bytes[i+8..i+8+(directory_entry_name_length as usize)];
-
-            if directory_entry_inode_num == 0 {
-                i += 8;
+                i += entry_data.rec_len as usize;
             }
 
-            let new_directory_entry = DirectoryEntry{
-                // all part of the spec
-                inode_number: directory_entry_inode_num,
-                entry_size: directory_entry_size as u16,
-                name_length: directory_entry_name_length,
-
-                name_characters: [0; 256]
-            };
-
-            entries.push(DirectoryEntryWrapper{
-                entry: new_directory_entry,
-                inode_block_num: i / BLOCK_SIZE,
-                offset: i % BLOCK_SIZE
-            });
-
-            entries.iter_mut().next_back().unwrap().entry.
-                name_characters[0..directory_entry_name_length as usize].
-                copy_from_slice(directory_entry_name);
-
-            i += directory_entry_size as usize;
+            let skip_blocks = i / block_size;
+            block_idx += skip_blocks;
+            i -= block_size * skip_blocks;
+            assert!(skip_blocks == 1);
         }
 
-        Ok(entries)
+        Ok(None)
     }
     
     pub fn find_new_blocks<D: BlockDevice>(&self, ext2: &mut Ext2<D>,
@@ -1348,13 +1393,14 @@ impl INodeWrapper
                                            all_blocks_or_fail: bool,
                                            deferred_writes: &mut DeferredWriteMap)
                                            -> Result<Vec<usize>, Ext2Error> {
+        let block_size: usize = ext2.superblock.get_block_size();
         let num_of_block_groups: usize = ext2.num_of_block_groups();
         let num_of_blocks_per_block_group: usize =
             ext2.superblock.s_blocks_per_group as usize;
         let mut blocks_needed_for_block_bitmap: usize =
-            (num_of_blocks_per_block_group / 8) / BLOCK_SIZE;
+            (num_of_blocks_per_block_group / 8) / block_size;
 
-        if (num_of_blocks_per_block_group / 8) % BLOCK_SIZE != 0 {
+        if (num_of_blocks_per_block_group / 8) % block_size != 0 {
             blocks_needed_for_block_bitmap += 1;
         }
 
@@ -1395,7 +1441,7 @@ impl INodeWrapper
             let needed_blocks: usize = std::cmp::min(num_of_blocks_left, free_block_count);
 
             while blocks_allocated_from_block_group < needed_blocks {
-                let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+                let mut block_buffer = vec![0; block_size];
                 let mut block_buffer_dirty: bool = false;
                 let mut byte_writes: BTreeMap<usize, u8> = BTreeMap::new();
 
@@ -1441,7 +1487,7 @@ impl INodeWrapper
                     for byte_write in byte_writes {
                         ext2.add_write_to_deferred_writes_map(deferred_writes, current_block_bitmap_block,
                                                               byte_write.0, slice::from_ref(&byte_write.1),
-                                                              Some(block_buffer))?;
+                                                              Some(block_buffer.as_slice()))?;
                     }
                 }
 
@@ -1465,16 +1511,18 @@ impl INodeWrapper
                                                        blocks_newly_allocated: &mut usize,
                                                        new_blocks: &[usize],
                                                        deferred_write_map: &mut DeferredWriteMap) -> Result<(), Ext2Error> {
-        let mut block_buffer = AlignedBlock([0; BLOCK_SIZE]);
+        let block_size: usize = ext2.superblock.get_block_size();
+        let mut block_buffer = vec![0; block_size];
         let singly_indirect_block_block_limit: usize =
-            std::cmp::min(BLOCK_SIZE / size_of::<u32>(), new_blocks.len() - *blocks_newly_allocated);
+            std::cmp::min(block_size / size_of::<u32>(),
+                          new_blocks.len() - *blocks_newly_allocated);
 
-        ext2.read_logical_block_self(block_num, 1, &mut block_buffer.0,
-                                     Some(deferred_write_map))?;
+        ext2.read_logical_block(block_num, block_buffer.as_mut_slice(),
+                                Some(deferred_write_map))?;
 
         {
             let mut block_buffer_u32_slice: &mut [u32] =
-                bytemuck::cast_slice_mut::<_, u32>(&mut block_buffer.0);
+                bytemuck::cast_slice_mut::<_, u32>(block_buffer.as_mut_slice());
 
             // handling the contained lists of inode blocks
             for i in blocks_allocated_within_list..singly_indirect_block_block_limit {
@@ -1500,16 +1548,16 @@ impl INodeWrapper
 
     fn allocate_blocks_for_block_list<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>,
                                                       start_of_list: usize, end_of_list: usize,
-                                                      block_list_buffer: &mut AlignedBlock<BLOCK_SIZE>,
+                                                      block_list_buffer: &mut [u8],
                                                       new_block_storage_blocks_allocated: &mut usize,
                                                       all_blocks_or_fail: bool, deferred_writes: &mut DeferredWriteMap) -> Result<Vec<usize>, Ext2Error> {
         let mut new_blocks_needed_for_block_list_count: usize = 0;
 
         ext2.read_logical_block_self(self.inode.i_block[Self::DOUBLE_LINK_BLOCK_PTR_INDEX] as usize,
-                                     1, &mut block_list_buffer.0, Some(deferred_writes))?;
+                                     1, block_list_buffer, Some(deferred_writes))?;
 
         let block_list_u32_slice: &[u32] =
-            bytemuck::cast_slice::<u8, u32>(&mut block_list_buffer.0);
+            bytemuck::cast_slice::<u8, u32>(block_list_buffer);
 
         for block_num in start_of_list..end_of_list {
             if block_list_u32_slice[block_num] == UNALLOCATED_BLOCK_SLOT {
@@ -1538,6 +1586,7 @@ impl INodeWrapper
                                                              new_block_storage_blocks_allocated: &mut usize,
                                                              new_blocks: &[usize],
                                                              deferred_writes: &mut DeferredWriteMap) -> Result<(), Ext2Error> {
+        let block_size: usize = ext2.superblock.get_block_size();
         let count_of_doubly_linked_blocks: usize = *num_of_blocks_allocated -
             (ext2.get_inline_block_capacity() + ext2.get_single_indirect_block_capacity());
 
@@ -1545,9 +1594,9 @@ impl INodeWrapper
             count_of_doubly_linked_blocks / ext2.get_single_indirect_block_capacity();
         let ending_doubly_linked_block: usize =
             std::cmp::min(ext2.get_single_indirect_block_capacity(),
-                          Self::div_up(new_blocks.len() - *blocks_newly_allocated,
-                                       ext2.get_single_indirect_block_capacity()));
-        let mut block_list_buffer = AlignedBlock([0; BLOCK_SIZE]);
+                          new_blocks.len() -
+                              *blocks_newly_allocated.div_ceil(ext2.get_single_indirect_block_capacity()));
+        let mut block_list_buffer = vec![0; block_size];
 
         let new_block_list_blocks =
             self.allocate_blocks_for_block_list(ext2, starting_doubly_linked_block,
@@ -1564,23 +1613,23 @@ impl INodeWrapper
             };
 
             let mut current_block_slot: u32 =
-                bytemuck::cast_slice::<u8, u32>(&mut block_list_buffer.0)[block_num];
+                bytemuck::cast_slice::<u8, u32>(block_list_buffer.as_mut_slice())[block_num];
 
             if current_block_slot == UNALLOCATED_BLOCK_SLOT {
                 if new_block_list_index >= new_block_list_blocks.len() {
                     return Ok(());
                 }
 
-                bytemuck::cast_slice_mut::<u8, u32>(&mut block_list_buffer.0)[block_num] =
+                bytemuck::cast_slice_mut::<u8, u32>(block_list_buffer.as_mut_slice())[block_num] =
                     new_block_list_blocks[new_block_list_index] as u32;
                 new_block_list_index += 1;
 
                 ext2.add_write_to_deferred_writes_map(deferred_writes, double_indirect_block_num, block_num*size_of::<u32>(),
-                &block_list_buffer.0[block_num*size_of::<u32>()..(block_num+1)*size_of::<u32>()], None)?;
+                                                      &block_list_buffer[block_num*size_of::<u32>()..(block_num+1)*size_of::<u32>()], None)?;
             }
 
             current_block_slot =
-                bytemuck::cast_slice::<u8, u32>(&mut block_list_buffer.0)[block_num];
+                bytemuck::cast_slice::<u8, u32>(block_list_buffer.as_mut_slice())[block_num];
 
             self.write_indirected_block_to_inode(ext2, current_block_slot as usize,
                                                  num_of_blocks_allocated_within_list,
@@ -1598,23 +1647,24 @@ impl INodeWrapper
                                                                blocks_newly_allocated: &mut usize,
                                                                new_blocks: &[usize],
                                                                new_block_storage_blocks_allocated: &mut usize,
-                                                               deferred_writes: &mut DeferredWriteMap) -> Result<(), Ext2Error>  {
+                                                               deferred_writes: &mut DeferredWriteMap) -> Result<(), Ext2Error> {
+        let block_size: usize = ext2.superblock.get_block_size();
+
         self.allocate_indirect_list_block_if_needed(ext2, Self::TRIPLE_LINK_BLOCK_PTR_INDEX,
                                                     new_block_storage_blocks_allocated,
                                                     all_blocks_or_fail, deferred_writes)?;
 
-        let mut block_list_buffer = AlignedBlock([0; BLOCK_SIZE]);
+        let mut block_list_buffer = vec![0; block_size];
 
         ext2.read_logical_block_self(self.inode.i_block[Self::TRIPLE_LINK_BLOCK_PTR_INDEX] as usize,
-                                     1, &mut block_list_buffer.0, Some(deferred_writes))?;
+                                     1, block_list_buffer.as_mut_slice(), Some(deferred_writes))?;
 
         let starting_triply_directed_list_block: usize =
             (*num_of_blocks_allocated - ext2.get_double_indirect_block_capacity()) / ext2.get_double_indirect_block_capacity();
         let ending_triply_directed_list_block: usize =
             std::cmp::min(ext2.get_triple_indirect_block_capacity(),
-                          Self::div_up(new_blocks.len() - *blocks_newly_allocated,
-                                       ext2.get_double_indirect_block_capacity()));
-        let mut block_list_buffer = AlignedBlock([0; BLOCK_SIZE]);
+                          new_blocks.len() - *blocks_newly_allocated.div_ceil(ext2.get_double_indirect_block_capacity()));
+        let mut block_list_buffer = vec![0; block_size];
 
         let new_block_list_blocks: Vec<usize> =
             self.allocate_blocks_for_block_list(ext2, starting_triply_directed_list_block,
@@ -1624,7 +1674,7 @@ impl INodeWrapper
                                                 all_blocks_or_fail, deferred_writes)?;
         let mut new_block_list_index: usize = 0;
         let triply_indirect_block_list: &mut[u32] = 
-            bytemuck::cast_slice_mut::<u8, u32>(&mut block_list_buffer.0);
+            bytemuck::cast_slice_mut::<u8, u32>(block_list_buffer.as_mut_slice());
 
         for i in starting_triply_directed_list_block..ending_triply_directed_list_block {
             if triply_indirect_block_list[i] == UNALLOCATED_BLOCK_SLOT {
@@ -1676,7 +1726,8 @@ impl INodeWrapper
         // TODO: write new block num to inode
         // need to handle unallocated blocks containing doubly linked inode blocks
         // and singly linked inode block
-        let mut num_of_blocks_allocated: usize = Self::div_up(self.size() as usize, BLOCK_SIZE);
+        let block_size: usize = ext2.superblock.get_block_size();
+        let mut num_of_blocks_allocated: usize = (self.size() as usize).div_ceil(block_size);
 
         let mut blocks_newly_allocated: usize = 0;
 
@@ -1751,14 +1802,15 @@ impl INodeWrapper
     fn append_file_no_writeback<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>, new_data: &[u8],
                                 all_bytes_or_fail: bool,
                                 deferred_writes: &mut DeferredWriteMap) -> Result<usize, Ext2Error> {
-        let allocated_block_count: usize = Self::div_up(self.size() as usize, BLOCK_SIZE);
+        let block_size: usize = ext2.superblock.get_block_size();
+        let allocated_block_count: usize = self.size() as usize.div_ceil(block_size);
         let base_allocated_block: Option<usize> =
             if allocated_block_count == 0 { None } else {
                 Some(self.get_inode_block_num(allocated_block_count - 1, ext2,
                                               Some(deferred_writes))? as usize)
             };
 
-        let base_allocated_block_offset: usize = (self.size() as usize) % BLOCK_SIZE;
+        let base_allocated_block_offset: usize = (self.size() as usize) % block_size;
         let mut new_blocks_allocated: Vec<usize> = Vec::new();
         let mut new_block_storage_blocks_allocated: usize = 0;
         let mut bytes_written: usize = 0;
@@ -1767,12 +1819,12 @@ impl INodeWrapper
             new_blocks_allocated.push(base_allocated_block.unwrap());
         }
 
-        let image_file_size_in_blocks: usize = Self::div_up(new_data.len(), BLOCK_SIZE);
+        let image_file_size_in_blocks: usize = new_data.len().div_ceil(block_size);
 
         // if we have no space left in our base block or we have insufficient enough space to only
         // use the blocks we have, then we go looking for more blocks
         if base_allocated_block_offset == 0 ||
-           (BLOCK_SIZE - base_allocated_block_offset) < new_data.len() {
+           (block_size - base_allocated_block_offset) < new_data.len() {
             let new_blocks_allocated_result =
                 self.find_new_blocks::<D>(ext2, image_file_size_in_blocks, all_bytes_or_fail,
                                           deferred_writes);
@@ -1799,9 +1851,9 @@ impl INodeWrapper
                 0
             };
             let write_size = std::cmp::min(if base_allocated_block.is_some() && new_block == base_allocated_block.unwrap() {
-                BLOCK_SIZE - base_allocated_block_offset
+                block_size - base_allocated_block_offset
             } else {
-                BLOCK_SIZE
+                block_size
             }, new_data.len() - bytes_written);
 
             let current_byte_slice: &[u8] = &new_data[bytes_written..bytes_written+write_size];
@@ -1835,7 +1887,7 @@ impl INodeWrapper
     pub fn truncate_file<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>, num_bytes: u64) -> Result<u64, Ext2Error> {
         // TODO: 
         let mut deferred_writes = BTreeMap::new();
-        let block_info: INodeBlockInfo = Ext2::get_block_that_has_inode(&mut ext2.device, &ext2.superblock, &ext2.block_group_descriptor_tables, self.inode_num as usize);
+        let block_info: INodeBlockInfo = Ext2::get_block_that_has_inode(&mut ext2.device, &ext2.superblock, &ext2.block_group_descriptor_tables, self._inode_num as usize);
         if self.size() > num_bytes {
             return Err(Ext2Error::FileSizeMismatch);
         } else if (self.size() - num_bytes) / BLOCK_SIZE as u64 == self.size() / BLOCK_SIZE as u64 {
@@ -1881,43 +1933,44 @@ impl INodeWrapper
     pub fn overwrite_file<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>, new_data: &[u8],
                                           all_bytes_or_fail: bool) -> Result<usize, Ext2Error> {
         // TODO(Sasha): Handle partial writes, properly report bytes written
-        let allocated_block_count = Self::div_up(self.size() as usize, BLOCK_SIZE);
+        let block_size: usize = ext2.superblock.get_block_size();
+        let allocated_block_count = Self::div_up(self.size() as usize, block_size);
         let mut deferred_writes: DeferredWriteMap = BTreeMap::new();
         let mut bytes_written: u64 = 0;
-        if allocated_block_count == Self::div_up(new_data.len(), BLOCK_SIZE) {
+        if allocated_block_count == Self::div_up(new_data.len(), block_size) {
             // easy case
             for i in 0..allocated_block_count {
                 let cur_block = self.get_inode_block_num(i, ext2, Some(&deferred_writes))? as usize;
-                let current_byte_slice: &[u8] = &new_data[i*BLOCK_SIZE..std::cmp::min((i+1)*BLOCK_SIZE, new_data.len())];
+                let current_byte_slice: &[u8] = &new_data[i*block_size..std::cmp::min((i+1)*block_size, new_data.len())];
                 ext2.add_write_to_deferred_writes_map(&mut deferred_writes, cur_block, 0,
                     current_byte_slice, None)?;
-                bytes_written += (std::cmp::min((i+1)*BLOCK_SIZE, new_data.len()) - i*BLOCK_SIZE) as u64;
+                bytes_written += (std::cmp::min((i+1)*block_size, new_data.len()) - i*block_size) as u64;
             }
             self.update_size(bytes_written, ext2);
             self.get_deferred_write_inode(ext2, &mut deferred_writes)?;
             ext2.write_back_deferred_writes(deferred_writes)?;
-        } else if allocated_block_count < Self::div_up(new_data.len(), BLOCK_SIZE) {
+        } else if allocated_block_count < Self::div_up(new_data.len(), block_size) {
             // allocate more
             for i in 0..allocated_block_count {
                 let cur_block = self.get_inode_block_num(i, ext2, Some(&deferred_writes))? as usize;
-                let current_byte_slice: &[u8] = &new_data[i*BLOCK_SIZE..(i+1)*BLOCK_SIZE];
+                let current_byte_slice: &[u8] = &new_data[i*block_size..(i+1)*block_size];
                 ext2.add_write_to_deferred_writes_map(&mut deferred_writes, cur_block, 0,
                     current_byte_slice, None)?;
-                bytes_written += ((i+1)*BLOCK_SIZE - i*BLOCK_SIZE) as u64;
+                bytes_written += ((i+1)*block_size - i*block_size) as u64;
             }
             self.update_size(bytes_written, ext2);
             self.get_deferred_write_inode(ext2, &mut deferred_writes)?;
             ext2.write_back_deferred_writes(deferred_writes)?;
-            let new_slice: &[u8] = &new_data[allocated_block_count*BLOCK_SIZE..new_data.len()];
+            let new_slice: &[u8] = &new_data[allocated_block_count*block_size..new_data.len()];
             bytes_written += self.append_file(ext2, new_slice, all_bytes_or_fail)? as u64;
         } else {
             self.truncate_file(ext2, new_data.len() as u64 - self.size() as u64);
             for i in 0..allocated_block_count {
                 let cur_block = self.get_inode_block_num(i, ext2, Some(&deferred_writes))? as usize;
-                let current_byte_slice: &[u8] = &new_data[i*BLOCK_SIZE..std::cmp::min((i+1)*BLOCK_SIZE, new_data.len())];
+                let current_byte_slice: &[u8] = &new_data[i*block_size..std::cmp::min((i+1)*block_size, new_data.len())];
                 ext2.add_write_to_deferred_writes_map(&mut deferred_writes, cur_block, 0,
                     current_byte_slice, None)?;
-                bytes_written += (std::cmp::min((i+1)*BLOCK_SIZE, new_data.len()) - i*BLOCK_SIZE) as u64;
+                bytes_written += (std::cmp::min((i+1)*block_size, new_data.len()) - i*block_size) as u64;
             }
             self.update_size(bytes_written, ext2);
             self.get_deferred_write_inode(ext2, &mut deferred_writes)?;
@@ -1927,12 +1980,13 @@ impl INodeWrapper
     }
 
     pub fn delete_file<D: BlockDevice>(&mut self, ext2: &mut Ext2<D>) -> Result<usize, Ext2Error> {
+        let block_size = ext2.superblock.get_block_size();
         let size = self.size() as usize;
         self.truncate_file(ext2, self.size());
-        let actual_inode_num = self.inode_num - 1; // inodes are 1 indexed
+        let actual_inode_num = self._inode_num - 1; // inodes are 1 indexed
         let block_group_num = actual_inode_num as usize / ext2.superblock.s_blocks_per_group as usize;
         let index = actual_inode_num as usize % ext2.superblock.s_blocks_per_group as usize;
-        let mut block_buffer: [u8; BLOCK_SIZE] = [0; BLOCK_SIZE];
+        let mut block_buffer = vec![0; block_size];
 
         let mut deferred_writes: DeferredWriteMap = BTreeMap::new();
 

@@ -1,3 +1,7 @@
+#[cfg(feature = "std")]
+extern crate std;
+
+use crate::{linux::FileBlockDevice, Ext2, INodeWrapper};
 use alloc::rc::Rc;
 use std::cell::RefCell;
 use crate::{linux::FileBlockDevice, INodeWrapper, Superblock};
