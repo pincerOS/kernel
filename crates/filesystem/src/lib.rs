@@ -7,6 +7,7 @@ use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::ops::ControlFlow;
 
 #[cfg(test)]
 mod tests;
@@ -30,6 +31,7 @@ pub enum Ext2Error {
     FileNotFound,
     NotEnoughDeviceSpace,
     NotUtf8,
+    NotADirectory,
 }
 
 impl From<BlockDeviceError> for Ext2Error {
@@ -72,15 +74,22 @@ pub struct Ext2<Device> {
     root_inode: Rc<INodeWrapper>,
 }
 
-pub struct DirectoryEntry {
-    // assumption: name length <= 2^16
-    // all part of the spec
-    inode_number: u32,
-    _entry_size: u16,
-    name_length: u16,
-
-    name_characters: [u8; 256],
+#[repr(C)]
+struct DirEntryData {
+    inode: u32,
+    rec_len: u16,
+    name_len: u8,
+    file_type: u8,
+    name_chars: [u8; 0],
 }
+
+pub struct DirEntry<'a> {
+    pub inode_num: u32,
+    pub name_length: u8,
+    pub file_type: u8,
+    pub name: &'a [u8],
+}
+
 // https://www.nongnu.org/ext2-doc/ext2.html
 
 #[repr(C)]
@@ -456,35 +465,36 @@ where
         self.superblock.s_inode_size as u32
     }
 
-    pub fn find(&mut self, node: &INodeWrapper, name: &str) -> Result<Rc<INodeWrapper>, Ext2Error> {
-        let dir_entries: Vec<DirectoryEntry> = node.get_dir_entries(self)?;
-
-        if node.is_dir() {
-            for dir_entry in dir_entries {
-                let dir_entry_str_slice: &str = core::str::from_utf8(
-                    &dir_entry.name_characters[0..dir_entry.name_length as usize],
-                )
-                .unwrap();
-
-                if dir_entry_str_slice == name {
-                    // TODO: find out how to do operator overloading in rust and convert this into
-                    // TODO: a mut self method
-                    let inode: INode = Self::get_inode(
-                        &mut self.device,
-                        &self.superblock,
-                        &self.block_group_descriptor_tables,
-                        dir_entry.inode_number as usize,
-                    )?;
-
-                    return Ok(Rc::new(INodeWrapper {
-                        inode,
-                        _inode_num: dir_entry.inode_number,
-                    }));
-                }
-            }
+    pub fn find(
+        &mut self,
+        node: &INodeWrapper,
+        name: &[u8],
+    ) -> Result<Rc<INodeWrapper>, Ext2Error> {
+        if !node.is_dir() {
+            return Err(Ext2Error::NotADirectory);
         }
+        let inode_num = node.get_dir_entries(self, |dir_entry| {
+            if dir_entry.name == name {
+                ControlFlow::Break(dir_entry.inode_num)
+            } else {
+                ControlFlow::Continue(())
+            }
+        })?;
+        let inode_num = inode_num.ok_or(Ext2Error::FileNotFound)?;
 
-        Err(Ext2Error::FileNotFound)
+        // TODO: find out how to do operator overloading in rust and convert this into
+        // TODO: a mut self method
+        let inode: INode = Self::get_inode(
+            &mut self.device,
+            &self.superblock,
+            &self.block_group_descriptor_tables,
+            inode_num as usize,
+        )?;
+
+        Ok(Rc::new(INodeWrapper {
+            inode,
+            _inode_num: inode_num,
+        }))
     }
 }
 
@@ -506,10 +516,6 @@ impl INodeWrapper {
 
     fn get_word(byte_array: &[u8]) -> u32 {
         u32::from_le_bytes(*byte_array.first_chunk().unwrap())
-    }
-
-    fn get_half_word(byte_array: &[u8]) -> u16 {
-        u16::from_le_bytes(*byte_array.first_chunk().unwrap())
     }
 
     pub fn get_inode_block_num<D: BlockDevice>(
@@ -640,50 +646,57 @@ impl INodeWrapper {
         String::from_utf8(bytes).map_err(|_| Ext2Error::NotUtf8)
     }
 
-    pub fn get_dir_entries<D: BlockDevice>(
+    pub fn get_dir_entries<D: BlockDevice, F, O>(
         &self,
         ext2: &mut Ext2<D>,
-    ) -> Result<Vec<DirectoryEntry>, Ext2Error> {
+        mut callback: F,
+    ) -> Result<Option<O>, Ext2Error>
+    where
+        F: FnMut(&DirEntry<'_>) -> ControlFlow<O>,
+    {
         // TODO: caching
         let block_size: usize = ext2.superblock.get_block_size();
-        let mut entries: Vec<DirectoryEntry> = Vec::new();
-        let mut entries_raw_bytes: Vec<u8> = Vec::new();
+        let mut buffer = alloc::vec![0; block_size];
+
         let dir_size: usize = self.size() as usize;
+        let dir_blocks: usize = dir_size.div_ceil(block_size);
 
-        entries_raw_bytes.resize(dir_size / 9, 0);
+        let mut i = 0;
+        let mut block_idx = 0;
 
-        let directory_entry_size_blocks: usize = dir_size.div_ceil(block_size);
-        entries_raw_bytes.resize(directory_entry_size_blocks * block_size, 0);
+        while block_idx < dir_blocks {
+            self.read_block(block_idx, buffer.as_mut_slice(), ext2)?;
 
-        self.read_block(0, entries_raw_bytes.as_mut_slice(), ext2)?;
+            while i < block_size {
+                // TODO: cleanly error on malformed directory entries
+                let entry_start = &buffer[i..];
+                assert!(entry_start.len() >= size_of::<DirEntryData>());
+                let entry_data =
+                    unsafe { entry_start.as_ptr().cast::<DirEntryData>().read_unaligned() };
+                let name_start = &entry_start[size_of::<DirEntryData>()..];
+                let name = &name_start[..entry_data.name_len as usize];
 
-        let mut i: usize = 0;
+                let entry = DirEntry {
+                    inode_num: entry_data.inode,
+                    name_length: entry_data.name_len,
+                    file_type: entry_data.file_type,
+                    name,
+                };
 
-        while i < dir_size {
-            let directory_entry_inode_num = Self::get_word(&entries_raw_bytes[i..]);
-            let directory_entry_size = Self::get_half_word(&entries_raw_bytes[i + 4..i + 6]);
-            let directory_entry_name_length = entries_raw_bytes[i + 6];
-            let directory_entry_name = String::from_utf8_lossy(
-                &entries_raw_bytes[i + 8..i + 8 + (directory_entry_name_length as usize)],
-            )
-            .into_owned();
+                match callback(&entry) {
+                    ControlFlow::Continue(()) => (),
+                    ControlFlow::Break(res) => return Ok(Some(res)),
+                }
 
-            let mut dir_entry = DirectoryEntry {
-                // all part of the spec
-                inode_number: directory_entry_inode_num,
-                _entry_size: directory_entry_size as u16,
-                name_length: directory_entry_name_length as u16,
+                i += entry_data.rec_len as usize;
+            }
 
-                name_characters: [0; 256],
-            };
-
-            dir_entry.name_characters[0..dir_entry.name_length as usize]
-                .copy_from_slice(directory_entry_name.as_bytes());
-
-            entries.push(dir_entry);
-
-            i += directory_entry_size as usize;
+            let skip_blocks = i / block_size;
+            block_idx += skip_blocks;
+            i -= block_size * skip_blocks;
+            assert!(skip_blocks == 1);
         }
-        Ok(entries)
+
+        Ok(None)
     }
 }
