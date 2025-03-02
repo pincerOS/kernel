@@ -8,6 +8,7 @@ pub mod mailbox;
 pub mod rng;
 pub mod system_timer;
 pub mod watchdog;
+pub mod usb;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -193,6 +194,20 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let gpio = unsafe { gpio::bcm2711_gpio_driver::init_with_defaults(gpio_base, true) };
         unsafe { GPIO.init(SpinLock::new(gpio)) };
         println!("| initialized GPIO");
+    }
+
+    {
+        let usb = discover_compatible(tree, b"brcm,bcm2708-usb")
+            .unwrap()
+            .next()
+            .unwrap();
+
+        let (usb_addr, _) = find_device_addr(usb).unwrap().unwrap();
+        let usb_base = unsafe { map_device(usb_addr) }.as_ptr();
+        println!("| USB controller addr: {:#010x}", usb_addr as usize);
+        println!("| USB controller base: {:#010x}", usb_base as usize);
+
+        usb::usb_init(usb_base);
     }
 
     // Set up the interrupt controllers to preempt on the arm generic
