@@ -11,7 +11,7 @@ DEBUG_ARGS=${DEBUG_ARGS-"-s"}
 # DEBUG_ARGS="-s"     (run, attach debugger later)
 # DEBUG_ARGS=""       (no debugging)
 
-# QEMU_DEBUG="mmu,guest_errors,int,trace:bcm2835*"  (also log interrupts)
+# QEMU_DEBUG="guest_errors,trace:usb_hub_control,trace:usb_dwc2_work_bh_next,trace:usb_dwc2_work_bh_service,trace:usb_dwc2_packet_done,trace:usb_dwc2_packet_next,trace:usb_packet_state_fault,trace:usb_packet_state_change,trace:usb_dwc2_device_not_found,trace:usb_dwc2_device_found,trace:usb_dwc2_port_disabled,trace:usb_dwc2_async_packet_complete,trace:usb_dwc2_enable_chan,trace:usb_dwc2_work_bh,trace:usb_dwc2_memory_write,trace:usb_dwc2_async_packet,trace:usb_dwc2_packet_error,trace:usb_dwc2_handle_packet,trace:usb_dwc2_memory_read,trace:usb_dwc2_packet_status,trace:usb_dwc2_attach_speed"  #(also log interrupts)
 
 # QEMU_DISPLAY="default"  (show the framebuffer)
 
@@ -41,4 +41,5 @@ qemu-system-aarch64 \
     -serial "${SERIAL_ALT}" \
     -display "${QEMU_DISPLAY}" \
     "${QEMU_DEBUG_PFX}" "${QEMU_DEBUG}" \
+    -device usb-kbd \
     ${DEBUG_ARGS}
