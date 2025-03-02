@@ -20,6 +20,13 @@ pub fn get_time() -> u64 {
     SYSTEM_TIMER.get().get_time()
 }
 
+pub fn micro_delay(delay: u32) {
+    let stop = get_time() + delay as u64;
+    while get_time() < stop {
+        unsafe { asm!("nop") };
+    }
+}
+
 pub unsafe fn initialize_system_timer(base: *mut ()) {
     unsafe { SYSTEM_TIMER.init(Bcm2835SysTmr::new(base)) };
     if super::gic::GIC.is_initialized() {
