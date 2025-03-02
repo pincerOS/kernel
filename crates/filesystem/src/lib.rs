@@ -444,20 +444,23 @@ where
     fn read_logical_block_inner(device: &mut D, superblock: &Superblock, logical_block_start: usize,
                                 buffer: &mut [u8],
                                 deferred_writes: Option<&DeferredWriteMap>) -> Result<(), Ext2Error> {
-        assert_eq!(buffer.len(), superblock.get_block_size());
-        let start_sector_numerator: usize = logical_block_start * superblock.get_block_size();
+        let block_size: usize = superblock.get_block_size();
+        assert_eq!(buffer.len(), block_size);
+        let start_sector_numerator: usize = logical_block_start * block_size;
         let start_sector: usize = start_sector_numerator / SECTOR_SIZE;
 
         if deferred_writes.is_some() {
             let deferred_writes_unwrapped: &DeferredWriteMap = deferred_writes.unwrap();
 
             if deferred_writes_unwrapped.contains_key(&logical_block_start) {
-                buffer[0..superblock.get_block_size()].copy_from_slice(
+                buffer[0..block_size].copy_from_slice(
                     &deferred_writes_unwrapped[&logical_block_start]);
+                
+                return Ok(());
             }
-        } else {
-            device.read_sectors(start_sector as u64, buffer)?;
         }
+
+        device.read_sectors(start_sector as u64, buffer)?;
 
         Ok(())
     }
@@ -560,6 +563,8 @@ where
             ((inode_table_index * inode_size) / superblock.get_block_size()) + inode_table_block;
         let inode_table_interblock_offset: usize =
             (inode_table_index * inode_size) % superblock.get_block_size();
+
+        print!("");
 
         INodeBlockInfo{
             block_num: inode_table_block_with_offset,
@@ -717,7 +722,11 @@ where
             return Err(Ext2Error::NotADirectory);
         }
         let inode_num: Option<u32> = node.get_dir_entries(self, |dir_entry| {
-            if &dir_entry.entry.name_characters[0..dir_entry.entry.name_len as usize] == name {
+            let name_str = std::str::from_utf8(name);
+            let current_name_str =
+                std::str::from_utf8(&dir_entry.entry.name_characters[0..dir_entry.entry.name_len as usize]);
+
+            if current_name_str == name_str {
                 ControlFlow::Break(dir_entry.entry.inode_num)
             } else {
                 ControlFlow::Continue(())
@@ -735,7 +744,7 @@ where
 
         self.inode_map.insert(inode_num as usize, Rc::downgrade(&return_value));
 
-        Err(Ext2Error::FileNotFound)
+        Ok(return_value)
     }
 
     pub fn find_recursive(&mut self, node: Rc<RefCell<INodeWrapper>>, name: &[u8],
@@ -886,14 +895,15 @@ where
             };
 
             if no_optional_block_buffer {
-                self.read_logical_block(block_num, &mut block_buffer, Some(deferred_write_map))?;
+                self.read_logical_block(block_num, block_buffer.as_mut_slice(), Some(deferred_write_map))?;
             }
 
             deferred_write_map.insert(block_num, block_buffer);
         }
 
-        deferred_write_map.get_mut(&block_num).unwrap()
-            [start_write..start_write+write_bytes.len()].copy_from_slice(write_bytes);
+        let block_buffer = deferred_write_map.get_mut(&block_num).unwrap();
+        
+        block_buffer[start_write..start_write+write_bytes.len()].copy_from_slice(write_bytes);
 
         Ok(())
     }
@@ -1356,13 +1366,13 @@ impl INodeWrapper {
             while i < block_size {
                 // TODO: cleanly error on malformed directory entries
                 let entry_start = &buffer[i..];
-                assert!(entry_start.len() >= size_of::<DirectoryEntryData>());
+                //assert!(entry_start.len() >= size_of::<DirectoryEntryData>());
                 let entry_data =
                     unsafe { entry_start.as_ptr().cast::<DirectoryEntryData>().read_unaligned() };
-                let name_start = &entry_start[size_of::<DirectoryEntryData>()..];
+                let name_start = &entry_start[(size_of::<DirectoryEntryData>() - 256)..];
                 let name = &name_start[..entry_data.name_len as usize];
 
-                let entry = DirectoryEntryWrapper {
+                let mut entry = DirectoryEntryWrapper {
                     entry: DirectoryEntryData {
                         inode_num: entry_data.inode_num,
                         rec_len: entry_data.rec_len,
@@ -1373,6 +1383,8 @@ impl INodeWrapper {
                     inode_block_num: block_idx,
                     offset: 0,
                 };
+
+                entry.entry.name_characters[..entry_data.name_len as usize].copy_from_slice(name);
 
                 match callback(entry) {
                     ControlFlow::Continue(()) => (),
