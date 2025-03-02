@@ -4,7 +4,6 @@ extern crate std;
 use crate::{linux::FileBlockDevice, Ext2, INodeWrapper};
 use alloc::rc::Rc;
 use std::cell::RefCell;
-use crate::{linux::FileBlockDevice, INodeWrapper, Superblock};
 use std::{format, fs};
 use std::fs::{File, ReadDir};
 use std::{env, io, println, vec};
@@ -14,7 +13,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::prelude::v1::{Box, String, ToString, Vec};
 use std::process::{Command, Output};
-use crate::{BlockDevice, Ext2};
 
 pub fn create_ext2_fs(dir_path: &str, block_size: usize, img_name: &str, ro: bool) -> Ext2<FileBlockDevice> {
     Command::new("mkfs.ext2")
