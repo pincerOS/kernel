@@ -226,9 +226,7 @@ pub fn iter_device_tree<'a>(
 
                 let len = len.get() as usize;
                 let data: &[u8] = bytemuck::cast_slice(&struct_slice[i..]);
-                let data = data
-                    .get(..len)
-                    .ok_or("invalid data in FDT_PROP field")?;
+                let data = data.get(..len).ok_or("invalid data in FDT_PROP field")?;
 
                 emit(StructEntry::Prop { name, data })?;
 
