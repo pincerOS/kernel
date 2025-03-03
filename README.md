@@ -18,14 +18,14 @@
   <a href="#development-status-">Development Status</a> •
   <a href="#credits-">Credits</a> •
   <a href="#license-">License</a>
-</p>  
+</p>
 
 <!--
 <p align="center">
   add clip here when we have something cool to show
 ![screenshot](clip.gif)
-</p>                                                                                                                             
-                                                                                                                                                      
+</p>
+
 
                                                                                                                                                       -->
 # About The Project 🦀
@@ -59,16 +59,7 @@ Currently, the project can be tested on QEMU version 9.0 or higher. If your pack
 ## Dependencies
 - Rust toolchain (https://www.rust-lang.org/tools/install)
 - QEMU >= 9.0 (https://www.qemu.org/download/)
-
-<!--
-- llvm (https://llvm.org/docs/GettingStarted.html):
-```brew install llvm``` or ```sudo apt-get install llvm```
-
-**MacOS**
-For a temporary fix on MacOS for issues related to llvm-objcopy:
-```brew install binutils```
-```sudo ln -s $(which gobjcopy) /usr/local/bin/llvm-objcopy```
--->
+- Just (https://github.com/casey/just?tab=readme-ov-file#packages)
 
 ## Setup
 <!-- 1. Install Rust target:

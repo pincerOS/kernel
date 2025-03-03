@@ -24,11 +24,6 @@ cyan := "\\033[0;36m"
 bold := "\\033[1m"
 reset := "\\033[0m"
 
-# Check if a command exists
-_command-exists command:
-    #!/usr/bin/env bash
-    command -v {{command}} &> /dev/null
-
 # Check Rust version
 _check-rust-version:
     #!/usr/bin/env bash
@@ -72,7 +67,7 @@ _check-target:
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             echo -e "{{blue}}Installing target {{target}}...{{reset}}"
-            rustup target add {{target}}
+            rustup target add "{{target}}"
             echo -e "{{green}}Target {{target}} installed successfully.{{reset}}"
         else
             echo -e "{{red}}{{bold}}Error:{{reset}} Target {{target}} is required to build the kernel."
@@ -87,13 +82,13 @@ _install-llvmbox:
 
     export PATH="$(pwd)/{{llvmbox_dir}}/bin:$PATH"
 
-    # Check if llvm-objcopy exists in PATH or in our llvmbox directory
-    if command -v llvm-objcopy &> /dev/null; then
+    # Check if objcopy exists in PATH or in our llvmbox directory
+    if command -v objcopy &> /dev/null || command -v llvm-objcopy &> /dev/null; then
         exit 0
     fi
 
-    echo -e "{{yellow}}{{bold}}Warning:{{reset}} llvm-objcopy not found."
-    read -p "$(echo -e "{{cyan}}Would you like to download llvmbox (contains llvm tools)? (y/n) {{reset}}")" -n 1 -r
+    echo -e "{{yellow}}{{bold}}Warning:{{reset}} objcopy not found."
+    read -p "$(echo -e "{{cyan}}Would you like to download llvmbox to {{llvmbox_dir}} (contains llvm tools)? (y/n) {{reset}}")" -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         # Determine OS and architecture
@@ -140,9 +135,11 @@ _install-llvmbox:
         tar -xf "{{llvmbox_dir}}/llvmbox.tar.xz" -C "{{llvmbox_dir}}" --strip-components=1
         rm "{{llvmbox_dir}}/llvmbox.tar.xz"
 
+        ln -s "{{llvmbox_dir}}/bin/llvm-objcopy" "{{llvmbox_dir}}/bin/objcopy"
+
         echo -e "{{green}}{{bold}}Success:{{reset}} llvmbox installed to {{llvmbox_dir}}"
     else
-        echo -e "{{red}}{{bold}}Error:{{reset}} llvm-objcopy is required to build the kernel."
+        echo -e "{{red}}{{bold}}Error:{{reset}} objcopy is required to build the kernel."
         exit 1
     fi
 
@@ -157,38 +154,30 @@ build example=example profile=profile target=target: _check-rust-version _check-
         export PATH="$LLVMBOX_PATH:$PATH"
     fi
 
-    # Verify llvm-objcopy is available
-    if ! command -v llvm-objcopy &> /dev/null; then
-        echo -e "{{red}}{{bold}}Error:{{reset}} llvm-objcopy not found in PATH or in {{llvmbox_dir}}/bin"
-        echo -e "{{yellow}}PATH=$PATH{{reset}}"
-        exit 1
-    fi
-
     echo -e "{{blue}}{{bold}}Building kernel...{{reset}}"
     set -x
 
     # Build the kernel
     cargo rustc --profile="{{profile}}" --example="{{example}}" \
-        --target={{target}} -- \
+        --target="{{target}}" -- \
         -C relocation-model=static
 
     # Get binary path
     if test "{{profile}}" = "dev" ; then
-        BINARY=../../target/{{target}}/debug/examples/{{example}}
+        BINARY="../../target/{{target}}/debug/examples/{{example}}"
     else
-        BINARY=../../target/{{target}}/{{profile}}/examples/{{example}}
+        BINARY="../../target/{{target}}/{{profile}}/examples/{{example}}"
     fi
 
     # Create kernel files
     cp "${BINARY}" kernel.elf
-    llvm-objcopy -O binary "${BINARY}" kernel.bin
+    objcopy -I elf64-little -O binary "${BINARY}" kernel.bin
 
     set +x
     echo -e "{{green}}{{bold}}Build successful!{{reset}}"
 
 # Build with debug profile
-build-debug example=example target=target:
-    just build {{example}} dev {{target}}
+build-debug example=example target=target: (build example "dev" target)
 
 # Run the kernel in QEMU
 run qemu_target=qemu_target qemu_debug=qemu_debug qemu_display=qemu_display debug_args=debug_args:
@@ -223,27 +212,19 @@ run qemu_target=qemu_target qemu_debug=qemu_debug qemu_display=qemu_display debu
         {{debug_args}}
 
 # Run with UI display
-run-ui:
-    just run "{{qemu_target}}" "{{qemu_debug}}" "default" "{{debug_args}}"
+run-ui: (run qemu_target qemu_debug "default" debug_args)
 
 # Run with debug mode (wait for debugger)
-debug:
-    just run "{{qemu_target}}" "{{qemu_debug}}" "{{qemu_display}}" "-s -S"
+debug: (run qemu_target qemu_debug qemu_display "-s -S")
 
 # Run with debug mode and UI display
-debug-ui:
-    just run "{{qemu_target}}" "{{qemu_debug}}" "default" "-s -S"
+debug-ui: (run qemu_target qemu_debug "default" "-s -S")
 
 # Run on Raspberry Pi 3B
-run-rpi3b:
-    just run "-M raspi3b -dtb bcm2710-rpi-3-b-plus.dtb" "{{qemu_debug}}" "{{qemu_display}}" "{{debug_args}}"
+run-rpi3b: (run "-M raspi3b -dtb bcm2710-rpi-3-b-plus.dtb" qemu_debug qemu_display debug_args)
 
 # Build and run in one command
-build-and-run example=example profile=profile:
-    just build {{example}} {{profile}}
-    just run
+build-and-run example=example profile=profile: (build example profile) && run
 
 # Build and run with debug profile
-build-and-run-debug example=example:
-    just build {{example}} dev
-    just run
+build-and-run-debug example=example: (build-and-run example "dev")
