@@ -1386,7 +1386,7 @@ impl INodeWrapper {
                         name_characters: [0;256],
                     },
                     inode_block_num: block_idx,
-                    offset: 0,
+                    offset: i,
                 };
 
                 assert!(entry_data.rec_len > 8);

@@ -137,7 +137,7 @@ fn read_and_verify_test(ext2: &mut Ext2<FileBlockDevice>, verify_requests: &Vec<
     }
 
     if env::consts::OS == "linux" {
-        //read_and_verify_via_fuse_test(verify_requests, image_path);
+        read_and_verify_via_fuse_test(verify_requests, image_path);
     }
 }
 
