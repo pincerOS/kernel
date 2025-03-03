@@ -124,27 +124,28 @@ pub struct Ext2<Device> {
 
 type DeferredWriteMap = BTreeMap<usize, Vec<u8>>;
 
-mod DirectoryEntryConstants {
-    pub const MAX_FILE_NAME_LEN: usize = 255;
-    pub const MIN_DIRECTORY_ENTRY_SIZE: usize = 8;
-}
-
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct DirectoryEntryData {
-    // assumption: name length <= 2^16
-    // all part of the spec
     inode_num: u32,
     rec_len: u16,
     name_len: u8,
     file_type: u8,
-
-    name_characters: [u8; 256],
+    name_characters: [u8; 0],
 }
-struct DirectoryEntryWrapper {
-    entry: DirectoryEntryData,
-    inode_block_num: usize,
-    offset: usize,
+
+pub struct DirectoryEntryRef<'a> {
+    inode_num: u32,
+    rec_len: u16,
+    name_len: u8,
+    file_type: u8,
+    name: &'a [u8],
+    dir_offset: usize,
+}
+
+impl DirectoryEntryData {
+    pub const MAX_FILE_NAME_LEN: usize = 255;
+    pub const MIN_DIRECTORY_ENTRY_SIZE: usize = size_of::<Self>();
 }
 
 // https://www.nongnu.org/ext2-doc/ext2.html
@@ -405,51 +406,6 @@ fn get_epoch_time() -> usize {
     0 // TODO
 }
 
-impl DirectoryEntryWrapper {
-    pub fn copy_to_bytes_slice(&self, slice: &mut [u8], use_offset: bool) {
-        let entry_bytes: &[u8] = bytemuck::bytes_of(&self.entry);
-
-        // we shouldn't write self.entry.rec_len because that contains padding bytes
-        // which can be larger than the maximum directory entry size without padding
-        let dir_rec_len_to_write =
-            (self.entry.name_len as usize) + DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE;
-        let entry_slice: &[u8] = &entry_bytes[0..dir_rec_len_to_write];
-
-        if use_offset {
-            slice[self.offset..(self.offset + dir_rec_len_to_write)].copy_from_slice(entry_slice);
-        } else {
-            slice.copy_from_slice(entry_slice);
-        }
-    }
-
-    pub fn add_deferred_write<D: BlockDevice>(
-        &mut self,
-        ext2: &mut Ext2<D>,
-        dir_node: &mut INodeWrapper,
-        deferred_writes: &mut DeferredWriteMap,
-    ) -> Result<(), Ext2Error> {
-        let entry_bytes: &[u8] = bytemuck::bytes_of(&self.entry);
-
-        // we shouldn't write self.entry.rec_len because that contains padding bytes
-        // which can be larger than the maximum directory entry size without padding
-        let dir_rec_len_to_write =
-            (self.entry.name_len as usize) + DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE;
-        let entry_slice: &[u8] = &entry_bytes[0..dir_rec_len_to_write];
-
-        let block_num =
-            dir_node.get_inode_block_num(self.inode_block_num, ext2, Some(deferred_writes))?
-                as usize;
-
-        ext2.add_write_to_deferred_writes_map(
-            deferred_writes,
-            block_num,
-            self.offset,
-            entry_slice,
-            None,
-        )
-    }
-}
-
 impl<D> Ext2<D>
 where
     D: BlockDevice,
@@ -701,7 +657,8 @@ where
             },
         );
 
-        let descriptor_table_bytes: &mut [u8] = bytemuck::cast_slice_mut(&mut block_group_descriptor_tables);
+        let descriptor_table_bytes: &mut [u8] =
+            bytemuck::cast_slice_mut(&mut block_group_descriptor_tables);
 
         for block in descriptor_table_bytes.chunks_exact_mut(block_size) {
             Self::read_logical_block_inner(
@@ -756,13 +713,8 @@ where
         let inode_num: Option<u32> = node.get_dir_entries(
             self,
             |dir_entry| {
-                let name_str = core::str::from_utf8(name);
-                let current_name_str = core::str::from_utf8(
-                    &dir_entry.entry.name_characters[0..dir_entry.entry.name_len as usize],
-                );
-
-                if current_name_str == name_str {
-                    ControlFlow::Break(dir_entry.entry.inode_num)
+                if name == dir_entry.name {
+                    ControlFlow::Break(dir_entry.inode_num)
                 } else {
                     ControlFlow::Continue(())
                 }
@@ -1040,80 +992,84 @@ where
             i_osd2: [0; 12],
         };
 
-        if name.len() > DirectoryEntryConstants::MAX_FILE_NAME_LEN {
+        if name.len() > DirectoryEntryData::MAX_FILE_NAME_LEN {
             return Err(Ext2Error::TooLongFileName);
         }
 
         let new_inode_wrapper = self.acquire_next_available_inode(new_inode, deferred_writes)?;
 
+        // TODO: error on too-long names
         let dir_entry_name_length: u16 =
-            core::cmp::min(name.len(), DirectoryEntryConstants::MAX_FILE_NAME_LEN) as u16;
-        let mut new_dir_entry_wrapper = DirectoryEntryWrapper {
-            entry: DirectoryEntryData {
-                inode_num: new_inode_wrapper.borrow()._inode_num,
-                rec_len: (DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE as u16)
-                    + dir_entry_name_length,
-                name_len: dir_entry_name_length as u8,
-                file_type: 0,
-                name_characters: [0; 256],
-            },
-            inode_block_num: 0,
-            offset: 0,
+            core::cmp::min(name.len(), DirectoryEntryData::MAX_FILE_NAME_LEN) as u16;
+
+        let file_type = 0; // TODO: should always be 0 for rev0, 1 for regular files on rev1
+        let mut new_dir_entry = DirectoryEntryData {
+            inode_num: new_inode_wrapper.borrow()._inode_num,
+            rec_len: ((DirectoryEntryData::MIN_DIRECTORY_ENTRY_SIZE as u16)
+                + dir_entry_name_length)
+                .next_multiple_of(4),
+            name_len: dir_entry_name_length as u8,
+            file_type,
+            name_characters: [],
         };
-
-        let name_string = core::str::from_utf8(name).unwrap();
-
-        new_dir_entry_wrapper.entry.name_characters
-            [0..(new_dir_entry_wrapper.entry.name_len as usize)]
-            .copy_from_slice(name);
 
         let mut current_inter_block_offset: usize = 0;
 
-        // TODO(Bobby): deal with case where there is enough block space for
-        // TODO(Bobby): dir entry but not padding
-        if new_dir_entry_wrapper.entry.rec_len % 4 != 0 {
-            new_dir_entry_wrapper.entry.rec_len += 4 - (new_dir_entry_wrapper.entry.rec_len % 4);
+        struct AvailableDirEntry {
+            // Offset of the DirEntry start into the directory's data
+            offset: usize,
+            // Total available space for the two directory entries
+            total_len: usize,
+            // Buffer to store the old directory entry data, and the new data
+            update_buffer: Vec<u32>,
+            // Offset of the start of the second directory entry in the update buffer
+            update_buffer_used: usize,
         }
-        let mut found_empty_dir_entry: bool = false;
 
-        let empty_dir_entry_wrapper: Option<DirectoryEntryWrapper> = node.get_dir_entries(
+        // Try to find an existing directory entry with extra space to
+        // split for the new entry.
+        let available_dir_entry = node.get_dir_entries(
             self,
-            |dir_entry_wrapper| {
-                let mut mutable_entry_for_dir_entry_wrapper = dir_entry_wrapper.entry.clone();
-                let mut prior_dir_entry_allocated_size: usize =
-                    DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE
-                        + (dir_entry_wrapper.entry.name_len as usize);
-                let mut dir_entry_padding: usize = 0;
+            |entry| {
+                let prior_used_size =
+                    (size_of::<DirectoryEntryData>() + entry.name_len as usize).next_multiple_of(4);
 
-                if (prior_dir_entry_allocated_size % 4) != 0 {
-                    dir_entry_padding = 4 - (prior_dir_entry_allocated_size % 4);
-                }
+                current_inter_block_offset += entry.rec_len as usize;
 
-                current_inter_block_offset += dir_entry_wrapper.entry.rec_len as usize;
-
-                if dir_entry_wrapper.entry.rec_len as usize
-                    >= prior_dir_entry_allocated_size
-                        + dir_entry_padding
-                        + new_dir_entry_wrapper.entry.rec_len as usize
+                if entry.inode_num == 0 && entry.rec_len as usize >= new_dir_entry.rec_len as usize
                 {
-                    // resizing prior directory entry to allow our new directory entry
-                    let prior_dir_entry_new_size =
-                        (prior_dir_entry_allocated_size + dir_entry_padding) as u16;
+                    // Dummy entry, fully replace it
+                    ControlFlow::Break(AvailableDirEntry {
+                        offset: entry.dir_offset,
+                        total_len: entry.rec_len as usize,
+                        update_buffer: alloc::vec![0u32; entry.rec_len as usize / 4],
+                        update_buffer_used: 0,
+                    })
+                } else if entry.rec_len as usize >= prior_used_size + new_dir_entry.rec_len as usize
+                {
+                    // Copy the entry and filename into a temporary buffer
+                    // to be updated and written back.
+                    let mut update_buffer = alloc::vec![0u32; entry.rec_len as usize / 4];
+                    let bytes = bytemuck::cast_slice_mut::<u32, u8>(&mut update_buffer);
 
-                    new_dir_entry_wrapper.inode_block_num = dir_entry_wrapper.inode_block_num;
-                    new_dir_entry_wrapper.offset =
-                        dir_entry_wrapper.offset + (prior_dir_entry_new_size as usize);
+                    let existing_entry = DirectoryEntryData {
+                        inode_num: entry.inode_num,
+                        rec_len: prior_used_size as u16,
+                        name_len: entry.name_len,
+                        file_type: entry.file_type,
+                        name_characters: [],
+                    };
 
-                    new_dir_entry_wrapper.entry.rec_len =
-                        dir_entry_wrapper.entry.rec_len - prior_dir_entry_new_size;
-                    mutable_entry_for_dir_entry_wrapper.rec_len = prior_dir_entry_new_size;
+                    bytes[..size_of::<DirectoryEntryData>()]
+                        .copy_from_slice(bytemuck::bytes_of(&existing_entry));
+                    bytes[size_of::<DirectoryEntryData>()..][..entry.name_len as usize]
+                        .copy_from_slice(entry.name);
 
-                    found_empty_dir_entry = true;
-
-                    ControlFlow::Break(DirectoryEntryWrapper {
-                        entry: mutable_entry_for_dir_entry_wrapper,
-                        inode_block_num: dir_entry_wrapper.inode_block_num,
-                        offset: dir_entry_wrapper.offset,
+                    ControlFlow::Break(AvailableDirEntry {
+                        offset: entry.dir_offset,
+                        total_len: entry.rec_len as usize,
+                        update_buffer,
+                        update_buffer_used: prior_used_size,
                     })
                 } else {
                     ControlFlow::Continue(())
@@ -1122,41 +1078,56 @@ where
             None,
         )?;
 
-        if empty_dir_entry_wrapper.is_some() {
-            let mut dir_entry_wrapper: DirectoryEntryWrapper = empty_dir_entry_wrapper.unwrap();
+        if let Some(available_dir_entry) = available_dir_entry {
+            let mut buffer = available_dir_entry.update_buffer;
+            let bytes = bytemuck::cast_slice_mut::<u32, u8>(&mut buffer);
 
-            dir_entry_wrapper.add_deferred_write(self, node, deferred_writes)?;
-            new_dir_entry_wrapper.add_deferred_write(self, node, deferred_writes)?;
+            new_dir_entry.rec_len =
+                (available_dir_entry.total_len - available_dir_entry.update_buffer_used) as u16;
+
+            // Copy the new directory entry into the remaining space
+            // of the available entry.
+            let rest = &mut bytes[available_dir_entry.update_buffer_used..];
+            rest[..size_of::<DirectoryEntryData>()]
+                .copy_from_slice(bytemuck::bytes_of(&new_dir_entry));
+            rest[size_of::<DirectoryEntryData>()..][..new_dir_entry.name_len as usize]
+                .copy_from_slice(&name[..new_dir_entry.name_len as usize]);
+
+            let block_size = self.get_block_size();
+            let logical_block = available_dir_entry.offset / block_size;
+            let block_offset = available_dir_entry.offset % block_size;
+            let block_num =
+                node.get_inode_block_num(logical_block, self, Some(deferred_writes))? as usize;
+
+            // Write back both updated entries
+            self.add_write_to_deferred_writes_map(
+                deferred_writes,
+                block_num,
+                block_offset,
+                bytes,
+                None,
+            )?;
         } else {
             // we will need to allocate a new block of dir entries
             let block_size: usize = self.superblock.get_block_size();
 
             assert_eq!((node.size() as usize) % block_size, 0);
-            assert!(
-                (block_size - current_inter_block_offset)
-                    < new_dir_entry_wrapper.entry.rec_len as usize
-            );
+            // All space in directories must be taken by entries,
+            // so this will always be adding a new block.
+            assert!(current_inter_block_offset % block_size == 0);
+            assert!(current_inter_block_offset as u64 == node.size());
 
-            let mut new_dir_entry: DirectoryEntryData = new_dir_entry_wrapper.entry;
-            let mut dir_entry_bytes_with_padding = vec![0; block_size];
-
-            let actual_rec_len: usize = new_dir_entry.rec_len as usize;
-
+            // Since we're adding a new block with a single entry, mark
+            // the rest of the block as padding for the first record.
             new_dir_entry.rec_len = block_size as u16;
 
-            let dir_entry_bytes = bytemuck::bytes_of(&new_dir_entry);
-            let remaining_bytes_in_block: usize = block_size - current_inter_block_offset;
+            let mut block_buffer = vec![0; block_size];
+            block_buffer[..size_of::<DirectoryEntryData>()]
+                .copy_from_slice(bytemuck::bytes_of(&new_dir_entry));
+            block_buffer[size_of::<DirectoryEntryData>()..][..new_dir_entry.name_len as usize]
+                .copy_from_slice(&name);
 
-            dir_entry_bytes_with_padding
-                [remaining_bytes_in_block..remaining_bytes_in_block + actual_rec_len]
-                .copy_from_slice(&dir_entry_bytes[0..actual_rec_len]);
-
-            node.append_file_no_writeback(
-                self,
-                dir_entry_bytes_with_padding.as_slice(),
-                true,
-                deferred_writes,
-            )?;
+            node.append_file_no_writeback(self, block_buffer.as_slice(), true, deferred_writes)?;
         }
 
         new_inode_wrapper
@@ -1187,46 +1158,37 @@ where
             &mut deferred_writes,
         )?;
 
-        let mut cur_dir_entry = DirectoryEntryWrapper {
-            entry: DirectoryEntryData {
-                inode_num: dir_node.borrow()._inode_num,
-                rec_len: (DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE as u16) + 1,
-                name_len: 1,
-                file_type: 0,
-                name_characters: [0; 256],
-            },
-            inode_block_num: 0,
-            offset: 0,
+        let dir_file_type = 0; // TODO: in rev 1, this should be 2
+        let cur_dir_entry = DirectoryEntryData {
+            inode_num: dir_node.borrow()._inode_num,
+            rec_len: (DirectoryEntryData::MIN_DIRECTORY_ENTRY_SIZE as u16 + 1).next_multiple_of(4),
+            name_len: 1,
+            file_type: dir_file_type,
+            name_characters: [],
+        };
+        let mut parent_dir_entry = DirectoryEntryData {
+            inode_num: node._inode_num,
+            rec_len: (DirectoryEntryData::MIN_DIRECTORY_ENTRY_SIZE as u16 + 2).next_multiple_of(4),
+            name_len: 2,
+            file_type: dir_file_type,
+            name_characters: [],
         };
 
-        cur_dir_entry.entry.rec_len += 4 - (cur_dir_entry.entry.rec_len % 4);
+        parent_dir_entry.rec_len = (block_size as u16) - cur_dir_entry.rec_len;
 
-        let mut prev_dir_entry = DirectoryEntryWrapper {
-            entry: DirectoryEntryData {
-                inode_num: node._inode_num,
-                rec_len: (DirectoryEntryConstants::MIN_DIRECTORY_ENTRY_SIZE as u16) + 2,
-                name_len: 2,
-                file_type: 0,
-                name_characters: [0; 256],
-            },
-            inode_block_num: 0,
-            offset: cur_dir_entry.entry.rec_len as usize,
-        };
+        let mut block_buffer = vec![0; block_size];
 
-        prev_dir_entry.entry.rec_len = (block_size as u16) - cur_dir_entry.entry.rec_len;
-
-        cur_dir_entry.entry.name_characters[0] = b'.';
-        prev_dir_entry.entry.name_characters[0] = b'.';
-        prev_dir_entry.entry.name_characters[1] = b'.';
-
-        let mut dir_entry_bytes = vec![0; block_size];
-
-        cur_dir_entry.copy_to_bytes_slice(&mut dir_entry_bytes, true);
-        prev_dir_entry.copy_to_bytes_slice(&mut dir_entry_bytes, true);
+        block_buffer[..size_of::<DirectoryEntryData>()]
+            .copy_from_slice(bytemuck::bytes_of(&cur_dir_entry));
+        block_buffer[size_of::<DirectoryEntryData>()..][..1].copy_from_slice(b".");
+        block_buffer[cur_dir_entry.rec_len as usize..][..size_of::<DirectoryEntryData>()]
+            .copy_from_slice(bytemuck::bytes_of(&parent_dir_entry));
+        block_buffer[cur_dir_entry.rec_len as usize + size_of::<DirectoryEntryData>()..][..2]
+            .copy_from_slice(b"..");
 
         dir_node.borrow_mut().append_file_no_writeback(
             self,
-            &dir_entry_bytes,
+            &block_buffer,
             true,
             &mut deferred_writes,
         )?;
@@ -1510,7 +1472,7 @@ impl INodeWrapper {
         deferred_writes: Option<&DeferredWriteMap>,
     ) -> Result<Option<O>, Ext2Error>
     where
-        F: FnMut(DirectoryEntryWrapper) -> ControlFlow<O>,
+        F: FnMut(DirectoryEntryRef<'_>) -> ControlFlow<O>,
     {
         // TODO: caching
         let block_size: usize = ext2.superblock.get_block_size();
@@ -1528,31 +1490,27 @@ impl INodeWrapper {
             while i < block_size {
                 // TODO: cleanly error on malformed directory entries
                 let entry_start = &buffer[i..];
-                //assert!(entry_start.len() >= size_of::<DirectoryEntryData>());
-                let entry_data = unsafe {
-                    entry_start
-                        .as_ptr()
-                        .cast::<DirectoryEntryData>()
-                        .read_unaligned()
-                };
-                let name_start = &entry_start[(size_of::<DirectoryEntryData>() - 256)..];
+                assert!(entry_start.len() >= size_of::<DirectoryEntryData>());
+                let entry_data = bytemuck::pod_read_unaligned::<DirectoryEntryData>(
+                    &entry_start[..size_of::<DirectoryEntryData>()],
+                );
+                assert!(entry_data.rec_len as usize >= size_of::<DirectoryEntryData>());
+                assert!(
+                    entry_data.name_len as usize
+                        <= size_of::<DirectoryEntryData>() + entry_data.rec_len as usize
+                );
+
+                let name_start = &entry_start[size_of::<DirectoryEntryData>()..];
                 let name = &name_start[..entry_data.name_len as usize];
 
-                let mut entry = DirectoryEntryWrapper {
-                    entry: DirectoryEntryData {
-                        inode_num: entry_data.inode_num,
-                        rec_len: entry_data.rec_len,
-                        name_len: entry_data.name_len,
-                        file_type: entry_data.file_type,
-                        name_characters: [0; 256],
-                    },
-                    inode_block_num: block_idx,
-                    offset: i,
+                let entry = DirectoryEntryRef {
+                    inode_num: entry_data.inode_num,
+                    rec_len: entry_data.rec_len,
+                    name_len: entry_data.name_len,
+                    file_type: entry_data.file_type,
+                    name,
+                    dir_offset: block_idx * block_size + i,
                 };
-
-                assert!(entry_data.rec_len > 8);
-
-                entry.entry.name_characters[..entry_data.name_len as usize].copy_from_slice(name);
 
                 match callback(entry) {
                     ControlFlow::Continue(()) => (),
