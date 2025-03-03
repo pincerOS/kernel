@@ -753,6 +753,7 @@ where
         let path_split = name.split(|byte| *byte == b'/');
         let path_split_vec = path_split.collect::<Vec<&[u8]>>();
         let mut current_node: Rc<RefCell<INodeWrapper>> = node;
+        let name_str = std::str::from_utf8(name);
 
         for (index, file_dir) in path_split_vec.iter().enumerate() {
             let file_dir_str = std::str::from_utf8(file_dir).unwrap();
@@ -1021,7 +1022,11 @@ where
 
                 found_empty_dir_entry = true;
 
-                ControlFlow::Break(dir_entry_wrapper)
+                ControlFlow::Break(DirectoryEntryWrapper{
+                    entry: mutable_entry_for_dir_entry_wrapper,
+                    inode_block_num: dir_entry_wrapper.inode_block_num,
+                    offset: dir_entry_wrapper.offset,
+                })
             } else {
                 ControlFlow::Continue(())
             }
@@ -1383,6 +1388,8 @@ impl INodeWrapper {
                     inode_block_num: block_idx,
                     offset: 0,
                 };
+
+                assert!(entry_data.rec_len > 8);
 
                 entry.entry.name_characters[..entry_data.name_len as usize].copy_from_slice(name);
 
