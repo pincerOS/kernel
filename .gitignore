@@ -5,3 +5,4 @@ kernel.elf
 .vscode
 .DS_Store
 *.tmp.*
+.llvmbox

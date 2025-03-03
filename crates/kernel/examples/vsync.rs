@@ -22,7 +22,7 @@ extern "Rust" fn kernel_main(tree: device_tree::DeviceTree) {
     println!("| acquiring framebuffer");
     let mut surface = unsafe { mailbox.get_framebuffer() };
 
-    println!("| starting vsync demo; make sure to run with ./scripts/run-ui.sh");
+    println!("| starting vsync demo; make sure to run with 'just run-ui'");
     vsync_tearing_demo(&mut surface);
 }
 
