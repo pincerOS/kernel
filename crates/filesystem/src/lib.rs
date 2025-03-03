@@ -47,6 +47,7 @@ mod tests;
 
 #[cfg(feature = "std")]
 pub mod linux;
+mod hash;
 
 pub const SECTOR_SIZE: usize = 512;
 
@@ -145,6 +146,51 @@ struct DirectoryEntryData {
 
     name_characters: [u8; 256],
 }
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct HTreeDirectoryEntryRoot {
+    current_dir_inode_number: u32,
+    current_dir_entry_size: u16,
+    current_dir_name_len: u8,
+    current_dir_file_type: u8,
+    current_dir_name: [u8; 4],
+
+    parent_dir_inode_number: u32,
+    parent_dir_entry_size: u16,
+    parent_dir_name_len: u8,
+    parent_dir_file_type: u8,
+    parent_dir_name: [u8; 4],
+
+    dx_root_reserved: u32,
+    hash_version: u8,
+    info_length: u8,
+    indirect_levels: u8,
+    unused_flags: u8,
+
+    limit: u16,
+    count: u16,
+    block: u32,
+}
+
+struct HTreeDirectoryEntryNode {
+    fake_zero_inode: u32,
+    block_size: u16,
+    name_length: u8,
+    file_type: u8,
+    limit: u16,
+    count: u16,
+    block: u32,
+}
+
+struct HTreeDirectoryEntry {
+    hash: u32,
+    block: u32
+}
+
+//const _: () = assert!(size_of::<HTreeDirectoryEntryRoot>() == 128);
+const _: () = assert!(size_of::<INode>() == 128);
+
 struct DirectoryEntryWrapper {
     entry: DirectoryEntryData,
     inode_block_num: usize,
@@ -396,7 +442,9 @@ pub struct BGD {
     bg_free_blocks_count: u16,
     bg_free_inodes_count: u16,
     bg_used_dirs_count: u16,
-    bg_flags: u16,
+    bg_pad: u16,
+    bg_reserved: [u8; 12]
+    /*bg_flags: u16,
     bg_exclude_bitmap_lo: u32,
     bg_block_bitmap_csum_lo: u16,
     bg_inode_bitmap_csum_lo: u16,
@@ -411,7 +459,7 @@ pub struct BGD {
     bg_exclude_bitmap_hi: u32,
     bg_block_bitmap_csum_hi: u16,
     bg_inode_bitmap_csum_hi: u16,
-    bg_pad: u32,
+    bg_pad: u32,*/
 }
 
 pub mod bg_flags {
@@ -884,23 +932,6 @@ where
         let descriptor_count = superblock.get_num_of_block_groups() as usize;
         let block_group_descriptor_blocks: usize =
             1 + (descriptor_count * size_of::<BGD>()).div_ceil(block_size);
-        block_group_descriptor_tables.resize(num_of_descriptor_tables,
-                                             BGD{ bg_block_bitmap: 0, bg_inode_bitmap: 0, 
-                                                        bg_inode_table: 0, bg_free_blocks_count: 0, 
-                                                        bg_free_inodes_count: 0, bg_used_dirs_count: 0,
-                                                        bg_flags: 0, bg_exclude_bitmap_lo: 0,
-                                                        bg_block_bitmap_csum_lo: 0,
-                                                        bg_inode_bitmap_csum_lo: 0,
-                                                        bg_itable_unused_lo: 0, bg_checksum: 0,
-                                                        bg_block_bitmap_hi: 0, bg_inode_bitmap_hi: 0,
-                                                        bg_free_blocks_count_hi: 0,
-                                                        bg_free_inodes_count_hi: 0,
-                                                        bg_used_dirs_count_hi: 0,
-                                                        bg_itable_unused_hi: 0,
-                                                        bg_exclude_bitmap_hi: 0,
-                                                        bg_block_bitmap_csum_hi: 0,
-                                                        bg_inode_bitmap_csum_hi: 0, bg_pad: 0 });
-
         let max_block_group_descriptors: usize =
             block_group_descriptor_blocks * (block_size / size_of::<BGD>());
 
@@ -1729,7 +1760,7 @@ impl INodeWrapper {
         Ok(return_value)
     }
 
-    pub fn get_dir_entries<D: BlockDevice, F, O>(
+    pub fn get_dir_entries_linear<D: BlockDevice, F, O>(
         &self,
         ext2: &mut Ext2<D>,
         mut callback: F,
@@ -1738,7 +1769,6 @@ impl INodeWrapper {
     where
         F: FnMut(DirectoryEntryWrapper) -> ControlFlow<O>,
     {
-        // TODO: caching
         let block_size: usize = ext2.superblock.get_block_size();
         let mut buffer = alloc::vec![0; block_size];
 
@@ -1795,6 +1825,36 @@ impl INodeWrapper {
         }
 
         Ok(None)
+    }
+
+    pub fn get_dir_entries_hashed<D: BlockDevice, F, O>(
+        &self,
+        ext2: &mut Ext2<D>,
+        mut callback: F,
+        deferred_writes: Option<&DeferredWriteMap>,
+    ) -> Result<Option<O>, Ext2Error>
+    where
+        F: FnMut(DirectoryEntryWrapper) -> ControlFlow<O>,
+    {
+        
+        
+        Ok(None)
+    }
+
+    pub fn get_dir_entries<D: BlockDevice, F, O>(
+        &self,
+        ext2: &mut Ext2<D>,
+        mut callback: F,
+        deferred_writes: Option<&DeferredWriteMap>,
+    ) -> Result<Option<O>, Ext2Error>
+    where
+        F: FnMut(DirectoryEntryWrapper) -> ControlFlow<O>,
+    {
+        if (self.inode.i_flags & i_flags::EXT2_INDEX_FL) != 0 {
+            self.get_dir_entries_hashed(ext2, callback, deferred_writes)
+        } else {
+            self.get_dir_entries_linear(ext2, callback, deferred_writes)
+        }
     }
 
     pub fn find_new_blocks<D: BlockDevice>(
@@ -2597,5 +2657,9 @@ impl INodeWrapper {
         ext2.add_super_block_deferred_write(&mut deferred_writes)?;
         //TODO: probably want to delete myself
         Ok(size)
+    }
+
+    pub fn filename_dir_hash(&self, name: &str) -> u32 {
+        0
     }
 }
