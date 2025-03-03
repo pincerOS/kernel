@@ -1,5 +1,7 @@
 use crate::sync::{SpinLock, UnsafeInit, Volatile};
 
+// https://documentation-service.arm.com/static/5e8e36c2fd977155116a90b5
+
 pub static UART: UnsafeInit<SpinLock<UARTInner>> = unsafe { UnsafeInit::uninit() };
 
 pub struct UARTInner {
@@ -65,14 +67,24 @@ impl UARTInner {
             this.reg(Self::UART_FBRD).write(40);
 
             // Enable FIFO & 8 bit data transmission (1 stop bit, no parity).
-            this.reg(Self::UART_LCRH).write((1 << 4) | (1 << 5) | (1 << 6));
+            this.reg(Self::UART_LCRH)
+                .write((1 << 4) | (1 << 5) | (1 << 6));
 
             // Mask all interrupts.
-            this.reg(Self::UART_IMSC).write((1 << 1) | (1 << 4) | (1 << 5) | (1 << 6) |
-                                (1 << 7) | (1 << 8) | (1 << 9) | (1 << 10));
+            this.reg(Self::UART_IMSC).write(
+                (1 << 1)
+                    | (1 << 4)
+                    | (1 << 5)
+                    | (1 << 6)
+                    | (1 << 7)
+                    | (1 << 8)
+                    | (1 << 9)
+                    | (1 << 10),
+            );
 
             // Enable UART, receive & transfer part of UART.
-            this.reg(Self::UART_CR).write((1 << 0) | (1 << 8) | (1 << 9));
+            this.reg(Self::UART_CR)
+                .write((1 << 0) | (1 << 8) | (1 << 9));
         }
         this
     }
@@ -138,13 +150,13 @@ impl core::fmt::Write for &SpinLock<UARTInner> {
 macro_rules! print {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
-        write!($crate::uart::UART.get(), $($arg)*).ok();
+        write!($crate::device::uart::UART.get(), $($arg)*).ok();
     }};
 }
 #[macro_export]
 macro_rules! println {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
-        writeln!($crate::uart::UART.get(), $($arg)*).ok();
+        writeln!($crate::device::uart::UART.get(), $($arg)*).ok();
     }};
 }

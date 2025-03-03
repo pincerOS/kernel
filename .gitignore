@@ -1,6 +1,9 @@
 /target
 kernel.bin
+kernel.elf
 .gdb_history
-*.img
+.vscode
 .idea
-.vs
+.DS_Store
+*.tmp.*
+*.img
