@@ -7,8 +7,8 @@ pub mod gpio;
 pub mod mailbox;
 pub mod rng;
 pub mod system_timer;
-pub mod watchdog;
 pub mod usb;
+pub mod watchdog;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;

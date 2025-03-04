@@ -6,38 +6,39 @@
 *	driver.
 *
 *	hcd/dwc/roothub.c contains code to control the DesignWare® Hi-Speed USB 2.0
-*	On-The-Go (HS OTG) Controller's virtual root hub. The physical USB 
-*	connection to the computer is treated as a virtual 1 port USB hub for 
+*	On-The-Go (HS OTG) Controller's virtual root hub. The physical USB
+*	connection to the computer is treated as a virtual 1 port USB hub for
 *	simplicity, allowing the USBD to control it directly with a Hub driver.
 *
 *	THIS SOFTWARE IS NOT AFFILIATED WITH NOR ENDORSED BY SYNOPSYS IP.
 ******************************************************************************/
 
-
-use crate::device::usb::usbd::device::*;
-use crate::device::usb::types::*;
-use crate::device::usb::usbd::request::*;
-use crate::device::usb::usbd::pipe::*;
-use crate::device::usb::usbd::descriptors::*;
+use crate::device::system_timer::micro_delay;
 use crate::device::usb::hcd::hub::HubDescriptor;
-
+use crate::device::usb::types::*;
+use crate::device::usb::usbd::descriptors::*;
+use crate::device::usb::usbd::device::*;
+use crate::device::usb::usbd::pipe::*;
+use crate::device::usb::usbd::request::*;
+use super::dwc_otgreg::*;
+use super::dwc_otg::*;
+use crate::device::usb::hcd::hub::*;
+use core::cmp::min;
+use core::ptr::copy;
 use crate::device::usb::usbd::usbd::*;
 use core::mem::size_of;
 
-
 pub const RootHubDeviceNumber: usize = 0;
 
-pub fn hcd_process_root_hub_message(
-    device: &mut UsbDevice,
-    pipe: UsbPipeAddress,
-    buffer: *mut u8,
-    buffer_length: u32,
-    request: &mut UsbDeviceRequest,
-) -> ResultCode {
-    ResultCode::OK
+pub fn memory_copy(dest: *mut u8, src: *const u8, len: usize) {
+    if len == 0 {
+        return;
+    }
+    
+    unsafe {
+        copy(src, dest, len); // Handles overlapping memory correctly
+    }
 }
-
-
 
 const DeviceDescriptor: UsbDeviceDescriptor = UsbDeviceDescriptor {
     descriptor_length: 0x12,
@@ -56,7 +57,6 @@ const DeviceDescriptor: UsbDeviceDescriptor = UsbDeviceDescriptor {
     configuration_count: 1,
 };
 
-
 #[repr(C, packed)]
 struct ConfigurationDescriptor {
     configuration: UsbConfigurationDescriptor,
@@ -72,8 +72,8 @@ const CONFIGURATION_DESCRIPTOR: ConfigurationDescriptor = ConfigurationDescripto
         interface_count: 1,
         configuration_value: 1,
         string_index: 0,
-        attributes: UsbConfigurationAttributes{
-            attributes: (1 << 6) | (1 << 7)
+        attributes: UsbConfigurationAttributes {
+            attributes: (1 << 6) | (1 << 7),
         },
         maximum_power: 0,
     },
@@ -94,12 +94,8 @@ const CONFIGURATION_DESCRIPTOR: ConfigurationDescriptor = ConfigurationDescripto
         endpoint_address: UsbEndpointAddress {
             Number: 1 | (1 << 7),
         },
-        attributes: UsbEndpointAttributes {
-            Type: 3,
-        },
-        packet: UsbPacket {
-            MaxSize: 8,
-        },
+        attributes: UsbEndpointAttributes { Type: 3 },
+        packet: UsbPacket { MaxSize: 8 },
         interval: 0xff,
     },
 };
@@ -117,7 +113,6 @@ const STRING_0: UsbStringDescriptor = UsbStringDescriptor {
 // };
 
 
-
 const HUB_DESCRIPTOR: HubDescriptor = HubDescriptor {
     DescriptorLength: 0x9,
     DescriptorType: DescriptorType::Hub,
@@ -127,3 +122,231 @@ const HUB_DESCRIPTOR: HubDescriptor = HubDescriptor {
     MaximumHubPower: 0,
     Data: [0x01, 0xff],
 };
+
+
+pub fn HcdProcessRootHubMessage(
+    device: &mut UsbDevice,
+    pipe: UsbPipeAddress,
+    buffer: *mut u8,
+    buffer_length: u32,
+    request: &mut UsbDeviceRequest,
+) -> ResultCode {
+    let mut result = ResultCode::OK;
+    let mut reply_length = 0;
+    device.error = UsbTransferError::Processing;
+
+    if pipe.transfer_type == UsbTransfer::Interrupt {
+        println!("| HCD.Hub: RootHub does not support IRQ pipes.");
+        device.error = UsbTransferError::Stall;
+        return ResultCode::OK;
+    }
+
+    match request.request {
+        UsbDeviceRequestRequest::GetStatus => {
+            match request.request_type {
+                0x80 => {
+                    unsafe {
+                        *(buffer as *mut u16) = 1;
+                    }
+                    reply_length = 2;
+                }
+                0x81 | 0x82 => {
+                    unsafe {
+                        *(buffer as *mut u16) = 0;
+                        reply_length = 2;
+                    }
+                }
+                0xa0 => {
+                    unsafe {
+                        *(buffer as *mut u32) = 0;
+                        reply_length = 4;
+                    }
+                }
+                0xa3 => {
+                    unsafe { 
+                        let hprt = read_volatile(DOTG_HPRT);
+                        *(buffer as *mut u32) = 0;
+
+                        let stat_buff = buffer as *mut HubPortFullStatus;
+
+                        let mut status = 0;
+                        status |= (hprt & HPRT_PRTCONNSTS) >> 1;
+                        status |= ((hprt & HPRT_PRTENA) >> 2) << 1;
+                        status |= ((hprt & HPRT_PRTSUSP) >> 7) << 2;
+                        status |= ((hprt & HPRT_PRTOVRCURRACT) >> 4) << 3;
+                        status |= ((hprt & HPRT_PRTRST) >> 8) << 4;
+                        status |= ((hprt & HPRT_PRTPWR) >> 12) << 8;
+
+                        if ((hprt & HPRT_PRTSPD_MASK) >> HPRT_PRTSPD_SHIFT) == HPRT_PRTSPD_HIGH as u32 {
+                            status |= 1 << 10;
+                        } else if ((hprt & HPRT_PRTSPD_MASK) >> HPRT_PRTSPD_SHIFT) == HPRT_PRTSPD_LOW as u32 {
+                            status |= 1 << 9;
+                        }
+                        status |= ((hprt & HPRT_PRTTSTCTL_SHIFT) >> 13) << 11;
+                        
+                        
+
+                        let mut change = 0;
+                        change |= ((hprt & HPRT_PRTCONNDET) >> 2) << 0;
+                        change |= ((hprt & HPRT_PRTENCHNG) >> 3) << 1;
+                        change |= ((hprt & HPRT_PRTOVRCURRCHNG) >> 5) << 3;
+                        change |= 1 << 4;
+                        //Don't even ask about this code, I hope its write
+
+                        (*stat_buff).Status._bitfield = status as u16;
+                        (*stat_buff).Change._bitfield = change as u16;
+                        reply_length = 4;
+                    }
+                }
+                _ => {
+                    device.error = UsbTransferError::Stall;
+                }
+            }
+        }
+        UsbDeviceRequestRequest::ClearFeature => {
+            match request.request_type {
+                0x2 | 0x20 => {}
+                0x23 => {
+                    match request.value {
+                        1 => { //FeatureEnable
+                            let mut hprt = read_volatile(DOTG_HPRT);
+                            hprt |= HPRT_PRTENA;
+                            write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x4));
+                        }
+                        2 => { //FeatureSuspend
+                            write_volatile(DOTG_PCGCCTL, 0);
+                            micro_delay(5000);
+                            let mut hprt = read_volatile(DOTG_HPRT);
+                            hprt |= HPRT_PRTRES;
+
+                            write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x40));
+                            micro_delay(100000);
+                            hprt &= !HPRT_PRTRES;
+                            hprt &= !HPRT_PRTSUSP;
+                            write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0xc0));
+                        }
+                        8 => { //FeaturePower
+                            let mut hprt = read_volatile(DOTG_HPRT);
+                            hprt &= !HPRT_PRTPWR;
+                            write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x1000));
+                        }
+                        16 => { //FeatureConnectionChange
+                            let mut hprt = read_volatile(DOTG_HPRT);
+                            hprt |= HPRT_PRTCONNDET;
+                            write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x2));
+                        }
+                        17 => { //FeatureEnableChange
+                            let mut hprt = read_volatile(DOTG_HPRT);
+                            hprt |= HPRT_PRTENCHNG;
+                            write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x8));
+                        }
+                        19 => { //FeatureOverCurrentChange
+                            let mut hprt = read_volatile(DOTG_HPRT);
+                            hprt |= HPRT_PRTOVRCURRCHNG;
+                            write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x20));
+                        }
+                        _ => {
+
+                        }
+                    }
+                }
+                _ => {
+                    result = ResultCode::ErrorArgument;
+                }
+            }
+        }
+        UsbDeviceRequestRequest::SetFeature => {
+            match request.request_type {
+                0x20 => {}
+                0x23 => {
+                    match request.value {
+                        4 => { //FeatureReset
+                            let mut pwr = read_volatile(DOTG_PCGCCTL);
+                            pwr &= !(1 << 5);
+                            pwr &= !(1 << 0);
+                            write_volatile(DOTG_PCGCCTL, pwr);
+                            write_volatile(DOTG_PCGCCTL, 0);
+
+                            let mut hprt = read_volatile(DOTG_HPRT);
+                            hprt &= !HPRT_PRTSUSP;
+                            hprt |= HPRT_PRTRST;
+                            hprt |= HPRT_PRTPWR;
+                            write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x1180));
+                            micro_delay(60000);
+
+                            hprt &= !HPRT_PRTRST;
+                            write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x1000));
+                        }
+                        8 => { //FeaturePower
+                            let mut hprt = read_volatile(DOTG_HPRT);
+                            hprt |= HPRT_PRTPWR;
+                            write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x1000));
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {
+                    result = ResultCode::ErrorArgument;
+                }
+            }
+        }
+        UsbDeviceRequestRequest::SetAddress => {
+            reply_length = 0;
+            println!("| HCD.Hub: Set Address Not Implemented.");
+            result = ResultCode::ErrorArgument;
+        }
+        UsbDeviceRequestRequest::GetDescriptor => {
+            match request.request_type {
+                0x80 => {
+                    match (request.value >> 8) & 0xff {
+                        1 => { //Device
+                            reply_length = min(size_of::<UsbDeviceDescriptor>(), buffer_length as usize);
+                            memory_copy(buffer, (&DeviceDescriptor as *const UsbDeviceDescriptor).cast(), reply_length);
+                        }
+                        2 => { //Configuration
+                            reply_length = min(size_of::<ConfigurationDescriptor>(), buffer_length as usize);
+                            memory_copy(buffer, (&CONFIGURATION_DESCRIPTOR as *const ConfigurationDescriptor).cast(), reply_length);
+                        }
+                        3 => { //String
+                            println!("| HCD.Hub: String Descriptor Not implemented.");
+                            result = ResultCode::ErrorArgument;
+                        }
+                        _ => {
+                            result = ResultCode::ErrorArgument;
+                        }
+                    }
+                }
+                0xa0 => {
+                    reply_length = min(HUB_DESCRIPTOR.DescriptorLength as usize, buffer_length as usize);
+                    memory_copy(buffer, (&HUB_DESCRIPTOR as *const HubDescriptor).cast(), reply_length as usize);
+                }
+                _ => {
+                    result = ResultCode::ErrorArgument;
+                }
+            }
+        }
+        UsbDeviceRequestRequest::GetConfiguration => {
+            unsafe { *(buffer as *mut u8) = 1 };
+            reply_length = 1;
+
+        }
+        UsbDeviceRequestRequest::SetConfiguration => {
+            reply_length = 0;
+            
+        }
+        _ => {
+            println!("| HCD.Hub: Unsupported request.");
+            result = ResultCode::ErrorArgument;
+        }
+    }
+
+    if result == ResultCode::ErrorArgument {
+        device.error = UsbTransferError::Stall;
+    } else {
+        device.error = UsbTransferError::NoError;
+    }
+
+    device.last_transfer = reply_length as u32;
+
+    return result;
+}

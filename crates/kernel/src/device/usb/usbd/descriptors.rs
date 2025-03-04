@@ -137,7 +137,6 @@ pub enum InterfaceClass {
     InterfaceClassVendorSpecific = 0xFF,
 }
 
-
 #[repr(C, packed)]
 pub struct UsbEndpointDescriptor {
     pub descriptor_length: u8,
@@ -175,34 +174,34 @@ pub struct UsbEndpointAttributes {
     // } UsbTransfer;
 
     //struct {
-	// 	UsbTransfer Type : 2; // @0
-	// 	enum {
-	// 		NoSynchronisation = 0,
-	// 		Asynchronous = 1,
-	// 		Adaptive = 2,
-	// 		Synchrouns = 3,
-	// 	} Synchronisation : 2; // @2
-	// 	enum {
-	// 		Data = 0,
-	// 		Feeback = 1,
-	// 		ImplicitFeebackData = 2,
-	// 	} Usage : 2; // @4
-	// 	unsigned _reserved6_7 : 2; // @6
-	// } __attribute__ ((__packed__)) Attributes; // +0x3
+    // 	UsbTransfer Type : 2; // @0
+    // 	enum {
+    // 		NoSynchronisation = 0,
+    // 		Asynchronous = 1,
+    // 		Adaptive = 2,
+    // 		Synchrouns = 3,
+    // 	} Synchronisation : 2; // @2
+    // 	enum {
+    // 		Data = 0,
+    // 		Feeback = 1,
+    // 		ImplicitFeebackData = 2,
+    // 	} Usage : 2; // @4
+    // 	unsigned _reserved6_7 : 2; // @6
+    // } __attribute__ ((__packed__)) Attributes; // +0x3
     pub Type: u8,
 }
 
 #[repr(C)]
 pub struct UsbPacket {
     //struct {
-	// 	unsigned MaxSize : 11; // @0
-	// 	enum {
-	// 		None = 0,
-	// 		Extra1 = 1,
-	// 		Extra2 = 2,
-	// 	} Transactions : 2; // @11
-	// 	unsigned _reserved13_15 : 3; // @13
-	// } __attribute__ ((__packed__)) Packet; // +0x4
+    // 	unsigned MaxSize : 11; // @0
+    // 	enum {
+    // 		None = 0,
+    // 		Extra1 = 1,
+    // 		Extra2 = 2,
+    // 	} Transactions : 2; // @11
+    // 	unsigned _reserved13_15 : 3; // @13
+    // } __attribute__ ((__packed__)) Packet; // +0x4
     pub MaxSize: u16,
 }
 

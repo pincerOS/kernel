@@ -6,7 +6,7 @@
 *	driver.
 *
 *   Converted to Rust by Aaron Lo
-* 
+*
 *	hcd/dwc/designware20.c contains code to control the DesignWare� Hi-Speed
 *	USB 2.0 On-The-Go (HS OTG) Controller.
 *
@@ -14,17 +14,123 @@
 ******************************************************************************/
 
 use crate::device::mailbox::PropGetPowerState;
-use crate::device::usb::usbd::usbd::*;
-use crate::device::usb::usbd::device::*;
-use crate::device::usb::types::*;
 use crate::device::usb::hcd::dwc::dwc_otgreg::*;
+use crate::device::usb::types::*;
+use crate::device::usb::usbd::device::*;
+use crate::device::usb::usbd::pipe::UsbPipeAddress;
+use crate::device::usb::usbd::request::UsbDeviceRequest;
+use crate::device::usb::usbd::usbd::*;
+use crate::device::usb::hcd::dwc::roothub::*;
 
-use crate::memory;
 use crate::device::mailbox;
 use crate::device::mailbox::PropSetPowerState;
 use crate::device::system_timer::micro_delay;
+use crate::memory;
 
 pub static mut dwc_otg_driver: DWC_OTG = DWC_OTG { base_addr: 0 };
+
+fn HcdChannelSendWait(
+    device: &mut UsbDevice,
+    pipe: &mut UsbPipeAddress,
+    channel: u8,
+    buffer: *mut u8,
+    buffer_length: u32,
+    request: &mut UsbDeviceRequest,
+    packet_id: u8,
+) -> ResultCode {
+    let mut tries: u32 = 0;
+
+    loop {
+        // Check for timeout after three attempts.
+        if tries == 3 {
+            println!("HCD: Failed to send to packet after 3 attempts.\n");
+            return ResultCode::ErrorTimeout;
+        }
+        tries += 1;
+
+        // Prepare the channel.
+        let result = HcdPrepareChannel(device, channel, buffer_length, packet_id, pipe);
+        if result != ResultCode::OK {
+            device.error = UsbTransferError::ConnectionError;
+            println!("HCD: Could not prepare data channel to packet.\n");
+            return result;
+        }
+
+        let mut transfer: u32 = 0;
+        // This variable will hold the previous packet count.
+        let mut packets: u32;
+
+        loop {
+            // Read current packet count.
+            packets = Host.Channel[channel as usize].TransferSize.PacketCount;
+            let result = HcdChannelSendWaitOne(
+                device,
+                pipe,
+                channel,
+                buffer,
+                buffer_length,
+                transfer,
+                request,
+            );
+            if result != ResultCode::OK {
+                if result == ResultCode::ErrorRetry {
+                    // Restart the entire process on ErrorRetry.
+                    continue;
+                }
+                return result;
+            }
+
+            // Update the transfer progress.
+            ReadBackReg(&mut Host.Channel[channel as usize].TransferSize);
+            transfer = buffer_length - Host.Channel[channel as usize].TransferSize.TransferSize;
+            // If the packet count hasn’t changed, break out of the loop.
+            if packets == Host.Channel[channel as usize].TransferSize.PacketCount {
+                break;
+            }
+            // Continue looping if there are still packets in progress.
+            if Host.Channel[channel as usize].TransferSize.PacketCount == 0 {
+                break;
+            }
+        }
+
+        // Check for a stuck transfer.
+        if packets == Host.Channel[channel as usize].TransferSize.PacketCount {
+            device.error = UsbTransferError::ConnectionError;
+            println!("HCD: Transfer to device got stuck.\n");
+            return ResultCode::ErrorDevice;
+        }
+
+        // if tries > 1 {
+        //     LOGF("HCD: Transfer to {} succeeded on attempt {}/3.\n", UsbGetDescription(device), tries);
+        // }
+        return ResultCode::OK;
+    }
+}
+
+
+pub fn HcdSubmitControlMessage(device: &mut UsbDevice, pipe: UsbPipeAddress, buffer: *mut u8, buffer_length: u32, request: &mut UsbDeviceRequest) -> ResultCode {
+    if pipe.device == RootHubDeviceNumber as u8 {
+        return HcdProcessRootHubMessage(device, pipe, buffer, buffer_length, request);
+    }
+
+    device.error = UsbTransferError::Processing;
+    device.last_transfer = 0;
+
+    let mut tempPipe = UsbPipeAddress {
+        max_size: pipe.max_size,
+        speed: pipe.speed,
+        end_point: pipe.end_point,
+        device: pipe.device,
+        transfer_type: pipe.transfer_type,
+        direction: pipe.direction,
+        _reserved: 0,
+    };
+
+
+
+
+    return ResultCode::OK;
+}
 
 fn mbox_set_power_on() -> ResultCode {
     //https://elixir.bootlin.com/freebsd/v14.2/source/sys/arm/broadcom/bcm2835/bcm283x_dwc_fdt.c#L82
@@ -36,7 +142,7 @@ fn mbox_set_power_on() -> ResultCode {
     // let msg_get = PropGetPowerState {
     //     device_id: 0x03,
     // };
-    
+
     let mailbox_base = unsafe { memory::map_device(0xfe00b880) }.as_ptr();
     let mut mailbox = unsafe { mailbox::VideoCoreMailbox::init(mailbox_base) };
     //TODO: FIX THIS
@@ -58,22 +164,22 @@ fn mbox_set_power_on() -> ResultCode {
     match resp {
         Ok(output) => {
             println!("| HCD: Power on successful {}", output.state);
-        },
+        }
         Err(_) => {
             println!("| HCD ERROR: Power on failed");
             // return ResultCode::ErrorDevice;
             return ResultCode::OK;
         }
     }
-    
+
     return ResultCode::OK;
 }
 
-/** 
-	\brief Triggers the core soft reset.
+/**
+    \brief Triggers the core soft reset.
 
-	Raises the core soft reset signal high, and then waits for the core to 
-	signal that it is ready again.
+    Raises the core soft reset signal high, and then waits for the core to
+    signal that it is ready again.
 */
 pub fn HcdReset() -> ResultCode {
     let mut count = 0;
@@ -104,14 +210,13 @@ pub fn HcdReset() -> ResultCode {
     return ResultCode::OK;
 }
 
-/** 
-	\brief Triggers the fifo flush for a given fifo.
+/**
+    \brief Triggers the fifo flush for a given fifo.
 
-	Raises the core fifo flush signal high, and then waits for the core to 
-	signal that it is ready again.
+    Raises the core fifo flush signal high, and then waits for the core to
+    signal that it is ready again.
 */
 fn HcdTransmitFifoFlush(fifo: CoreFifoFlush) -> ResultCode {
-
     let rst = (fifo as u32) << GRSTCTL_TXFNUM_SHIFT | GRSTCTL_TXFFLSH;
     write_volatile(DOTG_GRSTCTL, rst);
 
@@ -130,11 +235,11 @@ fn HcdTransmitFifoFlush(fifo: CoreFifoFlush) -> ResultCode {
     return ResultCode::OK;
 }
 
-/** 
-	\brief Triggers the receive fifo flush for a given fifo.
+/**
+    \brief Triggers the receive fifo flush for a given fifo.
 
-	Raises the core receive fifo flush signal high, and then waits for the core to 
-	signal that it is ready again.
+    Raises the core receive fifo flush signal high, and then waits for the core to
+    signal that it is ready again.
 */
 fn HcdReceiveFifoFlush() -> ResultCode {
     let rst = GRSTCTL_RXFFLSH;
@@ -155,7 +260,6 @@ fn HcdReceiveFifoFlush() -> ResultCode {
 }
 
 pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
-
     let mut dwc_sc = &mut bus.dwc_sc;
 
     println!("| HCD: Starting");
@@ -193,16 +297,19 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
 
     gusbcfg = read_volatile(DOTG_GUSBCFG);
     let cfg2 = read_volatile(DOTG_GHWCFG2) & 0b111;
-    
+
     match cfg2 {
-        0 => { //HNP_SRP_CAPABLE
+        0 => {
+            //HNP_SRP_CAPABLE
             gusbcfg |= GUSBCFG_HNPCAP | GUSBCFG_SRPCAP;
         }
-        1 | 3 | 5 => { //SRP_CAPABLE
+        1 | 3 | 5 => {
+            //SRP_CAPABLE
             gusbcfg &= !GUSBCFG_HNPCAP;
             gusbcfg |= GUSBCFG_SRPCAP;
         }
-        2 | 4 | 6 => { //NO_SRP_CAPABLE_DEVICE
+        2 | 4 | 6 => {
+            //NO_SRP_CAPABLE_DEVICE
             gusbcfg &= !GUSBCFG_HNPCAP;
             gusbcfg &= !GUSBCFG_SRPCAP;
         }
@@ -225,14 +332,14 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     hcfg = read_volatile(DOTG_HCFG);
     hcfg |= HCFG_FSLSSUPP; //Sets speed for FS/LS devices, no HS devices
     write_volatile(DOTG_HCFG, hcfg);
-    
-    // if (Host->Config.EnableDmaDescriptor == 
-	// 	Core->Hardware.DmaDescription &&
-	// 	(Core->VendorId & 0xfff) >= 0x90a) {
-	// 	LOG_DEBUG("HCD: DMA descriptor: enabled.\n");
-	// } else {
-	// 	LOG_DEBUG("HCD: DMA descriptor: disabled.\n");
-	// }/
+
+    // if (Host->Config.EnableDmaDescriptor ==
+    // 	Core->Hardware.DmaDescription &&
+    // 	(Core->VendorId & 0xfff) >= 0x90a) {
+    // 	LOG_DEBUG("HCD: DMA descriptor: enabled.\n");
+    // } else {
+    // 	LOG_DEBUG("HCD: DMA descriptor: disabled.\n");
+    // }/
 
     let cfg3 = read_volatile(DOTG_GHWCFG3);
     let fifo_size = cfg3 >> 16; //?
@@ -257,7 +364,8 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
 
     let hcfg = read_volatile(DOTG_HCFG);
     if (hcfg & HCFG_MULTISEGDMA) == 0 {
-        let num_hst_chans = (read_volatile(DOTG_GHWCFG2) & GHWCFG2_NUMHSTCHNL_MASK) >> GHWCFG2_NUMHSTCHNL_SHIFT;
+        let num_hst_chans =
+            (read_volatile(DOTG_GHWCFG2) & GHWCFG2_NUMHSTCHNL_MASK) >> GHWCFG2_NUMHSTCHNL_SHIFT;
 
         for channel in 0..num_hst_chans {
             let mut chan = read_volatile(DOTG_HCCHAR(channel as usize));
@@ -299,11 +407,10 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     hport &= !HPRT_PRTRST;
     write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x100));
 
-
     return ResultCode::OK;
 }
 
-pub fn HcdInitialize(bus: &mut UsbBus, base_addr: *mut()) -> ResultCode {
+pub fn HcdInitialize(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
     unsafe {
         dwc_otg_driver = DWC_OTG::init(base_addr);
     }
@@ -314,19 +421,28 @@ pub fn HcdInitialize(bus: &mut UsbBus, base_addr: *mut()) -> ResultCode {
     let user_id = read_volatile(DOTG_GUID);
 
     if (vendor_id & 0xfffff000) != 0x4f542000 {
-        println!("| HCD ERROR: Vendor ID: 0x{:x}, User ID: 0x{:x}", vendor_id, user_id);
+        println!(
+            "| HCD ERROR: Vendor ID: 0x{:x}, User ID: 0x{:x}",
+            vendor_id, user_id
+        );
 
         return ResultCode::ErrorIncompatible;
     } else {
-        println!("| HCD: Vendor ID: 0x{:x}, User ID: 0x{:x}", vendor_id, user_id);
+        println!(
+            "| HCD: Vendor ID: 0x{:x}, User ID: 0x{:x}",
+            vendor_id, user_id
+        );
     }
 
     let cfg2 = read_volatile(DOTG_GHWCFG2);
 
     if (cfg2 >> GHWCFG2_OTGARCH_SHIFT) & 0b10 == 0 {
-        println!("| HCD ERROR: Architecture not internal DMA {}", (cfg2 >> GHWCFG2_OTGARCH_SHIFT) & 0b10);
+        println!(
+            "| HCD ERROR: Architecture not internal DMA {}",
+            (cfg2 >> GHWCFG2_OTGARCH_SHIFT) & 0b10
+        );
         return ResultCode::ErrorIncompatible;
-    } 
+    }
 
     //High-Speed PHY Interfaces 1: UTMI+
     // I think that QEMU is not properly updating the cfg2 registers
@@ -351,15 +467,14 @@ pub fn HcdInitialize(bus: &mut UsbBus, base_addr: *mut()) -> ResultCode {
     ResultCode::OK
 }
 
-
-fn read_volatile(reg: usize) -> u32 {
+pub fn read_volatile(reg: usize) -> u32 {
     unsafe { core::ptr::read_volatile((dwc_otg_driver.base_addr + reg) as *mut u32) }
 }
-fn write_volatile(reg: usize, val: u32) {
+pub fn write_volatile(reg: usize, val: u32) {
     unsafe { core::ptr::write_volatile((dwc_otg_driver.base_addr + reg) as *mut u32, val) }
 }
 
-pub fn dwc_otg_initialize_controller(base_addr: *mut()) {
+pub fn dwc_otg_initialize_controller(base_addr: *mut ()) {
     unsafe {
         dwc_otg_driver = DWC_OTG::init(base_addr);
     }
@@ -371,10 +486,11 @@ struct DWC_OTG {
 
 impl DWC_OTG {
     pub unsafe fn init(base_addr: *mut ()) -> Self {
-        Self { base_addr: base_addr as usize }
+        Self {
+            base_addr: base_addr as usize,
+        }
     }
 }
-
 
 pub struct dwc_hub {
     pub databuffer: [u8; 1024],
@@ -385,7 +501,7 @@ impl dwc_hub {
     pub fn new() -> Self {
         Self {
             databuffer: [0; 1024],
-            phy_initialised: false, 
+            phy_initialised: false,
         }
     }
 }

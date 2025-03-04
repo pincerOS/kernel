@@ -8,12 +8,12 @@
 *   Converted to Rust by Aaron Lo
 *
 *	usbd/pipe.h contains definitions relating to the USB pipe structure,
-*	defined as part of the USB protocol. The precise details of this data 
-*	structure are an implementation detail, matching Linux in this case to 
+*	defined as part of the USB protocol. The precise details of this data
+*	structure are an implementation detail, matching Linux in this case to
 *	aid compatibility.
 ******************************************************************************/
 
-
+use super::super::types::*;
 
 /// Our implementation of the USB pipe defined in 10.5.1.
 ///
@@ -28,13 +28,13 @@
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct UsbPipeAddress {
-    pub max_size: UsbPacketSize,  // 2 bits @0
-    pub speed: UsbSpeed,          // 2 bits @2
-    pub end_point: u8,            // 4 bits @4
-    pub device: u8,               // 8 bits @8
+    pub max_size: UsbPacketSize,    // 2 bits @0
+    pub speed: UsbSpeed,            // 2 bits @2
+    pub end_point: u8,              // 4 bits @4
+    pub device: u8,                 // 8 bits @8
     pub transfer_type: UsbTransfer, // 2 bits @16
-    pub direction: UsbDirection,  // 1 bit @18
-    _reserved: u16,               // 13 bits @19 (fits within 16 bits)
+    pub direction: UsbDirection,    // 1 bit @18
+    pub _reserved: u16,                 // 13 bits @19 (fits within 16 bits)
 }
 
 // Ensure the enums match the bit widths correctly
@@ -47,23 +47,23 @@ pub enum UsbPacketSize {
     Size64 = 3,
 }
 
-#[repr(u8)]
-#[derive(Debug, Copy, Clone)]
-pub enum UsbSpeed {
-    Low = 0,
-    Full = 1,
-    High = 2,
-    Super = 3,
-}
+// #[repr(u8)]
+// #[derive(Debug, Copy, Clone)]
+// pub enum UsbSpeed {
+//     Low = 0,
+//     Full = 1,
+//     High = 2,
+//     Super = 3,
+// }
 
-#[repr(u8)]
-#[derive(Debug, Copy, Clone)]
-pub enum UsbTransfer {
-    Control = 0,
-    Isochronous = 1,
-    Bulk = 2,
-    Interrupt = 3,
-}
+// #[repr(u8)]
+// #[derive(Debug, Copy, Clone)]
+// pub enum UsbTransfer {
+//     Control = 0,
+//     Isochronous = 1,
+//     Bulk = 2,
+//     Interrupt = 3,
+// }
 
 #[repr(u8)]
 #[derive(Debug, Copy, Clone)]

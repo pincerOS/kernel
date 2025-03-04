@@ -12,9 +12,8 @@
 *	simply invoeks all of.
 ******************************************************************************/
 
-
-use crate::device::usb::usbd::usbd::*;
 use crate::device::usb::usbd::device::*;
+use crate::device::usb::usbd::usbd::*;
 
 pub fn ConfigurationLoad(bus: &mut UsbBus) {
     UsbLoad(bus);

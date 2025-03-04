@@ -7,7 +7,7 @@
 *
 *   Converted to Rust by Aaron Lo
 *
-*	usbd/devicerequest.h contains a definition of the standard device 
+*	usbd/devicerequest.h contains a definition of the standard device
 *	request structure defined in USB2.0
 ******************************************************************************/
 
@@ -21,12 +21,12 @@
 #[repr(packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct UsbDeviceRequest {
-    pub type_: u8, // +0x0
+    pub request_type: u8, // +0x0
 
     pub request: UsbDeviceRequestRequest, // +0x1
 
-    pub value: u16, // +0x2
-    pub index: u16, // +0x4
+    pub value: u16,  // +0x2
+    pub index: u16,  // +0x4
     pub length: u16, // +0x6
 }
 
@@ -46,7 +46,6 @@ pub enum UsbDeviceRequestRequest {
     GetInterface = 10,
     SetInterface = 11,
     SynchFrame = 12,
-
     // // HID requests
     // GetReport = 1,
     // GetIdle = 2,
@@ -63,7 +62,13 @@ impl Default for UsbDeviceRequestRequest {
 }
 
 impl UsbDeviceRequest {
-    pub fn new(type_: u8, request: UsbDeviceRequestRequest, value: u16, index: u16, length: u16) -> Self {
+    pub fn new(
+        type_: u8,
+        request: UsbDeviceRequestRequest,
+        value: u16,
+        index: u16,
+        length: u16,
+    ) -> Self {
         Self {
             type_,
             request,

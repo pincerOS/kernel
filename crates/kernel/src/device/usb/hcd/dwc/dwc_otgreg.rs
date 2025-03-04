@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2010,2011 Aleksandr Rybalko. All rights reserved.
- * 
- * Converted to Rust by Aaron Lo 
+ *
+ * Converted to Rust by Aaron Lo
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,8 +27,6 @@
  * SUCH DAMAGE.
  */
 
-
-
 pub const DOTG_GOTGCTL: usize = 0x0000;
 pub const DOTG_GOTGINT: usize = 0x0004;
 pub const DOTG_GAHBCFG: usize = 0x0008;
@@ -48,8 +46,8 @@ pub const DOTG_GPVNDCTL: usize = 0x0034;
 pub const DOTG_GGPIO: usize = 0x0038;
 pub const DOTG_GUID: usize = 0x003C;
 pub const DOTG_GSNPSID: usize = 0x0040;
-pub const DOTG_GSNPSID_REV_2_80a: usize = 0x4f54280a;  // RPi model B/RPi2
-pub const DOTG_GSNPSID_REV_3_10a: usize = 0x4f54310a;  // ODROID-C1
+pub const DOTG_GSNPSID_REV_2_80a: usize = 0x4f54280a; // RPi model B/RPi2
+pub const DOTG_GSNPSID_REV_3_10a: usize = 0x4f54310a; // ODROID-C1
 pub const DOTG_GHWCFG1: usize = 0x0044;
 pub const DOTG_GHWCFG2: usize = 0x0048;
 pub const DOTG_GHWCFG3: usize = 0x004C;
@@ -60,8 +58,12 @@ pub const DOTG_GDFIFOCFG: usize = 0x005C;
 pub const DOTG_GADPCTL: usize = 0x0060;
 pub const DOTG_HPTXFSIZ: usize = 0x0100;
 // start from 0x104, but fifo0 not exists
-pub const fn DOTG_DPTXFSIZ(fifo: usize) -> usize { 0x0100 + (4 * fifo) }
-pub const fn DOTG_DIEPTXF(fifo: usize) -> usize { 0x0100 + (4 * fifo) }
+pub const fn DOTG_DPTXFSIZ(fifo: usize) -> usize {
+    0x0100 + (4 * fifo)
+}
+pub const fn DOTG_DIEPTXF(fifo: usize) -> usize {
+    0x0100 + (4 * fifo)
+}
 pub const DOTG_HCFG: usize = 0x0400;
 pub const DOTG_HFIR: usize = 0x0404;
 pub const DOTG_HFNUM: usize = 0x0408;
@@ -69,15 +71,33 @@ pub const DOTG_HPTXSTS: usize = 0x0410;
 pub const DOTG_HAINT: usize = 0x0414;
 pub const DOTG_HAINTMSK: usize = 0x0418;
 pub const DOTG_HPRT: usize = 0x0440;
-pub const fn DOTG_HCCHAR(ch: usize) -> usize { 0x0500 + (32 * ch) }
-pub const fn DOTG_HCSPLT(ch: usize) -> usize { 0x0504 + (32 * ch) }
-pub const fn DOTG_HCINT(ch: usize) -> usize { 0x0508 + (32 * ch) }
-pub const fn DOTG_HCINTMSK(ch: usize) -> usize { 0x050C + (32 * ch) }
-pub const fn DOTG_HCTSIZ(ch: usize) -> usize { 0x0510 + (32 * ch) }
-pub const fn DOTG_HCDMA(ch: usize) -> usize { 0x0514 + (32 * ch) }
-pub const fn DOTG_HCDMAI(ch: usize) -> usize { 0x0514 + (32 * ch) }
-pub const fn DOTG_HCDMAO(ch: usize) -> usize { 0x0514 + (32 * ch) }
-pub const fn DOTG_HCDMAB(ch: usize) -> usize { 0x051C + (32 * ch) }
+pub const fn DOTG_HCCHAR(ch: usize) -> usize {
+    0x0500 + (32 * ch)
+}
+pub const fn DOTG_HCSPLT(ch: usize) -> usize {
+    0x0504 + (32 * ch)
+}
+pub const fn DOTG_HCINT(ch: usize) -> usize {
+    0x0508 + (32 * ch)
+}
+pub const fn DOTG_HCINTMSK(ch: usize) -> usize {
+    0x050C + (32 * ch)
+}
+pub const fn DOTG_HCTSIZ(ch: usize) -> usize {
+    0x0510 + (32 * ch)
+}
+pub const fn DOTG_HCDMA(ch: usize) -> usize {
+    0x0514 + (32 * ch)
+}
+pub const fn DOTG_HCDMAI(ch: usize) -> usize {
+    0x0514 + (32 * ch)
+}
+pub const fn DOTG_HCDMAO(ch: usize) -> usize {
+    0x0514 + (32 * ch)
+}
+pub const fn DOTG_HCDMAB(ch: usize) -> usize {
+    0x051C + (32 * ch)
+}
 // Device Mode
 pub const DOTG_DCFG: usize = 0x0800;
 pub const DOTG_DCTL: usize = 0x0804;
@@ -95,20 +115,48 @@ pub const DOTG_DTKNQR4: usize = 0x0834;
 pub const DOTG_DIEPEMPMSK: usize = 0x0834;
 pub const DOTG_DEACHINT: usize = 0x0838;
 pub const DOTG_DEACHINTMSK: usize = 0x083C;
-pub const fn DOTG_DIEPEACHINTMSK(ch: u32) -> u32 { 0x0840 + (4 * ch) }
-pub const fn DOTG_DOEPEACHINTMSK(ch: u32) -> u32 { 0x0880 + (4 * ch) }
-pub const fn DOTG_DIEPCTL(ep: u32) -> u32 { 0x0900 + (32 * ep) }
-pub const fn DOTG_DIEPINT(ep: u32) -> u32 { 0x0908 + (32 * ep) }
-pub const fn DOTG_DIEPTSIZ(ep: u32) -> u32 { 0x0910 + (32 * ep) }
-pub const fn DOTG_DIEPDMA(ep: u32) -> u32 { 0x0914 + (32 * ep) }
-pub const fn DOTG_DTXFSTS(ep: u32) -> u32 { 0x0918 + (32 * ep) }
-pub const fn DOTG_DIEPDMAB(ep: u32) -> u32 { 0x091c + (32 * ep) }
-pub const fn DOTG_DOEPCTL(ep: u32) -> u32 { 0x0B00 + (32 * ep) }
-pub const fn DOTG_DOEPFN(ep: u32) -> u32 { 0x0B04 + (32 * ep) }
-pub const fn DOTG_DOEPINT(ep: u32) -> u32 { 0x0B08 + (32 * ep) }
-pub const fn DOTG_DOEPTSIZ(ep: u32) -> u32 { 0x0B10 + (32 * ep) }
-pub const fn DOTG_DOEPDMA(ep: u32) -> u32 { 0x0B14 + (32 * ep) }
-pub const fn DOTG_DOEPDMAB(ep: u32) -> u32 { 0x0B1c + (32 * ep) }
+pub const fn DOTG_DIEPEACHINTMSK(ch: u32) -> u32 {
+    0x0840 + (4 * ch)
+}
+pub const fn DOTG_DOEPEACHINTMSK(ch: u32) -> u32 {
+    0x0880 + (4 * ch)
+}
+pub const fn DOTG_DIEPCTL(ep: u32) -> u32 {
+    0x0900 + (32 * ep)
+}
+pub const fn DOTG_DIEPINT(ep: u32) -> u32 {
+    0x0908 + (32 * ep)
+}
+pub const fn DOTG_DIEPTSIZ(ep: u32) -> u32 {
+    0x0910 + (32 * ep)
+}
+pub const fn DOTG_DIEPDMA(ep: u32) -> u32 {
+    0x0914 + (32 * ep)
+}
+pub const fn DOTG_DTXFSTS(ep: u32) -> u32 {
+    0x0918 + (32 * ep)
+}
+pub const fn DOTG_DIEPDMAB(ep: u32) -> u32 {
+    0x091c + (32 * ep)
+}
+pub const fn DOTG_DOEPCTL(ep: u32) -> u32 {
+    0x0B00 + (32 * ep)
+}
+pub const fn DOTG_DOEPFN(ep: u32) -> u32 {
+    0x0B04 + (32 * ep)
+}
+pub const fn DOTG_DOEPINT(ep: u32) -> u32 {
+    0x0B08 + (32 * ep)
+}
+pub const fn DOTG_DOEPTSIZ(ep: u32) -> u32 {
+    0x0B10 + (32 * ep)
+}
+pub const fn DOTG_DOEPDMA(ep: u32) -> u32 {
+    0x0B14 + (32 * ep)
+}
+pub const fn DOTG_DOEPDMAB(ep: u32) -> u32 {
+    0x0B1c + (32 * ep)
+}
 
 // Register address
 pub const DOTG_PCGCCTL: usize = 0x0E00;
@@ -401,18 +449,42 @@ pub const GHWCFG4_ENABLEPWROPT: u32 = 1 << 4;
 pub const GHWCFG4_NUMDEVPERIOEPS_SHIFT: u32 = 0;
 pub const GHWCFG4_NUMDEVPERIOEPS_MASK: u32 = 0x0000000f;
 
-pub const fn GHWCFG1_GET_DIR(x: u32, n: u32) -> u32 { (x >> (2 * n)) & 3 }
-pub const fn GRXSTSRD_FN_GET(x: u32) -> u32 { ((x) >> 21) & 15 }
-pub const fn GRXSTSRD_BCNT_GET(x: u32) -> u32 { ((x) >> 4) & 0x7FF }
-pub const fn GRXSTSRD_CHNUM_GET(x: u32) -> u32 { (x) & 15 }
-pub const fn GHWCFG2_NUMHSTCHNL_GET(x: u32) -> u32 { ((((x) >> 14) & 15) + 1) }
-pub const fn GHWCFG2_NUMDEVEPS_GET(x: u32) -> u32 { ((((x) >> 10) & 15) + 1) }
-pub const fn GHWCFG3_DFIFODEPTH_GET(x: u32) -> u32 { (x) >> 16 }
-pub const fn GHWCFG3_PKTSIZE_GET(x: u32) -> u32 { 0x10 << (((x) >> 4) & 7) }
-pub const fn GHWCFG3_XFRRSIZE_GET(x: u32) -> u32 { 0x400 << (((x) >> 0) & 15) }
-pub const fn GHWCFG4_NUM_IN_EP_GET(x: u32) -> u32 { ((((x) >> 26) & 15) + 1) }
-pub const fn GHWCFG4_NUMCTLEPS_GET(x: u32) -> u32 { ((x) >> 16) & 15 }
-pub const fn GHWCFG4_NUMDEVPERIOEPS_GET(x: u32) -> u32 { ((x) >> 0) & 15 }
+pub const fn GHWCFG1_GET_DIR(x: u32, n: u32) -> u32 {
+    (x >> (2 * n)) & 3
+}
+pub const fn GRXSTSRD_FN_GET(x: u32) -> u32 {
+    ((x) >> 21) & 15
+}
+pub const fn GRXSTSRD_BCNT_GET(x: u32) -> u32 {
+    ((x) >> 4) & 0x7FF
+}
+pub const fn GRXSTSRD_CHNUM_GET(x: u32) -> u32 {
+    (x) & 15
+}
+pub const fn GHWCFG2_NUMHSTCHNL_GET(x: u32) -> u32 {
+    ((((x) >> 14) & 15) + 1)
+}
+pub const fn GHWCFG2_NUMDEVEPS_GET(x: u32) -> u32 {
+    ((((x) >> 10) & 15) + 1)
+}
+pub const fn GHWCFG3_DFIFODEPTH_GET(x: u32) -> u32 {
+    (x) >> 16
+}
+pub const fn GHWCFG3_PKTSIZE_GET(x: u32) -> u32 {
+    0x10 << (((x) >> 4) & 7)
+}
+pub const fn GHWCFG3_XFRRSIZE_GET(x: u32) -> u32 {
+    0x400 << (((x) >> 0) & 15)
+}
+pub const fn GHWCFG4_NUM_IN_EP_GET(x: u32) -> u32 {
+    ((((x) >> 26) & 15) + 1)
+}
+pub const fn GHWCFG4_NUMCTLEPS_GET(x: u32) -> u32 {
+    ((x) >> 16) & 15
+}
+pub const fn GHWCFG4_NUMDEVPERIOEPS_GET(x: u32) -> u32 {
+    ((x) >> 0) & 15
+}
 
 // GLPMCFG
 pub const GLPMCFG_HSIC_CONN: u32 = 1 << 30;
@@ -559,12 +631,17 @@ pub const HCSPLT_PRTADDR_MASK: u32 = 0x0000007f;
 // HCINT
 pub const HCINT_ERRORS: u32 = HCINT_BBLERR | HCINT_XACTERR;
 pub const HCINT_RETRY: u32 = HCINT_DATATGLERR | HCINT_FRMOVRUN | HCINT_NAK;
-pub const HCINT_DEFAULT_MASK: u32 = HCINT_STALL | HCINT_BBLERR | 
-    HCINT_XACTERR | HCINT_NAK | HCINT_ACK | HCINT_NYET | 
-    HCINT_CHHLTD | HCINT_FRMOVRUN | 
-    HCINT_DATATGLERR;
-pub const HCINT_HCH_DONE_MASK: u32 = HCINT_ACK | HCINT_RETRY | HCINT_NYET | 
-    HCINT_ERRORS | HCINT_STALL | HCINT_SOFTWARE_ONLY;
+pub const HCINT_DEFAULT_MASK: u32 = HCINT_STALL
+    | HCINT_BBLERR
+    | HCINT_XACTERR
+    | HCINT_NAK
+    | HCINT_ACK
+    | HCINT_NYET
+    | HCINT_CHHLTD
+    | HCINT_FRMOVRUN
+    | HCINT_DATATGLERR;
+pub const HCINT_HCH_DONE_MASK: u32 =
+    HCINT_ACK | HCINT_RETRY | HCINT_NYET | HCINT_ERRORS | HCINT_STALL | HCINT_SOFTWARE_ONLY;
 
 pub const HCINT_SOFTWARE_ONLY: u32 = 1 << 20; // BSD only
 pub const HCINT_DATATGLERR: u32 = 1 << 10;
@@ -656,8 +733,12 @@ pub const DSTS_ENUMSPD_LOW10: u32 = 2;
 pub const DSTS_ENUMSPD_FULL10: u32 = 3;
 pub const DSTS_SUSPSTS: u32 = 1 << 0;
 
-pub const fn DSTS_SOFFN_GET(x: u32) -> u32 { ((x) >> 8) & 0x3FFF }
-pub const fn DSTS_ENUMSPD_GET(x: u32) -> u32 { ((x) >> 1) & 3 }
+pub const fn DSTS_SOFFN_GET(x: u32) -> u32 {
+    ((x) >> 8) & 0x3FFF
+}
+pub const fn DSTS_ENUMSPD_GET(x: u32) -> u32 {
+    ((x) >> 1) & 3
+}
 
 // DIEPMSK constants
 pub const DIEPMSK_TXFIFOUNDRNMSK: u32 = 1 << 8;
@@ -767,10 +848,15 @@ pub const DIEPCTL_MPS_32: u32 = 1 << 0;
 pub const DIEPCTL_MPS_16: u32 = 2 << 0;
 pub const DIEPCTL_MPS_8: u32 = 3 << 0;
 
-pub const fn DIEPCTL_TXFNUM_SET(n: u32) -> u32 { ((n) & 15) << 22 }
-pub const fn DIEPCTL_EPTYPE_SET(n: u32) -> u32 { ((n) & 3) << 18 }
-pub const fn DIEPCTL_MPS_SET(n: u32) -> u32 { (n) & 0x7FF }
-
+pub const fn DIEPCTL_TXFNUM_SET(n: u32) -> u32 {
+    ((n) & 15) << 22
+}
+pub const fn DIEPCTL_EPTYPE_SET(n: u32) -> u32 {
+    ((n) & 3) << 18
+}
+pub const fn DIEPCTL_MPS_SET(n: u32) -> u32 {
+    (n) & 0x7FF
+}
 
 pub const DOEPCTL_EPENA: u32 = 1 << 31;
 pub const DOEPCTL_EPDIS: u32 = 1 << 30;
@@ -807,14 +893,30 @@ pub const DOEPTSIZ_MC_MASK: u32 = 0x60000000;
 pub const DOEPTSIZ_MC_SHIFT: u32 = 29;
 /* common bits */
 
-pub const fn DOEPCTL_FNUM_SET(n: u32) -> u32 { ((n) & 15) << 22 }
-pub const fn DOEPCTL_EPTYPE_SET(n: u32) -> u32 { ((n) & 3) << 18 }
-pub const fn DOEPCTL_MPS_SET(n: u32) -> u32 { (n) & 0x7FF }
-pub const fn DXEPTSIZ_SET_MULTI(n: u32) -> u32 { ((n) & 3) << 29 }
-pub const fn DXEPTSIZ_SET_NPKT(n: u32) -> u32 { ((n) & 0x3FF) << 19 }
-pub const fn DXEPTSIZ_GET_NPKT(n: u32) -> u32 { ((n) >> 19) & 0x3FF }
-pub const fn DXEPTSIZ_SET_NBYTES(n: u32) -> u32 { ((n) & 0x7FFFFF) << 0 }
-pub const fn DXEPTSIZ_GET_NBYTES(n: u32) -> u32 { ((n) >> 0) & 0x7FFFFF }
+pub const fn DOEPCTL_FNUM_SET(n: u32) -> u32 {
+    ((n) & 15) << 22
+}
+pub const fn DOEPCTL_EPTYPE_SET(n: u32) -> u32 {
+    ((n) & 3) << 18
+}
+pub const fn DOEPCTL_MPS_SET(n: u32) -> u32 {
+    (n) & 0x7FF
+}
+pub const fn DXEPTSIZ_SET_MULTI(n: u32) -> u32 {
+    ((n) & 3) << 29
+}
+pub const fn DXEPTSIZ_SET_NPKT(n: u32) -> u32 {
+    ((n) & 0x3FF) << 19
+}
+pub const fn DXEPTSIZ_GET_NPKT(n: u32) -> u32 {
+    ((n) >> 19) & 0x3FF
+}
+pub const fn DXEPTSIZ_SET_NBYTES(n: u32) -> u32 {
+    ((n) & 0x7FFFFF) << 0
+}
+pub const fn DXEPTSIZ_GET_NBYTES(n: u32) -> u32 {
+    ((n) >> 0) & 0x7FFFFF
+}
 
 // #[inline(always)]
 // pub const fn ENDPOINT_MASK(x: u32, r#in: bool) -> u32 {

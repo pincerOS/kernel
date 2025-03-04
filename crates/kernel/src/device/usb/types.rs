@@ -4,14 +4,14 @@
 *
 *	A light weight implementation of the USB protocol stack fit for a simple
 *	driver.
-*   
+*
 *   Converted to Rust by Aaron Lo
 *
 *	types.h contains definitions of standardised types used ubiquitously.
 ******************************************************************************/
 
 /// Result of a method call.
-/// 
+///
 /// Negative results are errors.
 /// OK is for a general success.
 /// ErrorGeneral is an undisclosed failure.
@@ -26,8 +26,8 @@
 /// ErrorCompiler is a problem with the configuration of the compiler generating
 /// unusable code.
 /// ErrorMemory is used when the memory is exhausted.
-/// ErrorTimeout is used when a maximum delay is reached when waiting and an 
-/// operation is unfinished. This does not necessarily mean the operation 
+/// ErrorTimeout is used when a maximum delay is reached when waiting and an
+/// operation is unfinished. This does not necessarily mean the operation
 /// will not finish, just that it is unreasonably slow.
 /// ErrorDisconnected is used when a device is disconnected in transfer.
 #[repr(i32)]
@@ -135,7 +135,11 @@ macro_rules! min {
     ($x:expr, $y:expr) => {{
         let x = $x;
         let y = $y;
-        if x < y { x } else { y }
+        if x < y {
+            x
+        } else {
+            y
+        }
     }};
 }
 
@@ -145,6 +149,10 @@ macro_rules! max {
     ($x:expr, $y:expr) => {{
         let x = $x;
         let y = $y;
-        if x > y { x } else { y }
+        if x > y {
+            x
+        } else {
+            y
+        }
     }};
 }

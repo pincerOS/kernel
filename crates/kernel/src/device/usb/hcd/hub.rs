@@ -8,41 +8,40 @@
 *	device/hub.h contains definitions relating to the USB hub device.
 ******************************************************************************/
 
-
 use crate::device::usb::usbd::descriptors::DescriptorType;
 use crate::device::usb::UsbDriverDataHeader;
 use crate::device::usb::*;
 
 /**
     \brief The hub descriptor information.
-    The hub descriptor structure defined in the USB2.0 manual section 
+    The hub descriptor structure defined in the USB2.0 manual section
     11.23.2.1.
 */
 #[repr(C, packed)]
 pub struct HubDescriptor {
-    pub DescriptorLength: u8, // +0x0
+    pub DescriptorLength: u8,           // +0x0
     pub DescriptorType: DescriptorType, // +0x1
-    pub PortCount: u8, // +0x2
+    pub PortCount: u8,                  // +0x2
     // struct {
-	// 	enum HubPortControl {
-	// 		Global = 0,
-	// 		Individual = 1,			
-	// 	} PowerSwitchingMode : 2; // @0
-	// 	bool Compound : 1; // @2
-	// 	enum HubPortControl OverCurrentProtection : 2; // @3
-	// 	unsigned ThinkTime : 2; // in +1*8FS units @5
-	// 	bool Indicators : 1; // @7
-	// 	unsigned _reserved8_15 : 8; // @8
-	// } __attribute__ ((__packed__)) Attributes; // +0x3
-    pub Attributes: u16, // +0x3
-    pub PowerGoodDelay: u8, // +0x5
+    // 	enum HubPortControl {
+    // 		Global = 0,
+    // 		Individual = 1,
+    // 	} PowerSwitchingMode : 2; // @0
+    // 	bool Compound : 1; // @2
+    // 	enum HubPortControl OverCurrentProtection : 2; // @3
+    // 	unsigned ThinkTime : 2; // in +1*8FS units @5
+    // 	bool Indicators : 1; // @7
+    // 	unsigned _reserved8_15 : 8; // @8
+    // } __attribute__ ((__packed__)) Attributes; // +0x3
+    pub Attributes: u16,     // +0x3
+    pub PowerGoodDelay: u8,  // +0x5
     pub MaximumHubPower: u8, // +0x6
     pub Data: [u8; 2], // +0x7 the data consists of n bytes describing port detatchability, followed by n bytes for compatiblity. n = roundup(ports/8).
 }
 
 /**
     \brief Encapsulates the current status of a hub.
-    The hub status structure defined in 11.24.2.6 of the USB2.0 
+    The hub status structure defined in 11.24.2.6 of the USB2.0
     standard.
 */
 #[repr(C, packed)]
@@ -52,7 +51,7 @@ pub struct HubStatus {
 
 /**
     \brief Encapsulates the change in current status of a hub.
-    The hub status change structure defined in 11.24.2.6 of the USB2.0 
+    The hub status change structure defined in 11.24.2.6 of the USB2.0
     standard.
 */
 #[repr(C, packed)]
@@ -72,7 +71,7 @@ pub struct HubFullStatus {
 
 /**
     \brief Encapsulates the current status of a hub port.
-    The hub port status structure defined in 11.24.2.7.1 of the USB2.0 
+    The hub port status structure defined in 11.24.2.7.1 of the USB2.0
     standard.
 */
 #[repr(C, packed)]
@@ -82,7 +81,7 @@ pub struct HubPortStatus {
 
 /**
     \brief Encapsulates the change in current status of a hub port.
-    The hub port status change structure defined in 11.24.2.7.2 of the USB2.0 
+    The hub port status change structure defined in 11.24.2.7.2 of the USB2.0
     standard.
 */
 #[repr(C, packed)]
@@ -104,7 +103,7 @@ pub struct HubPortFullStatus {
     \brief A feature of a hub port.
     The feautres of a hub port that can be altered.
 */
-#[repr(u8)]
+#[repr(u16)]
 pub enum HubPortFeature {
     FeatureConnection = 0,
     FeatureEnable = 1,
@@ -124,9 +123,9 @@ pub enum HubPortFeature {
 /** The DeviceDriver field in UsbDriverDataHeader for hubs. */
 pub const DeviceDriverHub: u32 = 0x48554230;
 
-/** 
+/**
     \brief Hub specific data.
-    The contents of the driver data field for hubs. 
+    The contents of the driver data field for hubs.
 */
 pub struct HubDevice {
     pub Header: UsbDriverDataHeader,

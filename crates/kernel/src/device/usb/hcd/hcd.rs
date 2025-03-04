@@ -10,4 +10,3 @@
 *	hcd/hcd.h contains definitions relating to the host controller driver of
 *	the USB implementation.
 ******************************************************************************/
-

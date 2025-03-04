@@ -7,17 +7,18 @@
 *
 *   Converted to Rust by Aaron Lo
 *
-*	usbd/device.h contains a definition of a device structure used for 
+*	usbd/device.h contains a definition of a device structure used for
 *	storing devices and the device tree.
 ******************************************************************************/
 
 use super::descriptors::*;
 use super::pipe::*;
+use alloc::boxed::Box;
 // use super::super::types::*;
 use super::super::hcd::dwc::dwc_otg::*;
-use super::super::types::{ UsbSpeed, ResultCode };
+use super::super::types::{ResultCode, UsbSpeed};
 
-/// The maximum number of children a device could have, 
+/// The maximum number of children a device could have,
 /// which is the maximum number of ports a hub supports.
 pub const MAX_CHILDREN_PER_DEVICE: usize = 10;
 
@@ -72,7 +73,7 @@ pub struct UsbDevice {
     pub configuration_index: u8,
     pub port_number: u8,
     pub error: UsbTransferError,
-    
+
     // Generic device handlers
     pub device_detached: Option<fn(&mut UsbDevice)>,
     pub device_deallocate: Option<fn(&mut UsbDevice)>,
@@ -80,15 +81,45 @@ pub struct UsbDevice {
     pub device_child_detached: Option<fn(&mut UsbDevice, &mut UsbDevice)>,
     pub device_child_reset: Option<fn(&mut UsbDevice, &mut UsbDevice) -> Result<(), ()>>,
     pub device_check_connection: Option<fn(&mut UsbDevice, &mut UsbDevice) -> Result<(), ()>>,
-    
-    pub descriptor: UsbDeviceDescriptor,
-    pub configuration: UsbConfigurationDescriptor,
-    pub interfaces: [UsbInterfaceDescriptor; MAX_INTERFACES_PER_DEVICE],
-    pub endpoints: [[UsbEndpointDescriptor; MAX_ENDPOINTS_PER_DEVICE]; MAX_INTERFACES_PER_DEVICE],
+
+    pub descriptor: Option<UsbDeviceDescriptor>,
+    pub configuration: Option<UsbConfigurationDescriptor>,
+    pub interfaces: [Option<UsbInterfaceDescriptor>; MAX_INTERFACES_PER_DEVICE],
+    pub endpoints:
+        [[Option<UsbEndpointDescriptor>; MAX_ENDPOINTS_PER_DEVICE]; MAX_INTERFACES_PER_DEVICE],
     pub parent: Option<*mut UsbDevice>,
     pub full_configuration: Option<*mut u8>,
     pub driver_data: Option<*mut UsbDriverDataHeader>,
     pub last_transfer: u32,
+}
+
+impl UsbDevice {
+    pub fn new(num: u32) -> Self {
+        Self {
+            number: num,
+            speed: UsbSpeed::Full,
+            status: UsbDeviceStatus::Attached,
+            error: UsbTransferError::NoError,
+            port_number: 0,
+            configuration_index: 0xff,
+            parent: None,
+
+            device_detached: None,
+            device_deallocate: None,
+            device_check_for_change: None,
+            device_child_detached: None,
+            device_child_reset: None,
+            device_check_connection: None,
+
+            descriptor: None,
+            configuration: None,
+            interfaces: [None; MAX_INTERFACES_PER_DEVICE],
+            endpoints: core::array::from_fn(|_| core::array::from_fn(|_| None)),
+            full_configuration: None,
+            driver_data: None,
+            last_transfer: 0,
+        }
+    }
 }
 
 /// Number of interface class attach handlers.
@@ -98,7 +129,9 @@ pub const INTERFACE_CLASS_ATTACH_COUNT: usize = 16;
 pub const MaximumDevices: usize = 32;
 
 pub struct UsbBus {
-    pub devices: [Option<*mut UsbDevice>; MaximumDevices],
-    pub interface_class_attach: [Option<fn(device: &mut UsbDevice, interface_number: u32) -> ResultCode>; INTERFACE_CLASS_ATTACH_COUNT],
-    pub dwc_sc: dwc_hub
+    pub devices: [Option<Box<UsbDevice>>; MaximumDevices],
+    pub interface_class_attach: [Option<
+        fn(device: &mut UsbDevice, interface_number: u32) -> ResultCode,
+    >; INTERFACE_CLASS_ATTACH_COUNT],
+    pub dwc_sc: dwc_hub,
 }
