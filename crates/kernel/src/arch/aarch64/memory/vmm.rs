@@ -98,15 +98,9 @@ pub unsafe fn init_physical_alloc() {
     // TODO: proper physical memory layout documentation
     let base = 0x20_0000 * 16;
     PHYSICAL_ALLOC_BASE.store(base, Ordering::SeqCst);
-}
 
-//Temporary hack for testing before creating the sys call
-//This usize will store the virtual addr of the last given
-//UserTranslationTable so that main can map into it
-static mut PREV_USER_TRANSLATION_TABLE_VA: AtomicUsize = AtomicUsize::new(0);
-
-pub unsafe fn get_prev_user_translation_table_va() -> usize {
-    return unsafe{ PREV_USER_TRANSLATION_TABLE_VA.load(Ordering::SeqCst) };
+    //Maybe there's a better place to put this
+    unsafe { init_page_allocator() };
 }
 
 fn create_user_table(phys_base: usize) -> alloc::boxed::Box<UserTranslationTable> {
@@ -142,9 +136,6 @@ pub unsafe fn create_user_region() -> (*mut [u8], usize) {
 
     let user_table = create_user_table(phys_base);
     let user_table_ptr = alloc::boxed::Box::into_raw(user_table);
-
-    //Temporarily here for base testing
-    unsafe{ PREV_USER_TRANSLATION_TABLE_VA.store(user_table_ptr as usize, Ordering::SeqCst) };
 
     let user_table_phys = physical_addr(user_table_ptr.addr()).unwrap();
     println!("creating user table, {:#010x}", user_table_phys);

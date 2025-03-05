@@ -26,7 +26,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     unsafe { syscall::register_syscalls() };
     unsafe { crate::arch::memory::init_physical_alloc() };
     
-    unsafe { crate::arch::memory::init_page_allocator()  };
+    //unsafe { crate::arch::memory::init_page_allocator()  };
 
     let (_stdio, mut stdin_tx, mut stdout_rx) = {
         let (stdin_tx, stdin_rx) = ringbuffer::channel();
@@ -109,8 +109,6 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         access.map(|b| b.bits()).map_err(|e| e.bits())
     );
 
-    //let user_translation_table_ptr = unsafe { crate::arch::memory::get_prev_user_translation_table_va()  }as *mut crate::arch::memory::UserTranslationTable; 
-    
     //hack: get a "page" from the heap and try to map it to some virtual address
     let page_box = Box::new(SomePage([0; 4096]));
     let page_ptr: *mut SomePage = Box::into_raw(page_box);
