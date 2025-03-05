@@ -18,4 +18,6 @@ else
 fi
 
 cp "${BINARY}" kernel.elf
-llvm-objcopy -O binary "${BINARY}" kernel.bin
+
+# equivalent to 'objcopy -I elf64-little -O binary "${BINARY}" init.bin'
+cargo run -p elf --bin dump_img -- "${BINARY}" kernel.bin
