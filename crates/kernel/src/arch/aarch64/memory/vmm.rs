@@ -38,8 +38,12 @@ fn virt_addr_base() -> NonNull<()> {
 
 #[allow(improper_ctypes)]
 extern "C" {
-    static __rpi_phys_binary_end_addr: ();
+    //static __rpi_virt_binary_end_addr: ();
+    static __rpi_phys_binary_end_addr: (); // physical base of heap
 }
+
+//TOOD: maybe remove this later
+//static HEAP_BASE_VIRT: usize = __rpi_phys_binary_end_addr + 0xFFFF_FFFF_FE00_0000;
 
 //1000 pages
 #[repr(C, align(4096))]
@@ -263,7 +267,10 @@ pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> Result<(), MappingErr
 
 //TODO: add option to map huge page
 //TODO: add option to pass in flags
-pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, translation_table: &mut UserTranslationTable) -> Result<(), MappingError> {
+pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result<(), MappingError> {
+
+    //I hope that there is a less terribl way of doing this
+    let translation_table: &mut UserTranslationTable =  unsafe { &mut (*((ttbr0_pa + (virt_addr_base().as_ptr() as usize)) as *mut UserTranslationTable)) };
 
     //TODO: stop using these constants
     let mut index_bits = 25 - 21; //mildly redundant

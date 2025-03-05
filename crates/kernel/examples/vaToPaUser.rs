@@ -109,7 +109,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         access.map(|b| b.bits()).map_err(|e| e.bits())
     );
 
-    let user_translation_table_ptr = unsafe { crate::arch::memory::get_prev_user_translation_table_va()  }as *mut crate::arch::memory::UserTranslationTable; 
+    //let user_translation_table_ptr = unsafe { crate::arch::memory::get_prev_user_translation_table_va()  }as *mut crate::arch::memory::UserTranslationTable; 
     
     //hack: get a "page" from the heap and try to map it to some virtual address
     let page_box = Box::new(SomePage([0; 4096]));
@@ -131,7 +131,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         phys_addr, VIRTUAL_ADDR
     );
     unsafe {
-        match crate::arch::memory::map_pa_to_va_user(phys_addr, VIRTUAL_ADDR, &mut (*user_translation_table_ptr)) {
+        match crate::arch::memory::map_pa_to_va_user(phys_addr, VIRTUAL_ADDR, ttbr0) {
             Ok(()) => println!("Done mapping!"),
             Err(e) => println!("Error: {}", e),
         }
