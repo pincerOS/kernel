@@ -171,7 +171,7 @@ build example=example profile=profile target=target: _check-rust-version _check-
 
     # Create kernel files
     cp "${BINARY}" kernel.elf
-    objcopy -I elf64-little -O binary "${BINARY}" kernel.bin
+    cargo dump-img "${BINARY}" kernel.bin
 
     set +x
     echo -e "{{green}}{{bold}}Build successful!{{reset}}"

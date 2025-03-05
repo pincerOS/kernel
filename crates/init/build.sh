@@ -26,4 +26,6 @@ else
 fi
 
 cp "${BINARY}" init.elf
-objcopy -I elf32-little -O binary "${BINARY}" init.bin
+
+# equivalent to 'objcopy -I elf64-little -O binary "${BINARY}" init.bin'
+cargo run -p elf --bin dump_img -- "${BINARY}" init.bin
