@@ -8,6 +8,9 @@ extern crate alloc;
 #[macro_use]
 pub mod device;
 
+#[macro_use]
+pub mod test;
+
 pub mod arch;
 pub mod event;
 pub mod heap;
