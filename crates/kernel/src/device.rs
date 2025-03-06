@@ -18,6 +18,8 @@ use crate::memory::{map_device, map_device_block};
 use crate::sync::UnsafeInit;
 use crate::{shutdown, SpinLock};
 
+use crate::device::usb::controller::dwc_otg;
+
 // TODO: a non-O(n²) approach to device discovery and registration
 pub fn discover_compatible<'a, 'b>(
     tree: &DeviceTree<'a>,
@@ -185,14 +187,13 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let (usb_addr, _) = find_device_addr(usb_iter).unwrap().unwrap();
         let usb_base = unsafe { map_device_block(usb_addr, 0x1000) }.as_ptr();
 
-        // dwc_otg::dwc_otg_initialize_controller(usb_base);
-        // println!("| USB controller addr: {:#010x}", usb_addr as usize);
+        dwc_otg::dwc_otg_initialize_controller(usb_base);
+        println!("| USB controller addr: {:#010x}", usb_addr as usize);
 
-        // // gic::GIC.get().register_isr(105, test_handler);
 
-        // dwc_otg::initialize_dwc_otg_sc();
-        // let mut sc = unsafe { &mut *dwc_otg::dwc_otg_sc };
-        // dwc_otg::dwc_otg_init(&mut sc);
+        dwc_otg::initialize_dwc_otg_sc();
+        let mut sc = unsafe { &mut *dwc_otg::dwc_otg_sc };
+        dwc_otg::dwc_otg_init(&mut sc);
     }
 
     // Set up the interrupt controllers to preempt on the arm generic

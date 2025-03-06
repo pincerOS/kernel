@@ -50,16 +50,26 @@
 use crate::device::gic;
 use crate::context::Context;
 // mod dwc_otgreg;
-use crate::device::dwc_otgreg::*;
+use super::dwc_otgreg::*;
 use crate::device::usb::*;
-use crate::device::usbreg::*;
+// use crate::device::usbreg::*;
 use crate::shutdown;
 use crate::sync::{SpinLockInner, UnsafeInit};
-use super::system_timer::{self, SYSTEM_TIMER};
+use crate::device::system_timer::{self, SYSTEM_TIMER};
 use core::default;
 use core::ptr;
 use core::ptr::read;
 use alloc::boxed::Box;
+
+use super::super::usb_bus::*;
+use super::super::usb_controller::*;
+use super::super::usb_core::*;
+use super::super::usb_device::*;
+use super::super::usb_request::*;
+use super::super::usb_transfer::*;
+use super::super::usbdi::*;
+use super::super::usbreg::*;
+use super::super::usb::*;
 
 pub static mut dwc_otg_driver: DWC_OTG = DWC_OTG { base_addr: 0 };
 pub static mut dwc_otg_sc: *mut dwc_otg_softc = core::ptr::null_mut();
@@ -774,7 +784,7 @@ fn dwc_otg_interrupt(_ctx: &mut Context) {
     if (status & GINTSTS_PRTINT) != 0 {
 
 		let hprt = read_volatile(HPRT);
-
+        println!("HPRT = 0x{:08x}", hprt);
 		/* clear change bits */
         write_volatile(HPRT, (hprt & (HPRT_PRTPWR | HPRT_PRTENCHNG | HPRT_PRTCONNDET | HPRT_PRTOVRCURRCHNG)) | sc.sc_hprt_val);
 
@@ -1189,6 +1199,9 @@ pub fn dwc_otg_init(sc: &mut dwc_otg_softc) -> u32 {
     let ver = read_volatile(GSNPSID);
     println!("| DTC_OTG Version: 0x{:08x}", ver);
 
+    let hprt = read_volatile(HPRT);
+    println!("HPRT1 = 0x{:08x}", hprt);
+
     //disconnect
     write_volatile(DCTL, 1 << 1);
     usb_lock_mtx(1000 / 32);
@@ -1264,13 +1277,14 @@ pub fn dwc_otg_init(sc: &mut dwc_otg_softc) -> u32 {
 
     sc.sc_irq_mask |= (1 << 12) | (1 << 13) | (1 << 24) | (1 << 31) | (1 << 11) | (1 << 2) | (1 << 30);
     write_volatile(GINTMSK, sc.sc_irq_mask);
-
+    
     //hostmode
     //setup clocks
     let mut temp = read_volatile(HCFG);
     temp &= (1 << 2) | (0x00000003);
     temp |= (1 << 0); //?
     write_volatile(HCFG, temp);
+
 
     //only enable global interrupts
     println!("| Interrupts enabling");

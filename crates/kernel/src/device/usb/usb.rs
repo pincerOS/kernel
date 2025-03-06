@@ -246,7 +246,7 @@ pub enum usb_dev_state {
 	USB_STATE_POWERED,
 	USB_STATE_ADDRESSED,
 	USB_STATE_CONFIGURED,
-};
+}
 
 pub enum usb_ep_mode {
 	USB_EP_MODE_DEFAULT,
@@ -256,7 +256,7 @@ pub enum usb_ep_mode {
 	USB_EP_MODE_HW_ETHERNET_CDC,
 	USB_EP_MODE_HW_ETHERNET_NCM,
 	USB_EP_MODE_MAX
-};
+}
 
 #[allow(non_camel_case_types)]
 #[repr(C, packed)]

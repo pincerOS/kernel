@@ -44,13 +44,14 @@ fn usb_attach() -> u32 {
     }
 
     //allocate the root usb device
-    let child = usb_alloc_device();
+    // let child = usb_alloc_device();
+    // let mut child = core::ptr::null_mut();
 
-    if !child.is_null() {
-        //usb prob and attach
-    } else {
-        println!("| usb_attach: usb_alloc_device failed");
-    }
+    // if !child.is_null() {
+    //     //usb prob and attach
+    // } else {
+    //     println!("| usb_attach: usb_alloc_device failed");
+    // }
 
     usb_bus_lock(&mut bus);
 
