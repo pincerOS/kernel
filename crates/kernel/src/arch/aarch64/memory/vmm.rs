@@ -5,6 +5,8 @@ use core::{
     ptr::{self, addr_of, NonNull},
 };
 
+use crate::sync::UnsafeInit;
+
 use super::{
     machine::{LeafDescriptor, TableDescriptor, TranslationDescriptor},
     physical_addr,
@@ -56,21 +58,23 @@ struct PageAlloc {
 }
 
 impl PageAlloc {
-    fn init(&mut self, ptr_to_table: *const BigTable) {
-        self.table_va = ptr_to_table as usize;
-        self.table_pa = physical_addr(ptr_to_table.addr()).unwrap() as usize;
-    }
-
-    fn new() -> PageAlloc {
+    fn new(ptr_to_table: *const BigTable) -> PageAlloc {
         PageAlloc {
-            table_va: 0,
-            table_pa: 0,
+            table_va: ptr_to_table as usize,
+            table_pa: physical_addr(ptr_to_table.addr()).unwrap() as usize,
             alloc_offset: AtomicUsize::new(0),
         }
     }
+
+    //TODO: add an error here if the va is equal to PG_SZ * 1000
+    fn alloc_frame(&self) -> (usize, usize) {
+        let va: usize = self.table_va + self.alloc_offset.fetch_add(PG_SZ, Ordering::Relaxed);
+        let pa: usize = va - self.table_va + self.table_pa;
+        return (va, pa);
+    }
 }
 
-static mut PAGE_ALLOCATOR: PageAlloc = PageAlloc{table_va: 0, table_pa: 0, alloc_offset: AtomicUsize::new(0)};
+static PAGE_ALLOCATOR: UnsafeInit<PageAlloc> = unsafe { UnsafeInit::uninit() };
 
 static PHYSICAL_ALLOC_BASE: AtomicUsize = AtomicUsize::new(0);
 
@@ -82,16 +86,7 @@ pub unsafe fn init_page_allocator() {
     let data_box = Box::<BigTable>::new(BigTable([0; PG_SZ * 1000]));
     let data_ptr: *const BigTable = Box::into_raw(data_box);
 
-    unsafe{ PAGE_ALLOCATOR.init(data_ptr) };
-}
-
-//Returns the virtual and physical addrs of the allocated frame
-//TODO: add an error here if the va is equal to PG_SZ * 1000
-pub unsafe fn alloc_frame() -> (usize, usize){
-    //Maybe need to check for overflow?
-    let va: usize = unsafe{ PAGE_ALLOCATOR.table_va + PAGE_ALLOCATOR.alloc_offset.fetch_add(PG_SZ, Ordering::Relaxed) };
-    let pa: usize = unsafe{ va - PAGE_ALLOCATOR.table_va + PAGE_ALLOCATOR.table_pa };
-    return (va, pa);
+    unsafe { PAGE_ALLOCATOR.init(PageAlloc::new(data_ptr)) };
 }
 
 pub unsafe fn init_physical_alloc() {
@@ -193,9 +188,14 @@ impl Display for MappingError {
     fn fmt(&self, f: &mut Formatter) -> core::fmt::Result {
         match self {
             Self::HugePagePresent => {
-                write!(f, "Huge page present is present in desired mapping location")
+                write!(
+                    f,
+                    "Huge page present is present in desired mapping location"
+                )
             }
-            Self::TableDescriptorPresent => write!(f, "Table descriptor present in desired mapping location"),
+            Self::TableDescriptorPresent => {
+                write!(f, "Table descriptor present in desired mapping location")
+            }
             Self::LeafTableSpotTaken => write!(
                 f,
                 "The spot in the leaf table that is being mapped to is already taken"
@@ -259,9 +259,10 @@ pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> Result<(), MappingErr
 //TODO: add option to map huge page
 //TODO: add option to pass in flags
 pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result<(), MappingError> {
-
-    //I hope that there is a less terribl way of doing this
-    let translation_table: &mut UserTranslationTable =  unsafe { &mut (*((ttbr0_pa + (virt_addr_base().as_ptr() as usize)) as *mut UserTranslationTable)) };
+    //I hope that there is a less terrible way of doing this
+    let translation_table: &mut UserTranslationTable = unsafe {
+        &mut (*((ttbr0_pa + (virt_addr_base().as_ptr() as usize)) as *mut UserTranslationTable))
+    };
 
     //TODO: stop using these constants
     let mut index_bits = 25 - 21; //mildly redundant
@@ -269,11 +270,13 @@ pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result
     //level 2 table index is bits 29-21
     let mut table_index = (va >> 21) & mask;
     let mut table_descriptor: TableDescriptor = unsafe { translation_table.0[table_index].table };
-    
+
     //Need to insert new page table
     if !table_descriptor.is_valid() {
-        let (pt_va, pt_pa) = unsafe{ alloc_frame() };
-        translation_table.0[table_index] = TranslationDescriptor {table: TableDescriptor::new(pt_pa)};
+        let (_pt_va, pt_pa) = PAGE_ALLOCATOR.get().alloc_frame();
+        translation_table.0[table_index] = TranslationDescriptor {
+            table: TableDescriptor::new(pt_pa),
+        };
         //Need to update table descriptor being used so that leaf insertion can occur
         table_descriptor = unsafe { translation_table.0[table_index].table };
     } else if !table_descriptor.is_table_descriptor() {
@@ -283,13 +286,13 @@ pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result
 
     //Regular page case
     let lvl3_pa: usize = table_descriptor.get_pa() << 12;
-    let lvl3_va: usize = unsafe{ lvl3_pa - PAGE_ALLOCATOR.table_pa + PAGE_ALLOCATOR.table_va };
+    let lvl3_va: usize = lvl3_pa - PAGE_ALLOCATOR.get().table_pa + PAGE_ALLOCATOR.get().table_va;
     let lvl3_table_ptr: *mut [LeafDescriptor; PG_SZ] = lvl3_va as *mut [LeafDescriptor; PG_SZ];
 
     index_bits = 21 - 12;
     mask = (1 << index_bits) - 1;
     table_index = (va >> 12) & mask;
-    
+
     let table_base = lvl3_table_ptr.cast::<LeafDescriptor>();
     let entry = table_base.wrapping_add(table_index);
     if unsafe { entry.read() }.is_valid() {
@@ -297,11 +300,9 @@ pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result
         return Err(MappingError::LeafTableSpotTaken);
     }
 
-
     let aligned_pa = (pa / PG_SZ) * PG_SZ;
 
     let new_desc = LeafDescriptor::new(aligned_pa).set_global();
-    let stored_pa = ((new_desc.bits() >> 12) & ((1 << 36) - 1)) as usize;
     unsafe { entry.write(new_desc) };
 
     unsafe {

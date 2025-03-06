@@ -6,8 +6,8 @@ extern crate kernel;
 
 use core::arch::asm;
 
-use kernel::*;
 use alloc::boxed::Box;
+use kernel::*;
 
 //Current version of create_user_table leaves this addr free
 const VIRTUAL_ADDR: usize = 0x1E00000;
@@ -25,7 +25,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
 
     unsafe { syscall::register_syscalls() };
     unsafe { crate::arch::memory::init_physical_alloc() };
-    
+
     //unsafe { crate::arch::memory::init_page_allocator()  };
 
     let (_stdio, mut stdin_tx, mut stdout_rx) = {
@@ -152,7 +152,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     }
 
     all_good = true;
- 
+
     unsafe {
         core::ptr::copy_nonoverlapping(
             &raw const WORLD_CHARS[0],
@@ -173,7 +173,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     } else {
         println!("Second check failed");
     }
-    
+
     println!("Done with basic pa to va user mapping test!");
 
     let start = sync::get_time();
