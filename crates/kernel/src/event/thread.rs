@@ -1,6 +1,8 @@
 use alloc::boxed::Box;
 use core::ptr::NonNull;
 
+use crate::process::ProcessRef;
+
 use super::context::{context_switch, Context, SwitchAction, CORES};
 use super::{Event, SCHEDULER};
 
@@ -15,6 +17,7 @@ pub struct Thread {
 
     pub context: Option<Context>,
     pub user_regs: Option<UserRegs>,
+    pub process: Option<crate::process::ProcessRef>,
 }
 
 pub struct UserRegs {
@@ -54,7 +57,7 @@ impl Thread {
 
     /// Create a new user thread with the given stack pointer, initial
     /// program counter, and initial page table (`ttbr0`).
-    pub unsafe fn new_user(sp: usize, entry: usize, ttbr0: usize) -> Box<Self> {
+    pub unsafe fn new_user(process: ProcessRef, sp: usize, entry: usize) -> Box<Self> {
         let data = Context {
             regs: [0; 31],
             sp: 0,
@@ -69,9 +72,10 @@ impl Thread {
             context: Some(data),
             user_regs: Some(UserRegs {
                 sp_el0: sp,
-                ttbr0_el1: ttbr0,
+                ttbr0_el1: process.get_ttbr0(),
                 usermode: true,
             }),
+            process: Some(process),
         });
         thread.last_context = thread.context.as_mut().unwrap().into();
         thread
@@ -108,6 +112,7 @@ impl Thread {
             func,
             context: None,
             user_regs: None,
+            process: None,
         })
     }
 

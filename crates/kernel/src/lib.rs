@@ -2,6 +2,7 @@
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![warn(unsafe_attr_outside_unsafe, missing_unsafe_on_extern, static_mut_refs)]
+#![allow(clippy::new_without_default)]
 
 extern crate alloc;
 
@@ -15,6 +16,7 @@ pub mod arch;
 pub mod event;
 pub mod heap;
 pub mod memory;
+pub mod process;
 pub mod ringbuffer;
 pub mod runtime;
 pub mod sync;

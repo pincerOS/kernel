@@ -6,6 +6,7 @@ extern crate kernel;
 
 use core::arch::asm;
 
+use alloc::sync::Arc;
 use event::{context, task, thread};
 use kernel::*;
 
@@ -68,8 +69,12 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         }
     });
 
-    // Create user region (mapped at 0x20_0000 in virtual memory)
-    let (user_region, ttbr0) = unsafe { crate::arch::memory::create_user_region() };
+    // Create a user process
+    let process = crate::process::Process::new();
+    // Assume fixed mapped range in user process (0x20_0000 in virtual memory)
+    // TODO: mmap instead
+    let user_region = 0x20_0000 as *mut u8;
+    let ttbr0 = process.get_ttbr0();
 
     // Mark current thread as using TTBR0, so that preemption saves
     // and restores the register.
@@ -116,7 +121,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     let user_sp = 0x100_0000;
     let user_entry = 0x20_0000;
 
-    let user_thread = unsafe { thread::Thread::new_user(user_sp, user_entry, ttbr0) };
+    let user_thread = unsafe { thread::Thread::new_user(Arc::new(process), user_sp, user_entry) };
 
     event::SCHEDULER.add_task(event::Event::ScheduleThread(user_thread));
 

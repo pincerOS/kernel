@@ -1,5 +1,5 @@
-mod machine;
-mod vmm;
+pub mod machine;
+pub mod vmm;
 
 use core::arch::asm;
 
