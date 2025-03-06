@@ -770,6 +770,10 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
 
     println!("| HCD: Starting");
 
+    write_volatile(DOTG_DCTL, 1 << 1);
+    micro_delay(1000);
+
+
     let mut gusbcfg = read_volatile(DOTG_GUSBCFG);
     gusbcfg &= !(GUSBCFG_ULPIEXTVBUSDRV | GUSBCFG_TERMSELDLPULSE);
 
@@ -793,6 +797,7 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     //FSPhyType = Dedicated full-speed interface 2'b01
     //HSPhyType = UTMI+ 2'b01
     gusbcfg &= !(GUSBCFG_ULPIFSLS | GUSBCFG_ULPICLKSUSM);
+    gusbcfg |= GUSBCFG_FORCEHOSTMODE;
     write_volatile(DOTG_GUSBCFG, gusbcfg);
 
     //Enable DMA
@@ -905,14 +910,15 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
         write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x1000));
     }
 
-    hport = read_volatile(DOTG_HPRT);
-    hport |= HPRT_PRTRST;
-    write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x100));
 
-    micro_delay(50000);
-    hport &= !HPRT_PRTRST;
-    write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x100));
+    // hport = read_volatile(DOTG_HPRT);
+    // hport |= HPRT_PRTRST;
+    // write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x100));
 
+    // micro_delay(50000);
+    // hport &= !HPRT_PRTRST;
+    // write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x100));
+;
     return ResultCode::OK;
 }
 

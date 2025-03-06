@@ -174,7 +174,7 @@ pub fn HcdProcessRootHubMessage(
                         let stat_buff = buffer as *mut HubPortFullStatus;
 
                         let mut status = 0;
-                        status |= (hprt & HPRT_PRTCONNSTS) >> 1;
+                        status |= (hprt & HPRT_PRTCONNSTS) << 0;
                         status |= ((hprt & HPRT_PRTENA) >> 2) << 1;
                         status |= ((hprt & HPRT_PRTSUSP) >> 7) << 2;
                         status |= ((hprt & HPRT_PRTOVRCURRACT) >> 4) << 3;
@@ -190,17 +190,17 @@ pub fn HcdProcessRootHubMessage(
                         {
                             status |= 1 << 9;
                         }
-                        status |= ((hprt & HPRT_PRTTSTCTL_SHIFT) >> 13) << 11;
+                        status |= ((hprt & (1 << HPRT_PRTTSTCTL_SHIFT)) >> HPRT_PRTTSTCTL_SHIFT) << 11;
 
                         let mut change = 0;
-                        change |= ((hprt & HPRT_PRTCONNDET) >> 2) << 0;
+                        change |= ((hprt & HPRT_PRTCONNDET) >> 1) << 0;
                         change |= ((hprt & HPRT_PRTENCHNG) >> 3) << 1;
                         change |= ((hprt & HPRT_PRTOVRCURRCHNG) >> 5) << 3;
                         change |= 1 << 4;
                         //Don't even ask about this code, I hope its write
-
-                        (*stat_buff).Status._bitfield = status as u16;
-                        (*stat_buff).Change._bitfield = change as u16;
+                        println!("| HCD.Hub: HPRT: {:#x} Status: {:#x} Change: {:#x}", hprt, status, change);
+                        (*stat_buff).Status = HubPortStatus::from_bits_truncate(status as u16);
+                        (*stat_buff).Change = HubPortStatusChange::from_bits_truncate(change as u16);
                         reply_length = 4;
                     }
                 }

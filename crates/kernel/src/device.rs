@@ -207,7 +207,9 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         println!("| USB controller addr: {:#010x}", usb_addr as usize);
         println!("| USB controller base: {:#010x}", usb_base as usize);
 
-        usb::usb_init(usb_base);
+        let mut bus = usb::usb_init(usb_base);
+
+        // usb::usb_check_for_change(&mut bus);
     }
 
     // Set up the interrupt controllers to preempt on the arm generic

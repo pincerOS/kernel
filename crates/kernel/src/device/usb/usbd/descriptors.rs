@@ -30,7 +30,7 @@ pub enum DescriptorType {
 }
 
 #[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct UsbDescriptorHeader {
     pub descriptor_length: u8,
     pub descriptor_type: DescriptorType,

@@ -70,7 +70,7 @@ pub fn UsbInitialise(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
     result
 }
 
-fn UsbControlMessage(
+pub fn UsbControlMessage(
     device: &mut UsbDevice,
     pipe: UsbPipeAddress,
     buffer: *mut u8,
@@ -103,7 +103,7 @@ fn UsbControlMessage(
     return result;
 }
 
-fn UsbGetDescriptor(
+pub fn UsbGetDescriptor(
     device: &mut UsbDevice,
     desc_type: DescriptorType,
     index: u8,
@@ -386,11 +386,10 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
     return ResultCode::OK;
 }
 
-fn UsbAttachDevice(bus: &mut UsbBus, device_number: u32) -> ResultCode {
-    let device = bus.devices[device_number as usize]
-        .as_mut()
-        .unwrap()
-        .as_mut();
+pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
+    let mut bus = unsafe { &mut *(device.bus) };
+
+    println!("| USBD: Attaching device {}", device.number);
 
     let address = device.number;
     device.number = 0;
@@ -457,10 +456,19 @@ fn UsbAttachDevice(bus: &mut UsbBus, device_number: u32) -> ResultCode {
     return ResultCode::OK;
 }
 
-fn UsbAllocateDevice(bus: &mut UsbBus) -> ResultCode {
+pub fn UsbAllocateDevice(devices: &mut Box<UsbDevice>) -> ResultCode {
+    let mut bus = unsafe { &mut *(devices.bus) };
+    let mut device = devices.as_mut();
+    device.status = UsbDeviceStatus::Attached;
+    device.error = UsbTransferError::NoError;
+    device.port_number = 0;
+    device.configuration_index = 0xff;
+
     for number in 0..MaximumDevices {
         if bus.devices[number].is_none() {
-            bus.devices[number] = Some(Box::new(UsbDevice::new(bus, (number) as u32)));
+            println!("| USBD: Allocating device {}", number);
+            device.number = number as u32;
+            bus.devices[number] = Some(devices);
             break;
         }
     }
@@ -475,12 +483,25 @@ fn UsbAttachRootHub(bus: &mut UsbBus) -> ResultCode {
         return ResultCode::ErrorDevice;
     }
 
-    if UsbAllocateDevice(bus) != ResultCode::OK {
+    let mut device = Box::new(UsbDevice::new(bus, 0 as u32));
+
+    if UsbAllocateDevice(&mut device) != ResultCode::OK {
         println!("Error: UsbAllocateDevice failed");
         return ResultCode::ErrorMemory;
     }
 
-    bus.devices[RootHubDeviceNumber].as_mut().unwrap().status = UsbDeviceStatus::Powered;
+    unsafe { (*bus.devices[RootHubDeviceNumber].unwrap()).status = UsbDeviceStatus::Powered };
 
-    return UsbAttachDevice(bus, RootHubDeviceNumber as u32);
+    return UsbAttachDevice(unsafe {&mut (*bus.devices[RootHubDeviceNumber].unwrap()) });
 }
+
+
+// pub fn UsbCheckForChange(bus: &mut UsbBus) {
+//     if bus.devices[RootHubDeviceNumber].is_none() {
+//         return;
+//     }
+
+//     if let Some(device_check_for_change) = bus.devices[RootHubDeviceNumber].as_mut().unwrap().device_check_for_change {
+//         device_check_for_change(bus.devices[RootHubDeviceNumber].as_mut().unwrap().as_mut());
+//     }
+// }

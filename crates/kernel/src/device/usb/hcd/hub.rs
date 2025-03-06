@@ -12,6 +12,8 @@ use crate::device::usb::usbd::descriptors::DescriptorType;
 use crate::device::usb::UsbDriverDataHeader;
 use crate::device::usb::*;
 
+use bitflags::bitflags;
+
 /**
     \brief The hub descriptor information.
     The hub descriptor structure defined in the USB2.0 manual section
@@ -69,25 +71,42 @@ pub struct HubFullStatus {
     pub Change: HubStatusChange,
 }
 
-/**
+
+bitflags! {
+    /**
     \brief Encapsulates the current status of a hub port.
     The hub port status structure defined in 11.24.2.7.1 of the USB2.0
     standard.
-*/
-#[repr(C, packed)]
-pub struct HubPortStatus {
-    pub _bitfield: u16,
-}
+    */
+    #[derive(Clone, Copy)]
+    pub struct HubPortStatus: u16 {
+        const Connected = 1 << 0;
+        const Enabled = 1 << 1;
+        const Suspended = 1 << 2;
+        const OverCurrent = 1 << 3;
+        const Reset = 1 << 4;
+        const Power = 1 << 8;
+        const LowSpeedAttached = 1 << 9;
+        const HighSpeedAttached = 1 << 10;
+        const TestMode = 1 << 11;
+        const IndicatorControl = 1 << 12;
+    }
 
-/**
+    /**
     \brief Encapsulates the change in current status of a hub port.
     The hub port status change structure defined in 11.24.2.7.2 of the USB2.0
     standard.
-*/
-#[repr(C, packed)]
-pub struct HubPortStatusChange {
-    pub _bitfield: u16,
+    */
+    #[derive(Clone, Copy)]
+    pub struct HubPortStatusChange: u16 {
+        const ConnectedChanged = 1 << 0;
+        const EnabledChanged = 1 << 1;
+        const SuspendedChanged = 1 << 2;
+        const OverCurrentChanged = 1 << 3;
+        const ResetChanged = 1 << 4;
+    }
 }
+
 
 /**
     \brief Encapsulates the full status of a hub port.

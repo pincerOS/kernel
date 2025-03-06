@@ -89,13 +89,14 @@ pub struct UsbDevice {
         [[UsbEndpointDescriptor; MAX_ENDPOINTS_PER_DEVICE]; MAX_INTERFACES_PER_DEVICE],
     pub parent: Option<*mut UsbDevice>,
     pub full_configuration: Option<*mut u8>,
-    pub driver_data: Option<*mut UsbDriverDataHeader>,
+    pub driver_data: Option<*mut u8>,
     pub soft_sc: *mut (),
+    pub bus: *mut UsbBus,
     pub last_transfer: u32,
 }
 
 impl UsbDevice {
-    pub fn new(bus: &mut UsbBus, num: u32) -> Self {
+    pub fn new(bus: *mut UsbBus, num: u32) -> Self {
         Self {
             number: num,
             speed: UsbSpeed::Full,
@@ -118,7 +119,8 @@ impl UsbDevice {
             endpoints: core::array::from_fn(|_| core::array::from_fn(|_| UsbEndpointDescriptor::default())),
             full_configuration: None,
             driver_data: None,
-            soft_sc: bus.dwc_sc.as_mut() as *mut dwc_hub as *mut (),
+            soft_sc: unsafe { (*bus).dwc_sc.as_mut() as *mut dwc_hub as *mut () },
+            bus: bus,
             last_transfer: 0,
         }
     }
@@ -131,7 +133,7 @@ pub const INTERFACE_CLASS_ATTACH_COUNT: usize = 16;
 pub const MaximumDevices: usize = 32;
 
 pub struct UsbBus {
-    pub devices: [Option<Box<UsbDevice>>; MaximumDevices],
+    pub devices: [Option<*mut Box<UsbDevice>>; MaximumDevices],
     pub interface_class_attach: [Option<
         fn(device: &mut UsbDevice, interface_number: u32) -> ResultCode,
     >; INTERFACE_CLASS_ATTACH_COUNT],
