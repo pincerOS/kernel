@@ -1,5 +1,5 @@
-#[cfg(not(test))]
-#[panic_handler]
+#[cfg_attr(not(any(test, doc)), panic_handler)]
+#[allow(dead_code)]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     use crate::arch::halt;
     use crate::uart;

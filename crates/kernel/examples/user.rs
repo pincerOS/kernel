@@ -6,6 +6,7 @@ extern crate kernel;
 
 use core::arch::asm;
 
+use event::{context, task, thread};
 use kernel::*;
 
 static INIT_CODE: &[u8] = kernel::util::include_bytes_align!(u32, "../../init/init.bin");
@@ -48,7 +49,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
                     objects: [const { None }; 4],
                     data: Some(buf[..buf_len].into()),
                 };
-                stdin_tx.send_async(msg).await;
+                stdin_tx.send(msg).await;
                 buf_len = 0;
             }
             task::yield_future().await;
@@ -56,7 +57,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     });
     task::spawn_async(async move {
         loop {
-            let input = stdout_rx.recv_async().await;
+            let input = stdout_rx.recv().await;
             if let Some(data) = input.data {
                 let uart = device::uart::UART.get();
                 let mut stdout = uart.lock();

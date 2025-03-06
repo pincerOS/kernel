@@ -41,7 +41,7 @@ fn spawn_elf(elf: elf::Elf<'_>) -> sys::ChannelDesc {
 pub extern "C" fn main() {
     let archive = initfs::Archive::load(ARCHIVE).unwrap();
 
-    let mut buf = [0; 0x10000];
+    let mut buf = [0; 0x18000];
     let (_, file) = archive.find_file(b"example.elf").unwrap();
     let file = archive.read_file(file, &mut buf).unwrap();
 

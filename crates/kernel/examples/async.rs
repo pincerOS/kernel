@@ -4,6 +4,7 @@
 extern crate alloc;
 extern crate kernel;
 
+use kernel::event::{task, thread};
 use kernel::*;
 
 #[no_mangle]
@@ -21,10 +22,10 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
                 // TODO: non-spinning sleep
                 sync::spin_sleep(500_000);
                 println!("Ending thread {i}");
-                b.sync_async().await;
+                b.sync().await;
             });
         }
-        barrier.sync_async().await;
+        barrier.sync().await;
         println!("End of preemption test");
         shutdown();
     });

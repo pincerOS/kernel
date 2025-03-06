@@ -8,18 +8,13 @@ extern crate alloc;
 pub mod device;
 
 pub mod arch;
-pub mod context;
 pub mod event;
-pub mod exceptions;
 pub mod heap;
 pub mod memory;
 pub mod ringbuffer;
 pub mod runtime;
-pub mod scheduler;
 pub mod sync;
 pub mod syscall;
-pub mod task;
-pub mod thread;
 pub mod util;
 
 use device::uart;
@@ -54,7 +49,7 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
 
     device::init_devices(&device_tree);
 
-    unsafe { context::CORES.init() };
+    unsafe { event::context::CORES.init() };
     println!("| initialized per-core data");
 
     println!("| starting other cores...");
@@ -62,21 +57,21 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
 
     INIT_BARRIER.fetch_add(1, Ordering::SeqCst);
     while INIT_BARRIER.load(Ordering::SeqCst) < core_count {
-        unsafe { arch::yield_() };
+        core::hint::spin_loop();
     }
     INIT_WAIT.store(true, Ordering::SeqCst);
 
     device::init_devices_per_core();
 
     println!("| creating initial thread");
-    thread::thread(move || {
+    event::thread::thread(move || {
         unsafe { kernel_main(device_tree) };
         shutdown();
     });
 
     START_BARRIER.fetch_add(1, Ordering::SeqCst);
     while START_BARRIER.load(Ordering::SeqCst) < core_count {
-        unsafe { arch::yield_() };
+        core::hint::spin_loop();
     }
     START_WAIT.store(true, Ordering::SeqCst);
 
@@ -92,14 +87,14 @@ pub unsafe extern "C" fn kernel_entry_rust_alt(_x0: u32, _x1: u64, _x2: u64, _x3
 
     INIT_BARRIER.fetch_add(1, Ordering::SeqCst);
     while !INIT_WAIT.load(Ordering::SeqCst) {
-        unsafe { arch::yield_() };
+        core::hint::spin_loop();
     }
 
     device::init_devices_per_core();
 
     START_BARRIER.fetch_add(1, Ordering::SeqCst);
     while !START_WAIT.load(Ordering::SeqCst) {
-        unsafe { arch::yield_() };
+        core::hint::spin_loop();
     }
 
     if !FLAG_MULTICORE {

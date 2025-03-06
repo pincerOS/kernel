@@ -7,7 +7,7 @@
 //!
 //! Arm Generic Timer is implemented for each core to handle the timer interrupts, as the system timer is not functional in QEMU
 //!
-use crate::context::Context;
+use crate::event::context::Context;
 use crate::sync::{ConstInit, PerCore, UnsafeInit, Volatile};
 use core::arch::asm;
 use core::panic;

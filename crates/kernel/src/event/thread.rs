@@ -1,18 +1,12 @@
 use alloc::boxed::Box;
 use core::ptr::NonNull;
 
-use crate::context::{context_switch, Context, SwitchAction, CORES};
-use crate::event::{Event, SCHEDULER};
+use super::context::{context_switch, Context, SwitchAction, CORES};
+use super::{Event, SCHEDULER};
 
-pub fn yield_() {
-    context_switch(SwitchAction::Yield);
-}
-
-pub fn stop() -> ! {
-    context_switch(SwitchAction::FreeThread);
-    unreachable!()
-}
-
+/// A handle for a kernel or user thread, which owns its stack, and
+/// while the thread isn't running, stores the saved register state of
+/// the thread.
 pub struct Thread {
     pub last_context: NonNull<Context>,
     pub stack: NonNull<[u128]>,
@@ -33,6 +27,7 @@ unsafe impl Send for Thread {}
 unsafe impl Sync for Thread {}
 
 impl Thread {
+    /// Create a kernel thread from the given stack and closure
     unsafe fn from_fn<F>(stack: NonNull<[u128]>, func: F) -> Box<Self>
     where
         F: FnOnce() + Send + 'static,
@@ -57,6 +52,8 @@ impl Thread {
         unsafe { Self::new(stack, stack_offset, Some(fn_ptr)) }
     }
 
+    /// Create a new user thread with the given stack pointer, initial
+    /// program counter, and initial page table (`ttbr0`).
     pub unsafe fn new_user(sp: usize, entry: usize, ttbr0: usize) -> Box<Self> {
         let data = Context {
             regs: [0; 31],
@@ -80,6 +77,10 @@ impl Thread {
         thread
     }
 
+    /// Create a new kernel thread with the given stack and a function
+    /// to run when starting the thread.
+    ///
+    /// Stack must have been created with [`Box::into_raw`]
     unsafe fn new(
         stack: NonNull<[u128]>,
         stack_offset: usize,
@@ -99,9 +100,7 @@ impl Thread {
             link_reg: init_thread as usize,
             spsr: 0b0101, // Stay in EL1, using the EL1 sp
         };
-        unsafe {
-            core::ptr::write(context.as_ptr(), data);
-        }
+        unsafe { core::ptr::write(context.as_ptr(), data) };
 
         Box::new(Thread {
             stack,
@@ -112,6 +111,15 @@ impl Thread {
         })
     }
 
+    /// Save the given register context into the thread's state;
+    /// if the thread is a user thread, it copies the register context
+    /// into a space in the [`Thread`] struct (as the context is stored
+    /// on the temporary kernel stack).  If the thread is a kernel thread,
+    /// the context is stored on the kernel stack, so this can leave the
+    /// context in-place on the thread's stack.
+    ///
+    /// If this is a user thread, it saves the *current* values of
+    /// `TTBR0_EL1` and `SP_EL0` into the user's stack.
     pub unsafe fn save_context(&mut self, context: NonNull<Context>) {
         if let Some(user) = &mut self.user_regs {
             unsafe { core::arch::asm!("mrs {}, TTBR0_EL1", out(reg) user.ttbr0_el1) };
@@ -128,6 +136,7 @@ impl Thread {
         }
     }
 
+    /// Switch into the thread, restoring its context
     pub unsafe fn enter_thread(self: Box<Self>) -> ! {
         let next_ctx = self.last_context.as_ptr();
 
@@ -140,7 +149,7 @@ impl Thread {
         if let Some(user) = &self.user_regs {
             let ctx = unsafe { &mut *next_ctx };
 
-            // TODO: proper tlb flush stuff
+            // TODO: proper tlb flush stuff for switching address spaces
             unsafe {
                 core::arch::asm!(
                     "msr TTBR0_EL1, {0}",
@@ -165,7 +174,7 @@ impl Thread {
         assert!(old.is_none());
 
         // switch into the thread
-        unsafe { crate::context::restore_context(next_ctx) };
+        unsafe { super::context::restore_context(next_ctx) };
         // unreachable
     }
 }
@@ -181,6 +190,7 @@ impl Drop for Thread {
 trait Callback: FnOnce() {
     unsafe fn call(&mut self);
 }
+
 impl<F: FnOnce()> Callback for F {
     unsafe fn call(&mut self) {
         unsafe { core::ptr::read(self)() }
@@ -189,6 +199,7 @@ impl<F: FnOnce()> Callback for F {
 
 const STACK_SIZE: usize = 16384;
 
+/// Spawn a kernel thread that runs the given closure.
 pub fn thread<F>(f: F)
 where
     F: FnOnce() + Send + 'static,
@@ -212,4 +223,15 @@ extern "C" fn init_thread() {
     unsafe { (*func.as_ptr()).call() };
 
     stop();
+}
+
+/// Yield control of the current thread, running it again in the future.
+pub fn yield_() {
+    context_switch(SwitchAction::Yield);
+}
+
+/// Exit the current thread
+pub fn stop() -> ! {
+    context_switch(SwitchAction::FreeThread);
+    unreachable!()
 }

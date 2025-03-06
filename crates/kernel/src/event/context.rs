@@ -3,10 +3,12 @@ use core::cell::Cell;
 
 use alloc::boxed::Box;
 
-use crate::event::{run_event_loop, Event, SCHEDULER};
+use super::thread::Thread;
+use super::{run_event_loop, Event, SCHEDULER};
 use crate::sync::{disable_interrupts, restore_interrupts};
-use crate::thread::Thread;
 
+/// Per-core threading data, indicating the per-core stack pointers
+/// and the active thread for each core.
 pub static CORES: AllCores = AllCores::new();
 
 // Assume cache-line size of 64, align to avoid false sharing
@@ -38,6 +40,10 @@ impl AllCores {
         }
     }
 
+    // TODO: Make this non-reentrant?  (To prevent yield, etc from being
+    // called within the callback)
+    /// Run a callback with the current core's information.  The callback
+    /// is run with interrupts disabled.
     pub fn with_current<F, T>(&self, f: F) -> T
     where
         F: FnOnce(&CoreInfo) -> T,
@@ -66,6 +72,7 @@ impl AllCores {
 /// can switch between cores.
 unsafe impl Sync for AllCores {}
 
+/// The register context of a thread.
 #[repr(C)]
 pub struct Context {
     pub regs: [usize; 31],
@@ -74,32 +81,65 @@ pub struct Context {
     pub spsr: usize,
 }
 
-type EventQueue = crate::scheduler::Queue<Event>;
+type EventQueue = super::scheduler::Queue<Event>;
 
+/// An action to take on the thread descheduled by [`context_switch`].
 pub enum SwitchAction<'a> {
+    /// Re-add the thread to the scheduler's queue.
     Yield,
+    /// Exit the thread and free its resources.
     FreeThread,
+    /// Add the thread to the given wait queue, then unlock the spinlock.
     QueueAddUnlock(&'a EventQueue, &'a crate::sync::SpinLockInner),
 }
 
+/// An action to take on the thread descheduled by [`deschedule_thread`].
+// Note: this must not have fields, as it must be passed in a single
+// register.
+#[repr(usize)]
+pub enum DescheduleAction {
+    /// Re-add the thread to the scheduler's queue.
+    Yield,
+    /// Exit the thread and free its resources.
+    FreeThread,
+}
+
+/// Context switch away from the current thread,
 pub fn context_switch(mut action: SwitchAction) {
     let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
     let thread = thread.expect("attempt to context switch from an event");
-    unsafe { asm_context_switch(Some(thread), Some(&mut action), core_sp) };
+    unsafe { asm_context_switch(Some(thread), Some(&mut action), core_sp) }
+}
+
+/// Switch into the event loop for the current core, then operate on the
+/// passed thread as specified by the [`DescheduleAction`]
+pub unsafe fn deschedule_thread(action: DescheduleAction, thread: Option<Box<Thread>>) -> ! {
+    let (core_sp, active_thread) = CORES.with_current(|c| (c.core_sp.get(), c.thread.take()));
+    assert!(active_thread.is_none());
+    unsafe { asm_deschedule_thread(thread, action, core_sp) }
+}
+
+/// Switch into the event loop for the current core.
+pub unsafe fn enter_event_loop() -> ! {
+    let (core_sp, active_thread) = CORES.with_current(|c| (c.core_sp.get(), c.thread.take()));
+    assert!(active_thread.is_none());
+    unsafe { asm_deschedule_thread(None, DescheduleAction::Yield, core_sp) }
 }
 
 #[allow(improper_ctypes)]
 extern "C" {
-    pub fn asm_context_switch(
+    fn asm_context_switch(
         src_thread: Option<Box<Thread>>,
         action: Option<&mut SwitchAction>,
         core_sp: usize,
     );
-    pub fn switch_to_helper(
-        src_thread: Option<Box<Thread>>,
-        action: Option<&mut SwitchAction>,
+
+    fn asm_deschedule_thread(
+        thread: Option<Box<Thread>>,
+        action: DescheduleAction,
         core_sp: usize,
     ) -> !;
+
     pub fn restore_context(ctx: *mut Context) -> !;
 }
 
@@ -115,18 +155,17 @@ global_asm!(
 //     core_sp: usize,
 // )
 asm_context_switch:
+    // Shift the stack pointer to make room for the saved context
+    // (not all of the context is used, but the entire space needs
+    // to be reserved.)
     sub sp, sp, #0x110
 
-    # stp x0, x1, [sp, #0x00]
-    # stp x2, x3, [sp, #0x10]
-    # stp x4, x5, [sp, #0x20]
-    # stp x6, x7, [sp, #0x30]
-    # stp x8, x9, [sp, #0x40]
-    # stp x10, x11, [sp, #0x50]
-    # stp x12, x13, [sp, #0x60]
-    # stp x14, x15, [sp, #0x70]
-    # stp x16, x17, [sp, #0x80]
-    stp x18, x19, [sp, #0x90]
+    // TODO: ... this will actually load uninitialized stack values
+    // into the unused registers ... but they're caller-saved, so the
+    // caller shouldn't use them ...
+
+    // Save all callee-saved registers (x19-x29)
+    str x19, [sp, #0x98]
     stp x20, x21, [sp, #0xA0]
     stp x22, x23, [sp, #0xB0]
     stp x24, x25, [sp, #0xC0]
@@ -143,23 +182,27 @@ asm_context_switch:
     mov x5, #0b0101  // fake program status, staying in EL1 (TODO)
     stp x4, x5, [sp, #0x100]
 
+    // Write the context address on the thread's stack into last_context
+    // in the Thread struct.
     mov x4, sp
     str x4, [x0, #{thread_ctx_offset}]
-    # ldr x0, [x1, #{thread_ctx_offset}]
 
     // NOTE: fall-through
 
 switch_to_helper:
+    // Switch to the provided stack, then run the context switch callback
     mov sp, x2
-    bl context_switch_inner
+    bl context_switch_callback
 
     // NOTE: fall-through
 
 restore_context:
+    // Restore ELR and SPSR
     ldp x1, x2, [x0, #0x100]
     msr ELR_EL1, x1
     msr SPSR_EL1, x2
 
+    // Restore all registers
     ldp x2, x3, [x0, #0x10]
     ldp x4, x5, [x0, #0x20]
     ldp x6, x7, [x0, #0x30]
@@ -179,13 +222,24 @@ restore_context:
 
     ldp x0, x1, [x0, #0x00]
 
+    // Exception return; returns to the code at ELR_EL1,
+    // and runs with the privileges and modes specified in SPSR_EL1
     eret
+
+asm_deschedule_thread:
+    mov sp, x2
+    bl deschedule_thread_callback
+    udf #0
+
 "#,
     thread_ctx_offset = const core::mem::offset_of!(Thread, last_context),
 );
 
+/// Run by [`asm_context_switch`] after it saves the context and switches
+/// to the per-core stack; it then moves the passed [`SwitchAction`] onto
+/// the local stack, and calls [`context_switch_inner`].
 #[no_mangle]
-unsafe extern "C" fn context_switch_inner(
+unsafe extern "C" fn context_switch_callback(
     thread: Option<Box<Thread>>,
     action: Option<&mut SwitchAction>,
 ) -> *mut Context {
@@ -193,11 +247,39 @@ unsafe extern "C" fn context_switch_inner(
         .map(|ptr| core::mem::replace(ptr, SwitchAction::Yield))
         .unwrap_or(SwitchAction::Yield);
 
+    context_switch_inner(thread, action)
+}
+
+/// Run by [`asm_deschedule_thread`] after it switches to the per-core
+/// stack; runs [`context_switch_inner`] with a translated action.
+#[no_mangle]
+unsafe extern "C" fn deschedule_thread_callback(
+    thread: Option<Box<Thread>>,
+    action: DescheduleAction,
+) -> *mut Context {
+    let action = match action {
+        DescheduleAction::Yield => SwitchAction::Yield,
+        DescheduleAction::FreeThread => SwitchAction::FreeThread,
+    };
+    context_switch_inner(thread, action)
+}
+
+/// Execute some post-context switch operations, then enter the event
+/// loop.  This must be run on the correct per-core stack.
+fn context_switch_inner(thread: Option<Box<Thread>>, action: SwitchAction<'_>) -> ! {
     if let Some(thread) = thread {
         match action {
-            SwitchAction::Yield => SCHEDULER.add_task(Event::ScheduleThread(thread)),
-            SwitchAction::FreeThread => drop(thread),
+            SwitchAction::Yield => {
+                // Re-schedule the thread
+                SCHEDULER.add_task(Event::ScheduleThread(thread))
+            }
+            SwitchAction::FreeThread => {
+                // Free the thread
+                drop(thread)
+            }
             SwitchAction::QueueAddUnlock(queue, lock) => {
+                // Add the thread to a queue, then unlock the lock.
+
                 let mut queue_inner = queue.0.lock();
                 queue_inner.push_back(Event::ScheduleThread(thread));
                 lock.unlock();
@@ -215,46 +297,7 @@ unsafe extern "C" fn context_switch_inner(
         }
     }
 
-    unsafe { crate::event::run_event_loop() };
-}
-
-#[repr(C)]
-pub enum DescheduleAction {
-    Yield,
-    FreeThread,
-}
-
-#[allow(improper_ctypes)]
-extern "C" {
-    pub fn deschedule_thread(
-        core_sp: usize,
-        thread: Option<Box<Thread>>,
-        action: DescheduleAction,
-    ) -> !;
-}
-
-core::arch::global_asm!(
-    "
-.global deschedule_thread
-deschedule_thread:
-    mov sp, x0
-    bl deschedule_thread_inner
-    udf #0
-"
-);
-
-#[no_mangle]
-unsafe extern "C" fn deschedule_thread_inner(
-    _core_sp: usize,
-    thread: Option<Box<Thread>>,
-    action: DescheduleAction,
-) -> ! {
+    // re-enable interrupts and run the event loop on this stack.
     unsafe { crate::sync::enable_interrupts() };
-    if let Some(thread) = thread {
-        match action {
-            DescheduleAction::Yield => SCHEDULER.add_task(Event::ScheduleThread(thread)),
-            DescheduleAction::FreeThread => drop(thread),
-        }
-    }
     unsafe { run_event_loop() }
 }

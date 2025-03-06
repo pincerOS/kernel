@@ -195,6 +195,7 @@ impl Display for MappingError {
             }
             Self::TableDescriptorPresent => {
                 write!(f, "Table descriptor present in desired mapping location")
+
             }
             Self::LeafTableSpotTaken => write!(
                 f,

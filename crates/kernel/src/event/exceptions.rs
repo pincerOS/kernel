@@ -1,12 +1,9 @@
 use core::arch::{asm, global_asm};
-use core::sync::atomic::{AtomicUsize, Ordering};
 
+use super::context::{deschedule_thread, Context, DescheduleAction, CORES};
 use crate::arch::halt;
-use crate::context::{deschedule_thread, Context, DescheduleAction, CORES};
+use crate::sync::HandlerTableInner;
 use crate::uart;
-
-// TODO:
-// - Save FAR_EL1 for instruction abort/data aborts (faulting addr)
 
 global_asm!(
     r"
@@ -135,36 +132,36 @@ extern "C" {
     static mut save_context_br_lowEL32_serr: u32;
 }
 
+fn encode_bl(addr: usize, caller_addr: u64) -> u32 {
+    let diff = addr as i64 - caller_addr as i64;
+    let shifted = diff >> 2;
+    assert!(
+        (diff & 0b11 == 0) && shifted >= (-1 << 25) && shifted < (1 << 25),
+        "offset out of range: {diff}"
+    );
+    ((0b100101 << 26) | (shifted & ((1 << 26) - 1))) as u32
+}
+
+fn overwrite_target(target: *mut u32, addr: usize) {
+    let value = encode_bl(addr, target as u64);
+    unsafe {
+        core::ptr::write_volatile(target, value.to_le());
+        // Magic sequence to flush instruction cache?
+        core::arch::asm!(
+            "dc cvau, {0}",
+            "dsb ish",
+            "ic ivau, {0}",
+            "dsb ish",
+            "isb",
+            in(reg) target,
+        );
+    }
+}
+
 pub unsafe fn override_irq_handler(handler: ExceptionHandler) {
     let addr = handler as usize;
-
-    let encode_bl = |caller_addr: u64| {
-        let diff = addr as i64 - caller_addr as i64;
-        let shifted = diff >> 2;
-        assert!(
-            (diff & 0b11 == 0) && shifted >= (-1 << 25) && shifted < (1 << 25),
-            "offset out of range: {diff}"
-        );
-        ((0b100101 << 26) | (shifted & ((1 << 26) - 1))) as u32
-    };
-    let overwrite_target = |target: *mut u32| {
-        let value = encode_bl(target as u64);
-        unsafe { core::ptr::write_volatile(target, value.to_le()) };
-        unsafe {
-            // Magic sequence to flush instruction cache?
-            core::arch::asm!(
-                "dc cvau, {0}",
-                "dsb ish",
-                "ic ivau, {0}",
-                "dsb ish",
-                "isb",
-                in(reg) target,
-            );
-        }
-    };
-
-    overwrite_target(&raw mut save_context_br_curEL_sp1_irq);
-    overwrite_target(&raw mut save_context_br_lowEL64_irq);
+    overwrite_target(&raw mut save_context_br_curEL_sp1_irq, addr);
+    overwrite_target(&raw mut save_context_br_lowEL64_irq, addr);
 }
 
 // Docs: Armv8-A ARM - D23.2.41 ESR_EL2, Exception Syndrome Register (EL2)
@@ -196,7 +193,7 @@ static EXCEPTION_CLASS: [&str; 64] = {
     arr[0b100101] = "data abort (same EL)";
     arr[0b100110] = "SP alignment fault";
     arr[0b101000] = "FPE (32 bit)";
-    arr[0b101100] = "FPE (364 bit)";
+    arr[0b101100] = "FPE (64 bit)";
     arr[0b101101] = "GCS exception";
     arr[0b101111] = "SError exception";
     arr[0b110000] = "breakpoint (lower EL)";
@@ -211,25 +208,39 @@ static EXCEPTION_CLASS: [&str; 64] = {
     arr
 };
 
+unsafe fn read_far_el1() -> usize {
+    let far: usize;
+    unsafe {
+        asm!(
+            "mrs {}, far_el1",
+            out(reg) far,
+            options(nomem, nostack, preserves_flags)
+        );
+    }
+    far
+}
+
+unsafe fn read_ttbr0_el1() -> usize {
+    let ttbr0: usize;
+    unsafe {
+        asm!(
+            "mrs {}, ttbr0_el1",
+            out(reg) ttbr0,
+            options(nomem, nostack, preserves_flags)
+        );
+    }
+    ttbr0
+}
+
 #[no_mangle]
 unsafe extern "C" fn exception_handler_example(
-    ctx: &mut Context,
+    _ctx: &mut Context,
     elr: u64,
     spsr: u64,
     esr: u64,
     arg: u64,
 ) -> *mut Context {
-    // far_el1 should be preserved up to this point
-    // TODO: need to ensure that LLVM doesn't reorder this load
-    // after an operation that could overwrite it (yield-like ops)
-    let far: usize;
-    unsafe {
-        asm! {
-            "mrs {}, far_el1",
-            out(reg) far,
-            options(nomem, nostack, preserves_flags)
-        }
-    }
+    let far = unsafe { read_far_el1() };
 
     let exception_class = esr >> 26;
     let class_name = *EXCEPTION_CLASS
@@ -242,25 +253,6 @@ unsafe extern "C" fn exception_handler_example(
     }
 
     match exception_class {
-        0x15 => {
-            // supervisor call
-            let arg = esr & 0xFFFF;
-            println!("Got syscall with number: {arg:#x}");
-            match arg {
-                1 => {
-                    ctx.regs[0] *= ctx.regs[1];
-                    ctx
-                }
-                2 => {
-                    println!("Got syscall #2!  Shutting down");
-                    crate::shutdown();
-                }
-                _ => {
-                    println!("Unknown syscall number {arg:#x}");
-                    halt()
-                }
-            }
-        }
         _ => halt(),
     }
 }
@@ -276,26 +268,6 @@ unsafe extern "C" fn exception_handler_unhandled(
     halt();
 }
 
-type SyscallHandler = unsafe fn(ctx: &mut Context) -> *mut Context;
-
-#[allow(clippy::declare_interior_mutable_const)]
-const NULL_HANDLER: AtomicUsize = AtomicUsize::new(0);
-
-static SYSCALL_HANDLERS: [AtomicUsize; 256] = [NULL_HANDLER; 256];
-
-pub unsafe fn register_syscall_handler(num: usize, handler: SyscallHandler) {
-    SYSCALL_HANDLERS[num].store(handler as usize, Ordering::SeqCst);
-}
-
-pub fn get_syscall_handler(num: usize) -> Option<SyscallHandler> {
-    let num = SYSCALL_HANDLERS.get(num)?.load(Ordering::Relaxed);
-    if num == 0 {
-        None
-    } else {
-        Some(unsafe { core::mem::transmute::<usize, SyscallHandler>(num) })
-    }
-}
-
 #[no_mangle]
 unsafe extern "C" fn exception_handler_user(
     ctx: &mut Context,
@@ -304,35 +276,14 @@ unsafe extern "C" fn exception_handler_user(
     esr: u64,
     arg: u64,
 ) -> *mut Context {
-    // far_el1 should be preserved up to this point
-    // TODO: need to ensure that LLVM doesn't reorder this load
-    // after an operation that could overwrite it (yield-like ops)
-    let far: usize;
-    unsafe {
-        asm! {
-            "mrs {}, far_el1",
-            out(reg) far,
-            options(nomem, nostack, preserves_flags)
-        }
-    }
-
-    let ttbr0: usize;
-    unsafe {
-        asm! {
-            "mrs {}, ttbr0_el1",
-            out(reg) ttbr0,
-            options(nomem, nostack, preserves_flags)
-        }
-    }
+    let far = unsafe { read_far_el1() };
+    let ttbr0 = unsafe { read_ttbr0_el1() };
 
     let exception_class = esr >> 26;
     let class_name = *EXCEPTION_CLASS
         .get(exception_class as usize)
         .unwrap_or(&"unspecified");
     let _insn_len = if ((esr >> 25) & 1) != 0 { 4 } else { 2 };
-
-    // let insn = unsafe { core::ptr::read_volatile(elr as *const u32) };
-    // println!("Len: {:?}, insn {:#010x}", insn_len, insn);
 
     match exception_class {
         0x15 => {
@@ -346,11 +297,10 @@ unsafe extern "C" fn exception_handler_user(
                 }
                 println!("Unknown syscall number {arg:#x}; stopping user thread");
 
-                let (core_sp, thread) =
-                    CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
+                let thread = CORES.with_current(|core| core.thread.take());
                 let mut thread = thread.expect("usermode syscall without active thread");
                 unsafe { thread.save_context(ctx.into()) };
-                unsafe { deschedule_thread(core_sp, Some(thread), DescheduleAction::FreeThread) }
+                unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
             }
         }
         _ => {
@@ -361,4 +311,28 @@ unsafe extern "C" fn exception_handler_user(
             halt()
         }
     }
+}
+
+type SyscallHandler = unsafe fn(ctx: &mut Context) -> *mut Context;
+
+pub struct SyscallTable(HandlerTableInner<256>);
+
+impl SyscallTable {
+    pub fn get(&self, num: usize) -> Option<SyscallHandler> {
+        let v = self.0.get(num);
+        (v != 0).then(|| unsafe { core::mem::transmute::<usize, _>(v) })
+    }
+    pub fn set(&self, num: usize, func: Option<SyscallHandler>) {
+        self.0.set(num, func.map(|f| f as usize).unwrap_or(0));
+    }
+}
+
+static SYSCALL_HANDLERS: SyscallTable = SyscallTable(HandlerTableInner::new(0));
+
+pub unsafe fn register_syscall_handler(num: usize, handler: SyscallHandler) {
+    SYSCALL_HANDLERS.set(num, Some(handler));
+}
+
+pub fn get_syscall_handler(num: usize) -> Option<SyscallHandler> {
+    SYSCALL_HANDLERS.get(num)
 }

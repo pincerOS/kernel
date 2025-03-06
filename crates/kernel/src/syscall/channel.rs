@@ -1,14 +1,12 @@
-use core::arch::asm;
 use core::num::NonZeroU32;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::context::Context;
+use crate::event::async_handler::{run_async_handler, HandlerContext};
+use crate::event::context::Context;
 use crate::ringbuffer;
 use crate::sync::SpinLock;
-
-use super::run_async_syscall;
 
 // TODO: tracking ownership of objects
 pub struct ObjectDescriptor(core::num::NonZeroU32);
@@ -73,9 +71,10 @@ pub unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
     let buf_len = ctx.regs[3];
     let flags = SendRecvFlags::from_bits_truncate(ctx.regs[4] as u32);
 
-    run_async_syscall(ctx, async move {
+    run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
         let Some(desc) = NonZeroU32::new(desc as u32) else {
-            return [(-1isize) as usize];
+            context.regs().regs[0] = -1isize as usize;
+            return context.resume_final();
         };
         let sender = OBJECTS
             .lock()
@@ -90,14 +89,15 @@ pub unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
         let Some((mut send, recv)) = sender else {
             // TODO: proper approach to mpsc channels?
             println!("Skipping message, channel in-use or non-existant!");
-            return [(-1isize) as usize];
+            context.regs().regs[0] = -1isize as usize;
+            return context.resume_final();
         };
 
-        // user virtual memory is still enabled, haven't yielded yet
-
-        let msg_ptr = msg_ptr as *const UserMessage;
-        assert!(msg_ptr.is_aligned()); // TODO: check user access validity
-        let user_message = unsafe { core::ptr::read(msg_ptr) };
+        let user_message = context.with_user_vmem(|| {
+            let msg_ptr = msg_ptr as *const UserMessage;
+            assert!(msg_ptr.is_aligned()); // TODO: check user access validity
+            unsafe { core::ptr::read(msg_ptr) }
+        });
 
         // TODO: validate ownership of objects
         let objects = user_message
@@ -127,23 +127,24 @@ pub unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
                 data,
             });
             if r.is_err() {
-                res = [-2isize as usize];
+                res = -2isize as usize;
             } else {
-                res = [0];
+                res = 0;
             }
         } else {
-            send.send_async(Message {
+            send.send(Message {
                 tag: user_message.tag,
                 objects,
                 data,
             })
             .await;
-            res = [0];
+            res = 0;
         }
 
         OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
 
-        res
+        context.regs().regs[0] = res;
+        context.resume_final()
     })
 }
 
@@ -154,12 +155,10 @@ pub unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
     let buf_cap = ctx.regs[3];
     let flags = SendRecvFlags::from_bits_truncate(ctx.regs[4] as u32);
 
-    let user_ttbr0: usize;
-    unsafe { asm!("mrs {0}, TTBR0_EL1", out(reg) user_ttbr0) };
-
-    run_async_syscall(ctx, async move {
+    run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
         let Some(desc) = NonZeroU32::new(desc as u32) else {
-            return [(-1isize) as usize];
+            context.regs().regs[0] = -1isize as usize;
+            return context.resume_final();
         };
         let receiver = OBJECTS
             .lock()
@@ -175,57 +174,50 @@ pub unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
         let Some((send, mut recv)) = receiver else {
             // TODO: proper approach to mpsc channels?
             println!("Skipping message, channel in-use or non-existant!");
-            return [(-1isize) as usize];
+            context.regs().regs[0] = -1isize as usize;
+            return context.resume_final();
         };
 
         let message;
         if flags.contains(SendRecvFlags::NO_BLOCK) {
             message = recv.try_recv();
         } else {
-            message = Some(recv.recv_async().await);
+            message = Some(recv.recv().await);
         }
 
         OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
 
         let Some(message) = message else {
-            return [-2isize as usize];
+            context.regs().regs[0] = -2isize as usize;
+            return context.resume_final();
         };
 
         let user_message = UserMessage {
             tag: message.tag,
             objects: message.objects.map(|s| s.map(|o| o.0.get()).unwrap_or(0)),
         };
-
         // TODO: track ownership of objects
 
-        // Re-enable user virtual memory; it could have been
-        // disabled / switched, if recv yielded and ran a different
-        // user thread.
-        let cur_ttbr0: usize;
-        unsafe { asm!("mrs {0}, TTBR0_EL1", out(reg) cur_ttbr0) };
-        if cur_ttbr0 != user_ttbr0 {
-            // Enable the user-mode address space in this thread
-            unsafe {
-                asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) user_ttbr0)
-            };
-        }
-
         let mut data_len = 0;
-        if let Some(data) = message.data {
-            // TODO: validate memory region
-            let buf_ptr = buf_ptr as *mut u8;
-            let kbuf_ptr = data.as_ptr();
-            let actual_len = data.len().min(buf_cap); // TODO: ??? truncate ???
-            unsafe {
-                core::ptr::copy_nonoverlapping(kbuf_ptr, buf_ptr, actual_len);
+
+        context.with_user_vmem(|| {
+            if let Some(data) = message.data {
+                // TODO: validate memory region
+                let buf_ptr = buf_ptr as *mut u8;
+                let kbuf_ptr = data.as_ptr();
+                let actual_len = data.len().min(buf_cap); // TODO: ??? truncate ???
+                unsafe {
+                    core::ptr::copy_nonoverlapping(kbuf_ptr, buf_ptr, actual_len);
+                }
+                data_len = data.len();
             }
-            data_len = data.len();
-        }
 
-        let msg_ptr = msg_ptr as *mut UserMessage;
-        assert!(msg_ptr.is_aligned()); // TODO: check user access validity
-        unsafe { core::ptr::write(msg_ptr, user_message) };
+            let msg_ptr = msg_ptr as *mut UserMessage;
+            assert!(msg_ptr.is_aligned()); // TODO: check user access validity
+            unsafe { core::ptr::write(msg_ptr, user_message) };
+        });
 
-        [data_len]
+        context.regs().regs[0] = data_len;
+        context.resume_final()
     })
 }

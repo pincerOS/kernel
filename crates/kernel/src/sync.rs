@@ -1,6 +1,7 @@
-pub mod barrier;
+mod barrier;
 pub mod blocking_lock;
-pub mod condvar;
+mod condvar;
+pub mod handler_table;
 pub mod init;
 pub mod lock;
 pub mod per_core;
@@ -10,7 +11,8 @@ pub use crate::arch::interrupts;
 
 pub use barrier::Barrier;
 pub use blocking_lock::{BlockingLock, BlockingLockGuard};
-pub use condvar::CondVar;
+pub use condvar::Condvar;
+pub use handler_table::HandlerTableInner;
 pub use init::UnsafeInit;
 pub use interrupts::{disable_interrupts, enable_interrupts, restore_interrupts, InterruptsState};
 pub use lock::{InterruptSpinLock, InterruptSpinLockGuard, InterruptSpinLockInner};

@@ -3,20 +3,18 @@ use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::ptr::copy_nonoverlapping;
 
-use crate::context::{deschedule_thread, Context, DescheduleAction, CORES};
-use crate::{event, shutdown, thread};
+use crate::event::context::{deschedule_thread, Context, DescheduleAction, CORES};
+use crate::{event, event::thread, shutdown};
 
 pub unsafe fn sys_shutdown(_ctx: &mut Context) -> *mut Context {
     shutdown();
 }
 
 pub unsafe fn sys_exit(ctx: &mut Context) -> *mut Context {
-    let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
+    let thread = CORES.with_current(|core| core.thread.take());
     let mut thread = thread.expect("usermode syscall without active thread");
     unsafe { thread.save_context(ctx.into()) };
-
-    let action = DescheduleAction::FreeThread;
-    unsafe { deschedule_thread(core_sp, Some(thread), action) }
+    unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
 }
 
 pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {

@@ -1,21 +1,13 @@
-pub trait ConstInit {
-    const INIT: Self;
-}
+const CORES: usize = 4;
 
 #[repr(align(64))]
 struct PerCoreInner<T>(core::cell::RefCell<T>);
 
-pub struct PerCore<T>([PerCoreInner<T>; 4]);
+pub struct PerCore<T>([PerCoreInner<T>; CORES]);
 
-impl<T> PerCore<T>
-where
-    T: ConstInit,
-{
-    #[allow(clippy::declare_interior_mutable_const)]
-    const INIT_INNER: PerCoreInner<T> = PerCoreInner(core::cell::RefCell::new(ConstInit::INIT));
-
+impl<T: ConstInit> PerCore<T> {
     pub const fn new() -> Self {
-        Self([Self::INIT_INNER; 4])
+        Self([const { PerCoreInner(core::cell::RefCell::new(ConstInit::INIT)) }; CORES])
     }
 
     pub fn with_current<F, O>(&self, f: F) -> O
@@ -33,3 +25,7 @@ where
 }
 
 unsafe impl<T> Sync for PerCore<T> where T: Send {}
+
+pub trait ConstInit {
+    const INIT: Self;
+}

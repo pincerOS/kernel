@@ -5,24 +5,24 @@ use core::pin::Pin;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
-use crate::event::SCHEDULER;
+use super::SCHEDULER;
 use crate::sync::SpinLock;
 
-pub fn spawn_async(future: impl Future<Output = ()> + Send + Sync + 'static) {
+pub fn spawn_async(future: impl Future<Output = ()> + Send + 'static) {
     let task = TASKS.add_task(Task {
         future: Box::pin(future),
     });
-    SCHEDULER.add_task(crate::event::Event::AsyncTask(task));
+    SCHEDULER.add_task(super::Event::AsyncTask(task));
 }
 
 pub static TASKS: TaskList = TaskList::new();
 
 pub struct Task {
-    future: Pin<Box<dyn Future<Output = ()> + Send + Sync>>,
+    future: Pin<Box<dyn Future<Output = ()> + Send>>,
 }
 
 impl Task {
-    pub fn new(future: Pin<Box<dyn Future<Output = ()> + Send + Sync>>) -> Self {
+    pub fn new(future: Pin<Box<dyn Future<Output = ()> + Send>>) -> Self {
         Task { future }
     }
     pub fn poll(&mut self, context: &mut Context) -> Poll<()> {
@@ -101,7 +101,7 @@ impl TaskList {
 pub struct TaskId(usize);
 
 fn wake_task(task: TaskId) {
-    SCHEDULER.add_task(crate::event::Event::AsyncTask(task));
+    SCHEDULER.add_task(super::Event::AsyncTask(task));
 }
 
 static WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(

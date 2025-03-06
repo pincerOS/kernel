@@ -4,7 +4,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use alloc::sync::Arc;
 
-use crate::sync::{CondVar, SpinLock};
+use crate::sync::{Condvar, SpinLock};
 
 pub struct RingBuffer<const N: usize, T> {
     // TODO: put head and tail in separate cache lines?
@@ -102,7 +102,7 @@ pub fn channel<const N: usize, T>() -> (Sender<N, T>, Receiver<N, T>) {
     let inner = Arc::new(ChannelInner {
         buf: RingBuffer::new(),
         len: SpinLock::new(0),
-        cond: CondVar::new(),
+        cond: Condvar::new(),
     });
     let inner2 = Arc::clone(&inner);
     (Sender { inner: inner2 }, Receiver { inner })
@@ -114,7 +114,7 @@ unsafe impl<const N: usize, T: Send> Sync for ChannelInner<N, T> {}
 struct ChannelInner<const N: usize, T> {
     buf: RingBuffer<N, T>,
     len: SpinLock<usize>,
-    cond: CondVar,
+    cond: Condvar,
 }
 
 pub struct Sender<const N: usize, T> {
@@ -140,12 +140,12 @@ impl<const N: usize, T> Sender<N, T> {
         res
     }
 
-    pub async fn send_async(&mut self, event: T) {
+    pub async fn send(&mut self, event: T) {
         let mut guard = self.inner.len.lock();
         guard = self
             .inner
             .cond
-            .wait_while_async(guard, |len| *len == (N - 1))
+            .wait_while(guard, |len| *len == (N - 1))
             .await;
 
         let res = unsafe { self.inner.buf.try_send(event) };
@@ -176,13 +176,9 @@ impl<const N: usize, T> Receiver<N, T> {
         res
     }
 
-    pub async fn recv_async(&mut self) -> T {
+    pub async fn recv(&mut self) -> T {
         let mut guard = self.inner.len.lock();
-        guard = self
-            .inner
-            .cond
-            .wait_while_async(guard, |len| *len == 0)
-            .await;
+        guard = self.inner.cond.wait_while(guard, |len| *len == 0).await;
 
         let res = unsafe { self.inner.buf.try_recv() };
         let res = res.unwrap();
