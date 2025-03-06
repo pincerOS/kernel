@@ -18,8 +18,6 @@ static WORLD_CHARS: [u8; 5] = *b"world";
 #[repr(C, align(4096))]
 struct SomePage([u8; 4096]);
 
-static INIT_CODE: &[u8] = kernel::util::include_bytes_align!(u32, "../../init/init.bin");
-
 #[no_mangle]
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
@@ -27,7 +25,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     unsafe { syscall::register_syscalls() };
     unsafe { crate::arch::memory::init_physical_alloc() };
 
-    let (_stdio, mut stdin_tx, mut stdout_rx) = {
+    let (_stdio, _stdin_tx, _stdout_rx) = {
         let (stdin_tx, stdin_rx) = ringbuffer::channel();
         let (stdout_tx, stdout_rx) = ringbuffer::channel();
         let stdio_chan = syscall::channel::alloc_obj(syscall::channel::Object::Channel {
