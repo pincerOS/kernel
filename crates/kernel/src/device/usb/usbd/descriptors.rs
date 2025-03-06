@@ -12,8 +12,9 @@
 ******************************************************************************/
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub enum DescriptorType {
+    #[default]
     Device = 1,
     Configuration = 2,
     String = 3,
@@ -36,10 +37,11 @@ pub struct UsbDescriptorHeader {
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub enum DeviceClass {
     DeviceClassInInterface = 0x00,
     DeviceClassCommunications = 0x2,
+    #[default]
     DeviceClassHub = 0x9,
     DeviceClassDiagnostic = 0xdc,
     DeviceClassMiscellaneous = 0xef,
@@ -47,7 +49,7 @@ pub enum DeviceClass {
 }
 
 #[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct UsbDeviceDescriptor {
     pub descriptor_length: u8,
     pub descriptor_type: DescriptorType,
@@ -80,7 +82,7 @@ pub struct UsbDeviceQualifierDescriptor {
 }
 
 #[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct UsbConfigurationDescriptor {
     pub descriptor_length: u8,
     pub descriptor_type: DescriptorType,
@@ -93,13 +95,13 @@ pub struct UsbConfigurationDescriptor {
 }
 
 #[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct UsbConfigurationAttributes {
     pub attributes: u8,
 }
 
 #[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct UsbInterfaceDescriptor {
     pub descriptor_length: u8,
     pub descriptor_type: DescriptorType,
@@ -113,8 +115,9 @@ pub struct UsbInterfaceDescriptor {
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InterfaceClass {
+    #[default]
     InterfaceClassReserved = 0x00,
     InterfaceClassAudio = 0x01,
     InterfaceClassCommunications = 0x02,
@@ -137,7 +140,37 @@ pub enum InterfaceClass {
     InterfaceClassVendorSpecific = 0xFF,
 }
 
+impl InterfaceClass {
+    pub fn interface_class_to_num(ints: InterfaceClass) -> u8{
+        match ints {
+            InterfaceClass::InterfaceClassReserved => 0x00,
+            InterfaceClass::InterfaceClassAudio => 0x01,
+            InterfaceClass::InterfaceClassCommunications => 0x02,
+            InterfaceClass::InterfaceClassHid => 0x03,
+            InterfaceClass::InterfaceClassPhysical => 0x05,
+            InterfaceClass::InterfaceClassImage => 0x06,
+            InterfaceClass::InterfaceClassPrinter => 0x07,
+            InterfaceClass::InterfaceClassMassStorage => 0x08,
+            InterfaceClass::InterfaceClassHub => 0x09,
+            InterfaceClass::InterfaceClassCdcData => 0x0A,
+            InterfaceClass::InterfaceClassSmartCard => 0x0B,
+            InterfaceClass::InterfaceClassContentSecurity => 0x0D,
+            InterfaceClass::InterfaceClassVideo => 0x0E,
+            InterfaceClass::InterfaceClassPersonalHealthcare => 0x0F,
+            InterfaceClass::InterfaceClassAudioVideo => 0x10,
+            InterfaceClass::InterfaceClassDiagnosticDevice => 0xDC,
+            InterfaceClass::InterfaceClassWirelessController => 0xE0,
+            InterfaceClass::InterfaceClassMiscellaneous => 0xEF,
+            InterfaceClass::InterfaceClassApplicationSpecific => 0xFE,
+            InterfaceClass::InterfaceClassVendorSpecific => 0xFF,
+        }
+    }
+}
+
+
+
 #[repr(C, packed)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct UsbEndpointDescriptor {
     pub descriptor_length: u8,
     pub descriptor_type: DescriptorType,
@@ -148,6 +181,7 @@ pub struct UsbEndpointDescriptor {
 }
 
 #[repr(C, packed)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct UsbEndpointAddress {
     //typedef enum {
     // 	HostToDevice = 0,
@@ -165,6 +199,7 @@ pub struct UsbEndpointAddress {
 }
 
 #[repr(C, packed)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct UsbEndpointAttributes {
     // typedef enum {
     //     Control = 0,
@@ -192,6 +227,7 @@ pub struct UsbEndpointAttributes {
 }
 
 #[repr(C)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct UsbPacket {
     //struct {
     // 	unsigned MaxSize : 11; // @0

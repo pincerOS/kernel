@@ -50,9 +50,10 @@ pub enum ResultCode {
 /// Many and various parts of the USB standard use this 1-bit field to indicate
 /// in which direction information flows.
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum UsbDirection {
     // HostToDevice = 0,
+    #[default]
     Out = 0,
     // DeviceToHost = 1,
     In = 1,
@@ -86,8 +87,9 @@ impl UsbSpeed {
 /// Many and various parts of the USB standard use this 2-bit field to indicate
 /// the type of transaction to use.
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum UsbTransfer {
+    #[default]
     Control = 0,
     Isochronous = 1,
     Bulk = 2,
@@ -120,7 +122,7 @@ pub const fn size_from_number(size: u32) -> UsbPacketSize {
 }
 
 /// Converts `UsbPacketSize` to its numeric representation.
-pub fn size_to_number(packet_size: UsbPacketSize) -> u32 {
+pub fn size_to_number(packet_size: UsbPacketSize) -> u16 {
     match packet_size {
         UsbPacketSize::Bits8 => 8,
         UsbPacketSize::Bits16 => 16,

@@ -34,18 +34,18 @@ pub struct UsbPipeAddress {
     pub device: u8,                 // 8 bits @8
     pub transfer_type: UsbTransfer, // 2 bits @16
     pub direction: UsbDirection,    // 1 bit @18
-    pub _reserved: u16,                 // 13 bits @19 (fits within 16 bits)
+    pub _reserved: u16,             // 13 bits @19 (fits within 16 bits)
 }
 
-// Ensure the enums match the bit widths correctly
-#[repr(u8)]
-#[derive(Debug, Copy, Clone)]
-pub enum UsbPacketSize {
-    Size8 = 0,
-    Size16 = 1,
-    Size32 = 2,
-    Size64 = 3,
-}
+// // Ensure the enums match the bit widths correctly
+// #[repr(u8)]
+// #[derive(Debug, Copy, Clone)]
+// pub enum UsbPacketSize {
+//     Size8 = 0,
+//     Size16 = 1,
+//     Size32 = 2,
+//     Size64 = 3,
+// }
 
 // #[repr(u8)]
 // #[derive(Debug, Copy, Clone)]
@@ -65,9 +65,9 @@ pub enum UsbPacketSize {
 //     Interrupt = 3,
 // }
 
-#[repr(u8)]
-#[derive(Debug, Copy, Clone)]
-pub enum UsbDirection {
-    Out = 0,
-    In = 1,
-}
+// #[repr(u8)]
+// #[derive(Debug, Copy, Clone)]
+// pub enum UsbDirection {
+//     Out = 0,
+//     In = 1,
+// }

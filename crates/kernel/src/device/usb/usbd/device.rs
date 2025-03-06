@@ -79,22 +79,23 @@ pub struct UsbDevice {
     pub device_deallocate: Option<fn(&mut UsbDevice)>,
     pub device_check_for_change: Option<fn(&mut UsbDevice)>,
     pub device_child_detached: Option<fn(&mut UsbDevice, &mut UsbDevice)>,
-    pub device_child_reset: Option<fn(&mut UsbDevice, &mut UsbDevice) -> Result<(), ()>>,
-    pub device_check_connection: Option<fn(&mut UsbDevice, &mut UsbDevice) -> Result<(), ()>>,
+    pub device_child_reset: Option<fn(&mut UsbDevice, &mut UsbDevice) -> ResultCode>,
+    pub device_check_connection: Option<fn(&mut UsbDevice, &mut UsbDevice) -> ResultCode>,
 
-    pub descriptor: Option<UsbDeviceDescriptor>,
-    pub configuration: Option<UsbConfigurationDescriptor>,
-    pub interfaces: [Option<UsbInterfaceDescriptor>; MAX_INTERFACES_PER_DEVICE],
+    pub descriptor: UsbDeviceDescriptor,
+    pub configuration: UsbConfigurationDescriptor,
+    pub interfaces: [UsbInterfaceDescriptor; MAX_INTERFACES_PER_DEVICE],
     pub endpoints:
-        [[Option<UsbEndpointDescriptor>; MAX_ENDPOINTS_PER_DEVICE]; MAX_INTERFACES_PER_DEVICE],
+        [[UsbEndpointDescriptor; MAX_ENDPOINTS_PER_DEVICE]; MAX_INTERFACES_PER_DEVICE],
     pub parent: Option<*mut UsbDevice>,
     pub full_configuration: Option<*mut u8>,
     pub driver_data: Option<*mut UsbDriverDataHeader>,
+    pub soft_sc: *mut (),
     pub last_transfer: u32,
 }
 
 impl UsbDevice {
-    pub fn new(num: u32) -> Self {
+    pub fn new(bus: &mut UsbBus, num: u32) -> Self {
         Self {
             number: num,
             speed: UsbSpeed::Full,
@@ -111,12 +112,13 @@ impl UsbDevice {
             device_child_reset: None,
             device_check_connection: None,
 
-            descriptor: None,
-            configuration: None,
-            interfaces: [None; MAX_INTERFACES_PER_DEVICE],
-            endpoints: core::array::from_fn(|_| core::array::from_fn(|_| None)),
+            descriptor: UsbDeviceDescriptor::default(),
+            configuration: UsbConfigurationDescriptor::default(),
+            interfaces: [UsbInterfaceDescriptor::default(); MAX_INTERFACES_PER_DEVICE],
+            endpoints: core::array::from_fn(|_| core::array::from_fn(|_| UsbEndpointDescriptor::default())),
             full_configuration: None,
             driver_data: None,
+            soft_sc: bus.dwc_sc.as_mut() as *mut dwc_hub as *mut (),
             last_transfer: 0,
         }
     }
@@ -133,5 +135,5 @@ pub struct UsbBus {
     pub interface_class_attach: [Option<
         fn(device: &mut UsbDevice, interface_number: u32) -> ResultCode,
     >; INTERFACE_CLASS_ATTACH_COUNT],
-    pub dwc_sc: dwc_hub,
+    pub dwc_sc: Box<dwc_hub>,
 }

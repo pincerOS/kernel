@@ -63,14 +63,14 @@ impl Default for UsbDeviceRequestRequest {
 
 impl UsbDeviceRequest {
     pub fn new(
-        type_: u8,
+        request_type: u8,
         request: UsbDeviceRequestRequest,
         value: u16,
         index: u16,
         length: u16,
     ) -> Self {
         Self {
-            type_,
+            request_type,
             request,
             value,
             index,
