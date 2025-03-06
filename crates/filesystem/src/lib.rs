@@ -334,12 +334,39 @@ where
         Ok(())
     }
 
+    fn read_logical_blocks_inner(device: &mut D,
+                                 superblock: &Superblock,
+                                 logical_block_start: usize,
+                                 buffer: &mut [u8]) -> Result<(), Ext2Error> {
+        assert_eq!(buffer.len() % superblock.get_block_size(), 0);
+
+        for i in 0..(buffer.len()  / superblock.get_block_size()) {
+            Self::read_logical_block_inner(device, superblock, logical_block_start,
+                                           &mut buffer[i * superblock.get_block_size()..(i+1) * superblock.get_block_size()])?;
+        }
+
+        Ok(())
+    }
+
     pub fn read_logical_block(
         &mut self,
         logical_block_start: usize,
         buffer: &mut [u8],
     ) -> Result<(), Ext2Error> {
         Self::read_logical_block_inner(
+            &mut self.device,
+            &self.superblock,
+            logical_block_start,
+            buffer,
+        )
+    }
+
+    pub fn read_logical_blocks(
+        &mut self,
+        logical_block_start: usize,
+        buffer: &mut [u8],
+    ) -> Result<(), Ext2Error> {
+        Self::read_logical_blocks_inner(
             &mut self.device,
             &self.superblock,
             logical_block_start,
@@ -367,7 +394,7 @@ where
 
         let mut block_buffer: Vec<u8> = vec![0; superblock.get_block_size()];
 
-        Self::read_logical_block_inner(
+        Self::read_logical_blocks_inner(
             device,
             superblock,
             inode_table_block_with_offset,
@@ -434,7 +461,7 @@ where
             )
         };
 
-        Self::read_logical_block_inner(
+        Self::read_logical_blocks_inner(
             &mut device,
             &superblock,
             block_group_descriptor_block,
