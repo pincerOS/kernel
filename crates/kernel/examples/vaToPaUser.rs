@@ -26,8 +26,6 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     unsafe { syscall::register_syscalls() };
     unsafe { crate::arch::memory::init_physical_alloc() };
 
-    //unsafe { crate::arch::memory::init_page_allocator()  };
-
     let (_stdio, mut stdin_tx, mut stdout_rx) = {
         let (stdin_tx, stdin_rx) = ringbuffer::channel();
         let (stdout_tx, stdout_rx) = ringbuffer::channel();

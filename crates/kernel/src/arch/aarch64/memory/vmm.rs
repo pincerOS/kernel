@@ -81,7 +81,7 @@ static PHYSICAL_ALLOC_BASE: AtomicUsize = AtomicUsize::new(0);
 //Logic for current frame allocator:
 //va to pa: va - page allocator va + page allocator pa
 //pa to va: pa - page allocator pa + page allocator va
-pub unsafe fn init_page_allocator() {
+unsafe fn init_page_allocator() {
     //TODO: look to see if this creates an extra copy
     let data_box = Box::<BigTable>::new(BigTable([0; PG_SZ * 1000]));
     let data_ptr: *const BigTable = Box::into_raw(data_box);
