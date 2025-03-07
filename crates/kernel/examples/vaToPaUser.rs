@@ -22,18 +22,7 @@ struct SomePage([u8; 4096]);
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
 
-    unsafe { syscall::register_syscalls() };
     unsafe { crate::arch::memory::init_physical_alloc() };
-
-    let (_stdio, _stdin_tx, _stdout_rx) = {
-        let (stdin_tx, stdin_rx) = ringbuffer::channel();
-        let (stdout_tx, stdout_rx) = ringbuffer::channel();
-        let stdio_chan = syscall::channel::alloc_obj(syscall::channel::Object::Channel {
-            send: stdout_tx,
-            recv: stdin_rx,
-        });
-        (stdio_chan, stdin_tx, stdout_rx)
-    };
 
     // Create user region (mapped at 0x20_0000 in virtual memory)
     let (user_region, ttbr0) = unsafe { crate::arch::memory::create_user_region() };
@@ -132,6 +121,4 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     }
 
     println!("Done with basic pa to va user mapping test!");
-
-    //thread::stop();
 }

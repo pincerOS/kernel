@@ -1,18 +1,17 @@
-use core::sync::atomic::{AtomicUsize, Ordering};
+use crate::sync::UnsafeInit;
+use alloc::boxed::Box;
 use core::{
     arch::asm,
     fmt::{Display, Formatter},
+    mem::MaybeUninit,
     ptr::{self, addr_of, NonNull},
+    sync::atomic::{AtomicUsize, Ordering},
 };
-
-use crate::sync::UnsafeInit;
 
 use super::{
     machine::{LeafDescriptor, TableDescriptor, TranslationDescriptor},
     physical_addr,
 };
-
-use alloc::boxed::Box;
 
 const PG_SZ: usize = 0x1000;
 const KERNEL_LEAF_TABLE_SIZE: usize = PG_SZ / 8 * 2;
@@ -26,7 +25,7 @@ struct KernelLeafTable([LeafDescriptor; KERNEL_LEAF_TABLE_SIZE]);
 const USER_PG_SZ: usize = 0x1000;
 const USER_LEAF_TABLE_SIZE: usize = USER_PG_SZ / 8 * 2;
 
-//Can make this pub so that it can be stored in PCB?
+//This is public so that it can be placed in the PCB later
 #[repr(C, align(128))]
 pub struct UserTranslationTable([TranslationDescriptor; 16]);
 
@@ -40,17 +39,17 @@ fn virt_addr_base() -> NonNull<()> {
 
 #[allow(improper_ctypes)]
 extern "C" {
-    //static __rpi_virt_binary_end_addr: ();
-    static __rpi_phys_binary_end_addr: (); // physical base of heap
+    static __rpi_phys_binary_end_addr: ();
 }
-
-//TOOD: maybe remove this later
-//static HEAP_BASE_VIRT: usize = __rpi_phys_binary_end_addr + 0xFFFF_FFFF_FE00_0000;
 
 //1000 pages
 #[repr(C, align(4096))]
 struct BigTable([u8; PG_SZ * 1000]);
 
+//Logic for current frame allocator:
+//va to pa: va - page allocator va + page allocator pa
+//pa to va: pa - page allocator pa + page allocator va
+//This is the logic for the current intermediate page allocator
 struct PageAlloc {
     table_va: usize,
     table_pa: usize,
@@ -66,7 +65,9 @@ impl PageAlloc {
         }
     }
 
-    //TODO: add an error here if the va is equal to PG_SZ * 1000
+    /// Allocates a page of memory to be used for page tables
+    /// Returns a tuple, where the first value is the virtual address of the page and the second is
+    /// the physical address of the page
     fn alloc_frame(&self) -> (usize, usize) {
         let va: usize = self.table_va + self.alloc_offset.fetch_add(PG_SZ, Ordering::Relaxed);
         let pa: usize = va - self.table_va + self.table_pa;
@@ -74,18 +75,18 @@ impl PageAlloc {
     }
 }
 
+unsafe fn kernel_paddr_to_vaddr(paddr: usize) -> *mut () {
+    return (paddr + (virt_addr_base().as_ptr() as usize)) as *mut ();
+}
+
 static PAGE_ALLOCATOR: UnsafeInit<PageAlloc> = unsafe { UnsafeInit::uninit() };
 
 static PHYSICAL_ALLOC_BASE: AtomicUsize = AtomicUsize::new(0);
 
-//Logic for current frame allocator:
-//va to pa: va - page allocator va + page allocator pa
-//pa to va: pa - page allocator pa + page allocator va
 unsafe fn init_page_allocator() {
-    //TODO: look to see if this creates an extra copy
-    let data_box = Box::<BigTable>::new(BigTable([0; PG_SZ * 1000]));
-    let data_ptr: *const BigTable = Box::into_raw(data_box);
-
+    let mut data_box: Box<MaybeUninit<BigTable>> = Box::new_uninit();
+    unsafe { core::ptr::write_bytes(data_box.as_mut_ptr(), 0, 1) }; // zero the region
+    let data_ptr: *const BigTable = Box::into_raw(data_box).cast::<BigTable>();
     unsafe { PAGE_ALLOCATOR.init(PageAlloc::new(data_ptr)) };
 }
 
@@ -94,7 +95,6 @@ pub unsafe fn init_physical_alloc() {
     let base = 0x20_0000 * 16;
     PHYSICAL_ALLOC_BASE.store(base, Ordering::SeqCst);
 
-    //Maybe there's a better place to put this
     unsafe { init_page_allocator() };
 }
 
@@ -258,11 +258,11 @@ pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> Result<(), MappingErr
 
 //TODO: add option to map huge page
 //TODO: add option to pass in flags
+//TODO: in the future, change this to take in a mutable reference to the user translation table
+//instead of just ttrb0
 pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result<(), MappingError> {
-    //I hope that there is a less terrible way of doing this
-    let translation_table: &mut UserTranslationTable = unsafe {
-        &mut (*((ttbr0_pa + (virt_addr_base().as_ptr() as usize)) as *mut UserTranslationTable))
-    };
+    let translation_table: &mut UserTranslationTable =
+        unsafe { &mut *kernel_paddr_to_vaddr(ttbr0_pa).cast::<UserTranslationTable>() };
 
     //TODO: stop using these constants
     let mut index_bits = 25 - 21; //mildly redundant
