@@ -176,6 +176,11 @@ build example=example profile=profile target=target: _check-rust-version _check-
     set +x
     echo -e "{{green}}{{bold}}Build successful!{{reset}}"
 
+clean:
+    cargo clean
+    rm -f kernel.bin kernel.elf
+    rm -f uart2
+
 # Build with debug profile
 build-debug example=example target=target: (build example "dev" target)
 
