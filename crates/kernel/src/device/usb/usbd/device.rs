@@ -17,6 +17,7 @@ use alloc::boxed::Box;
 // use super::super::types::*;
 use super::super::hcd::dwc::dwc_otg::*;
 use super::super::types::{ResultCode, UsbSpeed};
+use alloc::vec::Vec;
 
 /// The maximum number of children a device could have,
 /// which is the maximum number of ports a hub supports.
@@ -58,7 +59,7 @@ pub enum UsbTransferError {
 
 /// Start of a device-specific data field.
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Default, Debug, Copy, Clone)]
 pub struct UsbDriverDataHeader {
     pub device_driver: u32,
     pub data_size: u32,
@@ -88,8 +89,8 @@ pub struct UsbDevice {
     pub endpoints:
         [[UsbEndpointDescriptor; MAX_ENDPOINTS_PER_DEVICE]; MAX_INTERFACES_PER_DEVICE],
     pub parent: Option<*mut UsbDevice>,
-    pub full_configuration: Option<*mut u8>,
-    pub driver_data: Option<*mut u8>,
+    pub full_configuration: Option<Box<[u8]>>, //TODO: the setupfor this is probably very bad
+    pub driver_data: Option<Box<[u8]>>, //TODO: the setupfor this is probably very bad
     pub soft_sc: *mut (),
     pub bus: *mut UsbBus,
     pub last_transfer: u32,
@@ -137,5 +138,6 @@ pub struct UsbBus {
     pub interface_class_attach: [Option<
         fn(device: &mut UsbDevice, interface_number: u32) -> ResultCode,
     >; INTERFACE_CLASS_ATTACH_COUNT],
+    pub roothub_device_number: u32,
     pub dwc_sc: Box<dwc_hub>,
 }

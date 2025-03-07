@@ -13,6 +13,7 @@ pub fn usb_init(base_addr: *mut ()) -> UsbBus {
     let mut bus = UsbBus {
         devices: core::array::from_fn(|_| const { None }),
         interface_class_attach: [None; INTERFACE_CLASS_ATTACH_COUNT],
+        roothub_device_number: 0,
         dwc_sc: Box::new(dwc_hub::new()),
     };
     // usbd::UsbLoad(&mut bus);

@@ -28,8 +28,6 @@ use core::cmp::min;
 use core::mem::size_of;
 use core::ptr::copy;
 
-pub const RootHubDeviceNumber: usize = 0;
-
 pub fn memory_copy(dest: *mut u8, src: *const u8, len: usize) {
     if len == 0 {
         return;
@@ -305,10 +303,8 @@ pub fn HcdProcessRootHubMessage(
         UsbDeviceRequestRequest::SetAddress => {
             reply_length = 0;
             let address = request.value as u32;
-            if address != 0 {
-                println!("| HCD.Hub: Set Address Roothub Error. {}", address);
-                result = ResultCode::ErrorArgument;
-            }
+            let mut bus = unsafe { &mut (*device.bus) };
+            bus.roothub_device_number = address;
         }
         UsbDeviceRequestRequest::GetDescriptor => {
             match request.request_type {

@@ -26,6 +26,7 @@ use crate::device::mailbox;
 use crate::device::mailbox::PropSetPowerState;
 use crate::device::system_timer::micro_delay;
 use crate::memory;
+use crate::shutdown;
 
 pub const ChannelCount: usize = 16;
 
@@ -398,6 +399,7 @@ pub fn HcdChannelSendWaitOne(
                 //     *((request as *const u8).offset(7)),
                 // );
                 println!("HCD: Request to failed.\n");
+                // shutdown();
                 return ResultCode::ErrorRetry;
             }
         }
@@ -468,11 +470,13 @@ fn HcdChannelSendWait(
         // This variable will hold the previous packet count.
         let mut packets: u32;
 
+        let mut result;
+
         loop {
             // Read current packet count.
             // packets = Host.Channel[channel as usize].TransferSize.PacketCount;
             packets = dwc_sc.channel[channel as usize].transfer_size.PacketCount;
-            let result = HcdChannelSendWaitOne(
+            result = HcdChannelSendWaitOne(
                 device,
                 pipe,
                 channel,
@@ -484,10 +488,12 @@ fn HcdChannelSendWait(
             if result != ResultCode::OK {
                 if result == ResultCode::ErrorRetry {
                     // Restart the entire process on ErrorRetry.
-                    continue;
+                    println!("| HCD: Retrying to packet.\n");
+                    break;
                 }
                 return result;
             }
+
 
             // Update the transfer progress.
             let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
@@ -496,12 +502,20 @@ fn HcdChannelSendWait(
             transfer = buffer_length - dwc_sc.channel[channel as usize].transfer_size.TransferSize;
             // If the packet count hasn’t changed, break out of the loop.
             if packets == dwc_sc.channel[channel as usize].transfer_size.PacketCount {
+                println!("HCD: Transfer to packet got stuck.\n");
                 break;
             }
             // Continue looping if there are still packets in progress.
             if dwc_sc.channel[channel as usize].transfer_size.PacketCount == 0 {
+                println!("HCD: Transfer to packet completed.\n");
                 break;
             }
+        }
+
+        println!("| HCD result: {:#?}\n", result);
+        if result == ResultCode::ErrorRetry {
+            println!("| HCD: Retrying to packet.\n");
+            continue;
         }
 
         // Check for a stuck transfer.
@@ -525,9 +539,13 @@ pub fn HcdSubmitControlMessage(
     buffer_length: u32,
     request: &mut UsbDeviceRequest,
 ) -> ResultCode {
-    if pipe.device == RootHubDeviceNumber as u8 {
+
+    let roothub_device_number = unsafe { (*device.bus).roothub_device_number };
+    if pipe.device == roothub_device_number as u8 {
         return HcdProcessRootHubMessage(device, pipe, buffer, buffer_length, request);
     }
+
+    println!("| HCD: Sending control message to device.\n");
     let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
 
     device.error = UsbTransferError::Processing;
@@ -844,6 +862,12 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     hcfg |= HCFG_FSLSSUPP; //Sets speed for FS/LS devices, no HS devices
     write_volatile(DOTG_HCFG, hcfg);
 
+
+    let h_dmaen = hcfg & (1 << 23);
+    let cfg4 = read_volatile(DOTG_GHWCFG4);
+    let c_dmad = cfg4 & cfg4 & (1 << 31);
+    let gsnpsid = read_volatile(DOTG_GSNPSID);
+    println!("| HCD: DMA enabled: {}, DMA description: {}, GSNPSID: {:#x}", h_dmaen, c_dmad, gsnpsid & 0xfff);
     // if (Host->Config.EnableDmaDescriptor ==
     // 	Core->Hardware.DmaDescription &&
     // 	(Core->VendorId & 0xfff) >= 0x90a) {

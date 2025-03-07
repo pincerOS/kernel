@@ -15,7 +15,7 @@
 use crate::device::system_timer::micro_delay;
 use crate::device::usb::hcd::dwc::dwc_otg::*;
 use crate::device::usb::hcd::dwc::roothub::memory_copy;
-use crate::device::usb::hcd::dwc::roothub::RootHubDeviceNumber;
+
 use alloc::boxed::Box;
 use alloc::vec;
 
@@ -322,7 +322,7 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
 		// return ErrorMemory;
     let config_total_length = device.configuration.total_length;
     println!("| USBD: Configuration descriptor length: {}", config_total_length);
-    let mut fullDescriptor_vec = vec![0; config_total_length as usize];
+    let mut fullDescriptor_vec = vec![0; config_total_length as usize].into_boxed_slice();
     let mut fullDescriptor = fullDescriptor_vec.as_mut_ptr() as *mut u8;
 
     result = UsbGetDescriptor(device, DescriptorType::Configuration, configuration, 0, fullDescriptor, device.configuration.total_length as u32, device.configuration.total_length as u32, 0);
@@ -381,7 +381,7 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         return result;
     }
 
-    device.full_configuration = Some(fullDescriptor);
+    device.full_configuration = Some(fullDescriptor_vec);
 
     return ResultCode::OK;
 }
@@ -467,7 +467,7 @@ pub fn UsbAllocateDevice(devices: &mut Box<UsbDevice>) -> ResultCode {
     for number in 0..MaximumDevices {
         if bus.devices[number].is_none() {
             println!("| USBD: Allocating device {}", number);
-            device.number = number as u32;
+            device.number = number as u32 + 1;
             bus.devices[number] = Some(devices);
             break;
         }
@@ -478,7 +478,7 @@ pub fn UsbAllocateDevice(devices: &mut Box<UsbDevice>) -> ResultCode {
 
 fn UsbAttachRootHub(bus: &mut UsbBus) -> ResultCode {
     println!("| USBD: Attaching root hub");
-    if bus.devices[RootHubDeviceNumber].is_some() {
+    if bus.devices[0].is_some() {
         println!("Error: Root hub already attached");
         return ResultCode::ErrorDevice;
     }
@@ -490,9 +490,9 @@ fn UsbAttachRootHub(bus: &mut UsbBus) -> ResultCode {
         return ResultCode::ErrorMemory;
     }
 
-    unsafe { (*bus.devices[RootHubDeviceNumber].unwrap()).status = UsbDeviceStatus::Powered };
+    unsafe { (*bus.devices[0].unwrap()).status = UsbDeviceStatus::Powered };
 
-    return UsbAttachDevice(unsafe {&mut (*bus.devices[RootHubDeviceNumber].unwrap()) });
+    return UsbAttachDevice(unsafe {&mut (*bus.devices[0].unwrap()) });
 }
 
 

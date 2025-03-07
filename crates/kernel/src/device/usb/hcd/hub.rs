@@ -12,6 +12,7 @@ use crate::device::usb::usbd::descriptors::DescriptorType;
 use crate::device::usb::UsbDriverDataHeader;
 use crate::device::usb::*;
 
+use alloc::vec::Vec;
 use bitflags::bitflags;
 
 /**
@@ -20,6 +21,7 @@ use bitflags::bitflags;
     11.23.2.1.
 */
 #[repr(C, packed)]
+#[derive(Default)]
 pub struct HubDescriptor {
     pub DescriptorLength: u8,           // +0x0
     pub DescriptorType: DescriptorType, // +0x1
@@ -47,6 +49,7 @@ pub struct HubDescriptor {
     standard.
 */
 #[repr(C, packed)]
+#[derive(Default)]
 pub struct HubStatus {
     pub _bitfield: u16,
 }
@@ -57,6 +60,7 @@ pub struct HubStatus {
     standard.
 */
 #[repr(C, packed)]
+#[derive(Default)]
 pub struct HubStatusChange {
     pub _bitfield: u16,
 }
@@ -66,6 +70,7 @@ pub struct HubStatusChange {
     The hub status structure defined in 11.24.2.6 of the USB2.0 standard.
 */
 #[repr(C, packed)]
+#[derive(Default)]
 pub struct HubFullStatus {
     pub Status: HubStatus,
     pub Change: HubStatusChange,
@@ -78,7 +83,7 @@ bitflags! {
     The hub port status structure defined in 11.24.2.7.1 of the USB2.0
     standard.
     */
-    #[derive(Clone, Copy)]
+    #[derive(Default, Clone, Copy)]
     pub struct HubPortStatus: u16 {
         const Connected = 1 << 0;
         const Enabled = 1 << 1;
@@ -97,7 +102,7 @@ bitflags! {
     The hub port status change structure defined in 11.24.2.7.2 of the USB2.0
     standard.
     */
-    #[derive(Clone, Copy)]
+    #[derive(Default, Clone, Copy)]
     pub struct HubPortStatusChange: u16 {
         const ConnectedChanged = 1 << 0;
         const EnabledChanged = 1 << 1;
@@ -113,6 +118,7 @@ bitflags! {
     The hub port status structure defined in 11.24.2.7 of the USB2.0 standard.
 */
 #[repr(C, packed)]
+#[derive(Default,Clone,  Copy)]
 pub struct HubPortFullStatus {
     pub Status: HubPortStatus,
     pub Change: HubPortStatusChange,
@@ -149,10 +155,25 @@ pub const DeviceDriverHub: u32 = 0x48554230;
 pub struct HubDevice {
     pub Header: UsbDriverDataHeader,
     pub Status: HubFullStatus,
-    pub Descriptor: *mut HubDescriptor,
+    // pub Descriptor: *mut HubDescriptor,
+    // pub Descriptor: Option<Box<[u8]>>,
+    pub Descriptor: Option<Box<HubDescriptor>>,
     pub MaxChildren: u32,
     pub PortStatus: [HubPortFullStatus; MAX_CHILDREN_PER_DEVICE],
     pub Children: [*mut UsbDevice; MAX_CHILDREN_PER_DEVICE],
+}
+
+impl HubDevice {
+    pub fn new() -> Self {
+        HubDevice {
+            Header: UsbDriverDataHeader::default(),
+            Status: HubFullStatus::default(),
+            Descriptor: None,
+            MaxChildren: 1,
+            PortStatus: [HubPortFullStatus::default(); MAX_CHILDREN_PER_DEVICE],
+            Children: [core::ptr::null_mut(); MAX_CHILDREN_PER_DEVICE]
+        }
+    }
 }
 
 /**
