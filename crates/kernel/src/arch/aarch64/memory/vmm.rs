@@ -182,6 +182,8 @@ pub enum MappingError {
     HugePagePresent,
     TableDescriptorPresent,
     LeafTableSpotTaken,
+    MemoryRangeCollision, //used with mmap
+    RequestedSizeUnavailable
 }
 
 impl Display for MappingError {
@@ -200,6 +202,8 @@ impl Display for MappingError {
                 f,
                 "The spot in the leaf table that is being mapped to is already taken"
             ),
+            Self::MemoryRangeCollison => write!(f, "A mapped memory range collides with this one"),
+            Self::RequestedSizeUnavailable => write!(f, "A memory range for the requested size is unavailable"),
         }
     }
 }
