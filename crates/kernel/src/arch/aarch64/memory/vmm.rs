@@ -22,7 +22,7 @@ struct KernelTranslationTable([TranslationDescriptor; 16]);
 #[repr(C, align(4096))]
 struct KernelLeafTable([LeafDescriptor; KERNEL_LEAF_TABLE_SIZE]);
 
-const USER_PG_SZ: usize = 0x1000;
+pub const USER_PG_SZ: usize = 0x1000;
 const USER_LEAF_TABLE_SIZE: usize = USER_PG_SZ / 8 * 2;
 
 //This is public so that it can be placed in the PCB later
@@ -79,7 +79,7 @@ unsafe fn kernel_paddr_to_vaddr(paddr: usize) -> *mut () {
     return (paddr + (virt_addr_base().as_ptr() as usize)) as *mut ();
 }
 
-static PAGE_ALLOCATOR: UnsafeInit<PageAlloc> = unsafe { UnsafeInit::uninit() };
+pub static PAGE_ALLOCATOR: UnsafeInit<PageAlloc> = unsafe { UnsafeInit::uninit() };
 
 static PHYSICAL_ALLOC_BASE: AtomicUsize = AtomicUsize::new(0);
 
