@@ -12,6 +12,8 @@
 *	across all systems, and in fact its implementation varies little either.
 ******************************************************************************/
 
+use core::ptr::read_volatile;
+
 use super::super::usbd::device::*;
 use super::super::usbd::descriptors::*;
 use super::super::usbd::usbd::*;
@@ -290,7 +292,9 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
         return result;
     }
     println!("Max5 children: {}", data.MaxChildren);
-    
+    use crate::device::usb::*;
+    let hprt = ReadHPRT();
+    println!("HPRT {:#x}", (hprt >> 17) & 3);
     
     let mut dev = Box::new(UsbDevice::new(device.bus, 0));
     println!("Max5.2 children: {}, Box address {:#x}", data.MaxChildren, dev.as_mut() as *mut UsbDevice as usize);
@@ -337,6 +341,8 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
 
 fn HubCheckConnection(device: &mut UsbDevice, port: u8) -> ResultCode {
     let mut data = unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
+    let prevHubStatus = data.PortStatus[port as usize].Status;
+    let prevConnected = prevHubStatus.contains(HubPortStatus::Connected);
     let mut result = HubPortGetStatus(device, port);
 
     println!("| HUB: HubCheckConnection for device {} port {}", device.number, port);
@@ -347,12 +353,19 @@ fn HubCheckConnection(device: &mut UsbDevice, port: u8) -> ResultCode {
     }
 
     let port_status = data.PortStatus[port as usize].Status;
-    let port_change = data.PortStatus[port as usize].Change;
+    let mut port_change = data.PortStatus[port as usize].Change;
 
     println!("| HUB: port_status: {:#x}", port_status);
     println!("| HUB: port_change: {:#x}", port_change);
 
     println!("Max children: {}", data.MaxChildren);
+
+    let mut port_changed_flag = false;
+    if device.number == 1 {
+        if prevConnected != port_status.contains(HubPortStatus::Connected) {
+            port_change.insert(HubPortStatusChange::ConnectedChanged);
+        }
+    }
 
     if port_change.contains(HubPortStatusChange::ConnectedChanged) {
         println!("| HUB: Port {} connected changed", port + 1);

@@ -59,6 +59,16 @@ pub enum UsbDirection {
     In = 1,
 }
 
+impl UsbDirection {
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            0 => UsbDirection::Out,
+            1 => UsbDirection::In,
+            _ => panic!("Invalid value for UsbDirection"),
+        }
+    }
+}
+
 /// Speed of USB communication.
 ///
 /// Many and various parts of the USB standard use this 2-bit field to indicate
@@ -94,6 +104,18 @@ pub enum UsbTransfer {
     Isochronous = 1,
     Bulk = 2,
     Interrupt = 3,
+}
+
+impl UsbTransfer {
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            0 => UsbTransfer::Control,
+            1 => UsbTransfer::Isochronous,
+            2 => UsbTransfer::Bulk,
+            3 => UsbTransfer::Interrupt,
+            _ => panic!("Invalid value for UsbTransfer"),
+        }
+    }
 }
 
 /// Transfer size in USB communication.

@@ -203,7 +203,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
             .unwrap();
 
         let (usb_addr, _) = find_device_addr(usb).unwrap().unwrap();
-        let usb_base = unsafe { map_device(usb_addr) }.as_ptr();
+        let usb_base = unsafe { map_device_block(usb_addr, 0x13000) }.as_ptr(); ////TODO: Get actual size
         println!("| USB controller addr: {:#010x}", usb_addr as usize);
         println!("| USB controller base: {:#010x}", usb_base as usize);
 
