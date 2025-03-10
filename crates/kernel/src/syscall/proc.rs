@@ -1,10 +1,13 @@
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::ptr::copy_nonoverlapping;
 
+use crate::sync::BlockingLock;
 use crate::event::context::{deschedule_thread, Context, DescheduleAction, CORES};
 use crate::{event, event::thread, shutdown};
+use crate::event::process::Process;
 
 pub unsafe fn sys_shutdown(_ctx: &mut Context) -> *mut Context {
     shutdown();
@@ -68,7 +71,10 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
     }
 
     println!("Creating new process with page dir {:#010}", page_dir);
-    let mut user_thread = unsafe { thread::Thread::new_user(user_sp, user_entry, page_dir) };
+    let new_proc: Arc<BlockingLock<Process>> = Arc::new(BlockingLock::new(Process::new(page_dir)));
+    //TODO: fix this to not be hard coded
+    new_proc.lock().reserve_memory_range(0x20_000, 0x_20_000 * 7).unwrap();
+    let mut user_thread = unsafe { thread::Thread::new_user(user_sp, user_entry, page_dir, new_proc) };
     user_thread.context.as_mut().unwrap().regs[0] = user_x0;
     event::SCHEDULER.add_task(event::Event::ScheduleThread(user_thread));
 

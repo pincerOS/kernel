@@ -1,8 +1,10 @@
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 use core::ptr::NonNull;
-
+use crate::sync::BlockingLock;
 use super::context::{context_switch, Context, SwitchAction, CORES};
 use super::{Event, SCHEDULER};
+use super::process::Process;
 
 /// A handle for a kernel or user thread, which owns its stack, and
 /// while the thread isn't running, stores the saved register state of
@@ -15,6 +17,7 @@ pub struct Thread {
 
     pub context: Option<Context>,
     pub user_regs: Option<UserRegs>,
+    pub process: Option<Arc<BlockingLock<Process>>>,
 }
 
 pub struct UserRegs {
@@ -54,7 +57,7 @@ impl Thread {
 
     /// Create a new user thread with the given stack pointer, initial
     /// program counter, and initial page table (`ttbr0`).
-    pub unsafe fn new_user(sp: usize, entry: usize, ttbr0: usize) -> Box<Self> {
+    pub unsafe fn new_user(sp: usize, entry: usize, ttbr0: usize, proc: Arc<BlockingLock<Process>>) -> Box<Self> {
         let data = Context {
             regs: [0; 31],
             sp: 0,
@@ -72,6 +75,7 @@ impl Thread {
                 ttbr0_el1: ttbr0,
                 usermode: true,
             }),
+            process: Some(proc),
         });
         thread.last_context = thread.context.as_mut().unwrap().into();
         thread
@@ -108,6 +112,7 @@ impl Thread {
             func,
             context: None,
             user_regs: None,
+            process: None,
         })
     }
 

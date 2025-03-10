@@ -4,6 +4,7 @@ pub mod exceptions;
 pub mod scheduler;
 pub mod task;
 pub mod thread;
+pub mod process;
 
 use alloc::boxed::Box;
 

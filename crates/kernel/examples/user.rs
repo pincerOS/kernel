@@ -5,8 +5,9 @@ extern crate alloc;
 extern crate kernel;
 
 use core::arch::asm;
-
-use event::{context, task, thread};
+use alloc::sync::Arc;
+use event::{context, task, thread, process::Process};
+use kernel::sync::BlockingLock;
 use kernel::*;
 
 static INIT_CODE: &[u8] = kernel::util::include_bytes_align!(u32, "../../init/init.bin");
@@ -116,7 +117,10 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     let user_sp = 0x100_0000;
     let user_entry = 0x20_0000;
 
-    let user_thread = unsafe { thread::Thread::new_user(user_sp, user_entry, ttbr0) };
+    let new_proc: Arc<BlockingLock<Process>> = Arc::new(BlockingLock::new(Process::new(ttbr0)));
+    //TODO: fix this to not be hard coded
+    new_proc.lock().reserve_memory_range(0x20_000, 0x_20_000 * 7).unwrap();
+    let user_thread = unsafe { thread::Thread::new_user(user_sp, user_entry, ttbr0, new_proc) };
 
     event::SCHEDULER.add_task(event::Event::ScheduleThread(user_thread));
 

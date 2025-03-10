@@ -50,7 +50,7 @@ struct BigTable([u8; PG_SZ * 1000]);
 //va to pa: va - page allocator va + page allocator pa
 //pa to va: pa - page allocator pa + page allocator va
 //This is the logic for the current intermediate page allocator
-struct PageAlloc {
+pub struct PageAlloc {
     table_va: usize,
     table_pa: usize,
     alloc_offset: AtomicUsize,
@@ -68,7 +68,7 @@ impl PageAlloc {
     /// Allocates a page of memory to be used for page tables
     /// Returns a tuple, where the first value is the virtual address of the page and the second is
     /// the physical address of the page
-    fn alloc_frame(&self) -> (usize, usize) {
+    pub fn alloc_frame(&self) -> (usize, usize) {
         let va: usize = self.table_va + self.alloc_offset.fetch_add(PG_SZ, Ordering::Relaxed);
         let pa: usize = va - self.table_va + self.table_pa;
         return (va, pa);
@@ -202,7 +202,7 @@ impl Display for MappingError {
                 f,
                 "The spot in the leaf table that is being mapped to is already taken"
             ),
-            Self::MemoryRangeCollison => write!(f, "A mapped memory range collides with this one"),
+            Self::MemoryRangeCollision => write!(f, "A mapped memory range collides with this one"),
             Self::RequestedSizeUnavailable => write!(f, "A memory range for the requested size is unavailable"),
         }
     }
