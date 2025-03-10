@@ -100,7 +100,7 @@ impl UsbDevice {
     pub fn new(bus: *mut UsbBus, num: u32) -> Self {
         Self {
             number: num,
-            speed: UsbSpeed::Full,
+            speed: UsbSpeed::Low,
             status: UsbDeviceStatus::Attached,
             error: UsbTransferError::NoError,
             port_number: 0,

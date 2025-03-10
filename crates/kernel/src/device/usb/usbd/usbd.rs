@@ -27,6 +27,7 @@ use super::pipe::*;
 use super::request::*;
 
 use core::ptr;
+use core::time;
 
 /** The default timeout in ms of control transfers. */
 pub const ControlMessageTimeout: usize = 10;
@@ -114,7 +115,7 @@ pub fn UsbGetDescriptor(
     recipient: u8,
 ) -> ResultCode {
     let mut result;
-
+    println!("| USBD: Getting descriptor at device {}", device.number);
     result = UsbControlMessage(
         device,
         UsbPipeAddress {
@@ -184,7 +185,8 @@ fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
             0,
         );
     } else if device.speed == UsbSpeed::Full {
-        device.descriptor.max_packet_size0 = 64;
+        // device.descriptor.max_packet_size0 = 64;
+        device.descriptor.max_packet_size0 = 8;
         result = UsbGetDescriptor(
             device,
             DescriptorType::Device,
@@ -213,7 +215,8 @@ fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
             0,
         );
     } else {
-        device.descriptor.max_packet_size0 = 64;
+        // device.descriptor.max_packet_size0 = 64;
+        device.descriptor.max_packet_size0 = 8;
         return UsbGetDescriptor(
             device,
             DescriptorType::Device,
@@ -228,6 +231,7 @@ fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
 }
 
 fn UsbSetAddress(device: &mut UsbDevice, address: u8) -> ResultCode {
+    println!("| USBD: Set device address to {}", address);
     if device.status != UsbDeviceStatus::Default {
         println!("| USBD: Device not in default state");
         return ResultCode::ErrorDevice;
@@ -317,6 +321,9 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         return result;
     }
 
+    let configuration_dev = &mut device.configuration;
+    println!("| USBD: Configuration descriptor:\n {:#?}", configuration_dev);
+
     //TODO TODO: if ((fullDescriptor = MemoryAllocate(device->Configuration.TotalLength)) == NULL) {
 		// LOG("USBD: Failed to allocate space for descriptor.\n");
 		// return ErrorMemory;
@@ -395,6 +402,8 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
     device.number = 0;
 
     let mut result = UsbReadDeviceDescriptor(device);
+    //print USB device descriptor
+    println!("| USBD: Device descriptor:\n {:#?}", device.descriptor);
     if result != ResultCode::OK {
         println!("| USBD: Failed to read device descriptor");
         return result;
@@ -411,6 +420,8 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
                 }
             }
         }
+    } else {
+        println!("| USBD: No parent device");
     }
 
     result = UsbSetAddress(device, address as u8);
@@ -426,6 +437,8 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
         println!("| USBD: Failed to read device descriptor");
         return result;
     }
+    println!("| USBD: Device descriptor:\n {:#?}", device.descriptor);
+
     let vendor_id = device.descriptor.vendor_id;
     let product_id = device.descriptor.product_id;
     println!(
@@ -433,15 +446,20 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
         vendor_id, product_id
     );
 
+    
     result = UsbConfigure(device, 0);
     if result != ResultCode::OK {
         println!("| USBD: Failed to configure device");
         return result;
     }
 
+    println!("\n Device interface class: {} at device number {}\n", device.interfaces[0].class as u16, device.number);
+    
+
     if (device.interfaces[0].class as usize) < INTERFACE_CLASS_ATTACH_COUNT {
         if let Some(class_attach) = bus.interface_class_attach[device.interfaces[0].class as usize] {
             result = class_attach(device, 0);
+            // micro_delay(1000000);
             if result != ResultCode::OK {
                 println!("| USBD: Class attach handler failed");
                 return result;

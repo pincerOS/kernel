@@ -61,6 +61,9 @@ fn HcdPrepareChannel(
     dwc_sc.channel[channel as usize]
         .characteristics
         .DeviceAddress = pipe.device;
+    // if pipe.device == 2 {
+    //     dwc_sc.channel[channel as usize].characteristics.DeviceAddress = 2;
+    // }
     dwc_sc.channel[channel as usize]
         .characteristics
         .EndPointNumber = pipe.end_point;
@@ -74,8 +77,8 @@ fn HcdPrepareChannel(
     };
 
     dwc_sc.channel[channel as usize].characteristics.Type = pipe.transfer_type;
-    println!("| Channel type: {:#?} Channel endpoint num {:#?} Channel endpoint direction {:#?}", dwc_sc.channel[channel as usize].characteristics.Type, dwc_sc.channel[channel as usize].characteristics.EndPointNumber, dwc_sc.channel[channel as usize].characteristics.EndPointDirection);
-    println!("| Device adress {:#?}", dwc_sc.channel[channel as usize].characteristics.DeviceAddress);
+    // println!("| Channel type: {:#?} Channel endpoint num {:#?} Channel endpoint direction {:#?}", dwc_sc.channel[channel as usize].characteristics.Type, dwc_sc.channel[channel as usize].characteristics.EndPointNumber, dwc_sc.channel[channel as usize].characteristics.EndPointDirection);
+    // println!("| Device adress {:#?}", dwc_sc.channel[channel as usize].characteristics.DeviceAddress);
     dwc_sc.channel[channel as usize]
         .characteristics
         .MaximumPacketSize = size_to_number(pipe.max_size);
@@ -93,13 +96,16 @@ fn HcdPrepareChannel(
     dwc_sc.channel[channel as usize].split_control.XactPos = 0;
     dwc_sc.channel[channel as usize].split_control.CompleteSplit = false;
     dwc_sc.channel[channel as usize].split_control.SplitEnable = false; 
-    if pipe.speed != UsbSpeed::High && device.parent.is_some() && unsafe { (*device.parent.unwrap()).speed == UsbSpeed::High  && (*device.parent.unwrap()).parent.is_some() }{
+    // if pipe.speed != UsbSpeed::High && device.parent.is_some() && unsafe { (*device.parent.unwrap()).speed == UsbSpeed::High  && (*device.parent.unwrap()).parent.is_some() }{
+    if pipe.speed != UsbSpeed::High {
         dwc_sc.channel[channel as usize].split_control.SplitEnable = true;
         if let Some(parent) = device.parent {
             unsafe {
+                // println!("| Parent number: {:#?}", (*parent).number);
                 dwc_sc.channel[channel as usize].split_control.HubAddress = (*parent).number;
             }
         }
+        // println!("| Port number: {:#?}", device.port_number);
         dwc_sc.channel[channel as usize].split_control.PortAddress = device.port_number;
     }
 
@@ -126,7 +132,7 @@ fn HcdPrepareChannel(
 
     dwc_sc.channel[channel as usize].transfer_size.packet_id = packet_id;
     let hctsiz = convert_host_transfer_size(dwc_sc.channel[channel as usize].transfer_size);
-    println!("| HCTSIZE {:#x}\n", hctsiz);
+    // println!("| HCTSIZE {:#x}\n", hctsiz);
     write_volatile(DOTG_HCTSIZ(channel as usize), hctsiz);
 
     return ResultCode::OK;
@@ -153,16 +159,16 @@ pub fn HcdTransmitChannel(device: &UsbDevice, channel: u8, buffer: *mut u8) {
         memory_copy(dma_loc as *mut u8, buffer, 100);
         
         //print out the first 8 bytes stored in buffer
-        unsafe { 
-            println!("Buffer: {:#x} {:#x} {:#x} {:#x} {:#x} {:#x} {:#x} {:#x}", *(buffer), *((buffer as *const u8).offset(1)), *((buffer as *const u8).offset(2)), *((buffer as *const u8).offset(3)), *((buffer as *const u8).offset(4)), *((buffer as *const u8).offset(5)), *((buffer as *const u8).offset(6)), *((buffer as *const u8).offset(7)));
-        };
+        // unsafe { 
+        //     println!("Buffer: {:#x} {:#x} {:#x} {:#x} {:#x} {:#x} {:#x} {:#x}", *(buffer), *((buffer as *const u8).offset(1)), *((buffer as *const u8).offset(2)), *((buffer as *const u8).offset(3)), *((buffer as *const u8).offset(4)), *((buffer as *const u8).offset(5)), *((buffer as *const u8).offset(6)), *((buffer as *const u8).offset(7)));
+        // };
 
 
         let dma_buffer = (dma_address) as *mut u8;
         // let dma_buffer = buffer;
-        println!("Buffer address: {:#x}\n", buffer as usize);
-        println!("DMA buffer address: {:#x}\n", dma_buffer as usize);
-
+        // println!("Buffer address: {:#x}\n", buffer as usize);
+        // println!("DMA buffer address: {:#x}\n", dma_buffer as usize);
+        
         dwc_sc.channel[channel as usize].dma_address = dma_buffer;
         write_volatile(DOTG_HCDMA(channel as usize), dma_buffer as u32);
 
@@ -296,11 +302,10 @@ pub fn HcdChannelSendWaitOne(
 
         // Transmit data.
         HcdTransmitChannel(device, channel, buffer.wrapping_add(bufferOffset as usize));
-        println!("| HCD: Transmitting data to device.\n");
         timeout = 0;
         loop {
             if timeout == RequestTimeout {
-                println!("HCD: Request to device has timed out.");
+                println!("| HCD: Request to device has timed out.");
                 device.error = UsbTransferError::ConnectionError;
                 return ResultCode::ErrorTimeout;
             }
@@ -516,7 +521,6 @@ fn HcdChannelSendWait(
                 return result;
             }
 
-            println!("| HCD: Transfer to packet completed.\n");
             // Update the transfer progress.
             let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
             // dwc_sc.channel[channel as usize].transfer_size.TransferSize = hctsiz & (0x7ffff);
@@ -527,20 +531,19 @@ fn HcdChannelSendWait(
             );
 
             transfer = buffer_length - dwc_sc.channel[channel as usize].transfer_size.TransferSize;
-            println!("| HCD: Transfer to packet progress: {}/{} with packets {} from {}\n", transfer, buffer_length, dwc_sc.channel[channel as usize].transfer_size.PacketCount, packets);
+            // println!("| HCD: Transfer to packet progress: {}/{} with packets {} from {}\n", transfer, buffer_length, dwc_sc.channel[channel as usize].transfer_size.PacketCount, packets);
             // If the packet count hasn’t changed, break out of the loop.
             if packets == dwc_sc.channel[channel as usize].transfer_size.PacketCount {
-                println!("HCD: Transfer to packet got stuck.\n");
+                println!("| HCD: Transfer to packet got stuck.");
                 break;
             }
             // Continue looping if there are still packets in progress.
             if dwc_sc.channel[channel as usize].transfer_size.PacketCount == 0 {
-                println!("HCD: Transfer to packet completed.\n");
+                // println!("| HCD: Transfer to packet completed.");
                 break;
             }
         }
 
-        println!("| HCD result: {:#?}\n", result);
         if result == ResultCode::ErrorRetry {
             println!("| HCD: Retrying to packet.\n");
             continue;
@@ -549,7 +552,6 @@ fn HcdChannelSendWait(
         // Check for a stuck transfer.
         if packets == dwc_sc.channel[channel as usize].transfer_size.PacketCount {
             device.error = UsbTransferError::ConnectionError;
-            println!("HCD: Transfer to device got stuck.\n");
             return ResultCode::ErrorDevice;
         }
 
@@ -577,7 +579,6 @@ pub fn HcdSubmitControlMessage(
         return HcdProcessRootHubMessage(device, pipe, buffer, buffer_length, request);
     }
 
-    println!("| HCD: Sending control message to device 1.\n");
     let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
 
     device.error = UsbTransferError::Processing;
@@ -594,7 +595,7 @@ pub fn HcdSubmitControlMessage(
     };
     let request_buffer = request as *mut UsbDeviceRequest as *mut u8;
 
-    dwc_sc.channel[0].characteristics.MaximumPacketSize = 8;
+    // dwc_sc.channel[0].characteristics.MaximumPacketSize = 8;
     let mut result;
     result = HcdChannelSendWait(
         device,
@@ -606,15 +607,12 @@ pub fn HcdSubmitControlMessage(
         PacketId::Setup,
     );
 
-    println!("| HCD: Sending control message to device 2.\n");
-
     if result != ResultCode::OK {
         println!("| HCD: Failed to send control message to device.\n");
         return result;
     }
 
     if !buffer.is_null() {
-        println!("Buffer is not null");
         if pipe.direction == UsbDirection::Out {
             memory_copy(dwc_sc.databuffer.as_mut_ptr(), buffer, buffer_length as usize);
         }
@@ -664,9 +662,6 @@ pub fn HcdSubmitControlMessage(
                 device.last_transfer as usize,
             );
 
-            let descriptor = buffer as *mut UsbDeviceDescriptor;
-            let mut_descriptor = unsafe { &mut *descriptor };
-            println!("| HCD: Device descriptor:\n {:#?}", mut_descriptor);
         } else {
             device.last_transfer = buffer_length;
         }
@@ -683,8 +678,9 @@ pub fn HcdSubmitControlMessage(
         tempPipe.direction = UsbDirection::Out;
     }
 
-    println!("Pipe dricetion {:#?} tempPipe direction {:#?}", pipe.direction, tempPipe.direction);
-
+    // tempPipe.direction = UsbDirection::In;
+    //TODO: This is necessary in Real hardware I think but QEMU doesn't fully handle it 
+    //https://elixir.bootlin.com/qemu/v9.0.2/source/hw/usb/hcd-dwc2.c#L346
     result = HcdChannelSendWait(
         device,
         &mut tempPipe,
@@ -695,15 +691,14 @@ pub fn HcdSubmitControlMessage(
         PacketId::Data1,
     );
     if result != ResultCode::OK {
-        println!("| HCD: Could not send STATUS to device.\n");
-        return result;
+        println!("| HCD: Could not send STATUS to device.");
+        // return result;
     }
 
     let hctsiz = read_volatile(DOTG_HCTSIZ(0));
-    // dwc_sc.channel[0].transfer_size.TransferSize = hctsiz & 0x7ffff;
     convert_into_host_transfer_size(hctsiz, &mut dwc_sc.channel[0].transfer_size);
     if dwc_sc.channel[0].transfer_size.TransferSize != 0 {
-        println!("| HCD: warning non zero status transfer\n");
+        println!("| HCD: warning non zero status transfer");
     }
 
     device.error = UsbTransferError::NoError;

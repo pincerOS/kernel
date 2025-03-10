@@ -49,7 +49,6 @@ fn HubReadDescriptor(device: &mut UsbDevice) -> ResultCode {
         //TODO: Update this creation as well
     }
 
-    println!("Hub descriptor address {:#x}", hub.Descriptor.as_mut().unwrap().as_mut() as *mut HubDescriptor as usize);
     result = UsbGetDescriptor(device, DescriptorType::Hub, 0, 0, hub.Descriptor.as_mut().unwrap().as_mut() as *mut HubDescriptor as *mut u8, header.descriptor_length as u32, header.descriptor_length as u32, 0x20);
     if result != ResultCode::OK {
         println!("| HUB: failed to read full descriptor");
@@ -242,11 +241,7 @@ fn HubPortReset(device: &mut UsbDevice, port: u8) -> ResultCode {
 fn HubChildReset(device: &mut UsbDevice, child: &mut UsbDevice) -> ResultCode {
     let mut data = unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
     println!("data {:#x} device {:#x}", data as *mut HubDevice as usize, device as *mut UsbDevice as usize);
-    println!("child.parent address {:#x} device address {:#x}", child.parent.unwrap() as usize, device as *mut UsbDevice as usize);
-    println!("child.port_number {} data.MaxChildren {}", child.port_number, data.MaxChildren as u8);
-    println!("data.Children[child.port_number as usize] {:#x} child {:#x}", data.Children[child.port_number as usize] as usize, child as *mut UsbDevice as usize);
     data.MaxChildren = 1;
-    println!("are equal {} {} {} {}", child.parent == Some(device), child.port_number >= 0, child.port_number < data.MaxChildren as u8, data.Children[child.port_number as usize] == child);
     if child.parent == Some(device) && child.port_number >= 0 && child.port_number < data.MaxChildren as u8 && data.Children[child.port_number as usize] == child {
         return HubPortReset(device, child.port_number);
     } else {
@@ -257,10 +252,7 @@ fn HubChildReset(device: &mut UsbDevice, child: &mut UsbDevice) -> ResultCode {
 
 fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
     let mut data = unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
-    println!("Address of data {:#x}", data as *mut HubDevice as usize);
-    println!("Address of data.MaxChildren {:#x}", &data.MaxChildren as *const u32 as usize);
     let mut portStatus = &mut data.PortStatus[port as usize];
-    println!("Max1 children: {}", data.MaxChildren);
     let mut result = HubPortGetStatus(device, port);
 
     if result != ResultCode::OK {
@@ -269,7 +261,6 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
     }
 
     println!("| HUB: port {} status: {:#x}", port + 1, 10);
-    println!("Max3 children: {}", data.MaxChildren);
 
     result = HubChangePortFeature(device, HubPortFeature::FeatureConnectionChange, port, false);
 
@@ -277,7 +268,6 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
         println!("| HUB: failed to clear connection change for port {}", port + 1);
         return result;
     }
-    println!("Max4 children: {}", data.MaxChildren);
     let port_status = portStatus.Status;
     if (!(port_status.contains(HubPortStatus::Connected)) && !(port_status.contains(HubPortStatus::Enabled))) || !data.Children[port as usize].is_null() {
         println!("| HUB: Disconnected");
@@ -291,22 +281,16 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
         println!("| HUB: count not reset port {} for new device", port + 1);
         return result;
     }
-    println!("Max5 children: {}", data.MaxChildren);
     use crate::device::usb::*;
     let hprt = ReadHPRT();
-    println!("HPRT {:#x}", (hprt >> 17) & 3);
     
     let mut dev = Box::new(UsbDevice::new(device.bus, 0));
-    println!("Max5.2 children: {}, Box address {:#x}", data.MaxChildren, dev.as_mut() as *mut UsbDevice as usize);
     data.Children[port as usize] = dev.as_mut() as *mut UsbDevice;
-    println!("data children address {:#x} dev address {:#x}", data.Children[port as usize] as usize, dev.as_mut() as *mut UsbDevice as usize);
     result = UsbAllocateDevice(&mut dev);
-    println!("Max5.5 children: {}", data.MaxChildren);
     if result != ResultCode::OK {
         println!("| HUB: failed to allocate new device");
         return result;
     }
-    println!("Max6 children: {}", data.MaxChildren);
 
     result = HubPortGetStatus(device, port);
     if result != ResultCode::OK {
@@ -314,7 +298,6 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
         return result;
     }
 
-    println!("Max2 children: {}", data.MaxChildren);
     let child_dev = unsafe { &mut *(data.Children[port as usize]) };
     println!("| HUB: allocated new device {}", child_dev.number);
     let port_status = portStatus.Status;
@@ -355,10 +338,8 @@ fn HubCheckConnection(device: &mut UsbDevice, port: u8) -> ResultCode {
     let port_status = data.PortStatus[port as usize].Status;
     let mut port_change = data.PortStatus[port as usize].Change;
 
-    println!("| HUB: port_status: {:#x}", port_status);
-    println!("| HUB: port_change: {:#x}", port_change);
-
-    println!("Max children: {}", data.MaxChildren);
+    // println!("| HUB: port_status: {:#x}", port_status);
+    // println!("| HUB: port_change: {:#x}", port_change);
 
     let mut port_changed_flag = false;
     if device.number == 1 {
@@ -478,11 +459,8 @@ fn HubAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 
     let mut hub = unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
     println!("| Hub Driver Data instantiated");
-    println!("hub header {:#x}", &mut hub.Header as *mut UsbDriverDataHeader as usize);
-    println!("hub header datasize {:#x}", &mut hub.Header.data_size as *const u32 as usize);
 
     let data_ize = hub.Header.data_size;
-    println!("hub thing {}", data_ize  );
 
     hub.Header.data_size = size_of::<HubDevice>() as u32;
     hub.Header.device_driver = DeviceDriverHub;
