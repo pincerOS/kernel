@@ -28,11 +28,13 @@ CARGO_TARGET_DIR="$TARGET_DIR" RUSTC_BOOTSTRAP=1 cargo rustc \
 BIN_PATH="${TARGET_DIR}/aarch64-unknown-none-softfloat/standalone/${NAME}"
 cp "${BIN_PATH}" "${SOURCE%.rs}.elf"
 
-# TODO: macos doesn't support realpath --relative-to, stat -c
-SIZE=$(test -f "${SOURCE%.rs}.elf" && find "${SOURCE%.rs}.elf" -printf "%s")
-SIZE=$(echo "${SIZE}" | python3 -c \
-    "(lambda f:f(f,float(input()),0))\
-     (lambda f,i,j:print('%.4g'%i,'BKMGTPE'[j]+'iB' if j else 'bytes')\
-     if i<1024 else f(f,i/1024,j+1))"
-)
-echo "Built ${RELATIVE%.rs}.elf, file size ${SIZE}"
+# Replace the SIZE calculation with a portable version
+if [ -f "${SOURCE%.rs}.elf" ]; then
+    SIZE=$(stat -f %z "${SOURCE%.rs}.elf" 2>/dev/null || stat -c %s "${SOURCE%.rs}.elf")
+    SIZE=$(echo "${SIZE}" | python3 -c \
+        "(lambda f:f(f,float(input()),0))\
+         (lambda f,i,j:print('%.4g'%i,'BKMGTPE'[j]+'iB' if j else 'bytes')\
+         if i<1024 else f(f,i/1024,j+1))"
+    )
+    echo "Built ${RELATIVE%.rs}.elf, file size ${SIZE}"
+fi

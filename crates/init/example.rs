@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 #![doc = r##"<!-- Absolutely cursed hacks:
-SOURCE="$0" NAME=$(basename "$0" .rs) DIR=$(realpath $(dirname "$0"))
+SOURCE="$0"
+NAME=$(basename "$0" .rs)
+DIR="$(cd "$(dirname "$0")" && pwd)"
+ULIB_PATH="$(cd "$(dirname "$0")/../ulib" && pwd)"
 exec "$(dirname "$0")/../ulib/compile.sh" "$0" <<END_MANIFEST
 [package]
 name = "$NAME"
@@ -12,7 +15,7 @@ name = "$NAME"
 path = "$DIR/$NAME.rs"
 
 [dependencies]
-ulib = { path = "$DIR/../ulib" }
+ulib = { path = "$ULIB_PATH" }
 
 [profile.standalone]
 inherits = "release"
@@ -29,6 +32,13 @@ exit # -->"##]
 extern crate ulib;
 
 use ulib::sys::{recv_block, send_block, ChannelDesc, Message};
+
+const CMD_EXIT: u64 = 0x0000000000000001;
+const CMD_CAT: u64 = 0x0000000000000002;
+const CMD_LS: u64 = 0x0000000000000003;
+const CMD_CD: u64 = 0x0000000000000004;
+const CMD_EXEC: u64 = 0x0000000000000005;
+const CMD_PWD: u64 = 0x0000000000000006;
 
 fn try_read_stdin(buf: &mut [u8]) -> isize {
     let chan = ChannelDesc(1);
@@ -54,23 +64,43 @@ impl LineReader {
             self.cur_base = 0;
         }
     }
+    
+    fn handle_backspace(&mut self, effective_length: &mut usize) {
+        if *effective_length > 0 {
+            *effective_length -= 1;
+            print!("\x08 \x08");
+        }
+    }
 }
 
 fn readline(reader: &mut LineReader) -> Result<&[u8], isize> {
     reader.shift();
+    let mut effective_length = 0;
+    
     loop {
         while reader.processed < reader.cursor {
             let i = reader.processed;
             reader.processed += 1;
+            
             match reader.buf[i] {
                 b'\r' => {
                     let base = reader.cur_base;
                     reader.cur_base = i + 1;
-                    return Ok(&reader.buf[base..i]);
+                    return Ok(&reader.buf[base..base + effective_length]);
                 }
-                b'\x7f' => print!("^?"),
-                c if c.is_ascii_control() => print!("^{}", (c + 64) as char),
-                c => print!("{}", c as char),
+                // Handle backspace (ASCII DEL character)
+                b'\x7f' => reader.handle_backspace(&mut effective_length),
+                // Also handle Ctrl+H as backspace
+                b'\x08' => reader.handle_backspace(&mut effective_length),
+                c => {
+                    if c.is_ascii_control() && c != b'\t' {
+                        print!("^{}", (c + 64) as char);
+                    } else {
+                        reader.buf[reader.cur_base + effective_length] = c;
+                        effective_length += 1;
+                        print!("{}", c as char);
+                    }
+                }
             }
         }
 
@@ -103,9 +133,33 @@ fn main(chan: ChannelDesc) {
         processed: 0,
         cur_base: 0,
     };
-
+    
+    let mut response_buf = [0; 1024 * 1024]; // 1MB for huge files
+    let mut cwd_buf = [0; 1024];
+    
     loop {
-        print!("$ ");
+        // Get cwd before displaying prompt
+        let msg = Message {
+            tag: CMD_PWD,
+            objects: [0; 4],
+        };
+        send_block(chan, &msg, b"");
+        
+        let (len, _) = match recv_block(chan, &mut cwd_buf) {
+            Ok(res) => res,
+            Err(_) => (0, Message { tag: 0, objects: [0; 4] }),
+        };
+        
+        if len > 0 {
+            if let Ok(cwd) = core::str::from_utf8(&cwd_buf[..len]) {
+                print!("{} $ ", cwd);
+            } else {
+                print!("$ ");
+            }
+        } else {
+            print!("$ ");
+        }
+        
         let line = match readline(&mut reader) {
             Ok(line) => line,
             Err(err) => {
@@ -120,15 +174,145 @@ fn main(chan: ChannelDesc) {
             continue;
         }
 
-        let msg = Message {
-            tag: 0xAAAAAAAA,
-            objects: [0; 4],
-        };
-        send_block(chan, &msg, line.as_bytes());
-
-        for _ in 0..100 {
-            // TODO: this is a hack to prevent concurrent access to stdout...
-            unsafe { ulib::sys::yield_() }
+        let mut parts = line.split_whitespace();
+        let cmd = parts.next().unwrap_or("");
+        
+        match cmd {
+            "exit" | "quit" => {
+                let msg = Message {
+                    tag: CMD_EXIT,
+                    objects: [0; 4],
+                };
+                send_block(chan, &msg, b"");
+                break;
+            },
+            "echo" => {
+                let rest = line.trim_start_matches("echo").trim();
+                println!("{}", rest);
+            },
+            "pwd" => {
+                // Get cwd 
+                let msg = Message {
+                    tag: CMD_PWD,
+                    objects: [0; 4],
+                };
+                send_block(chan, &msg, b"");
+                
+                let (len, _) = match recv_block(chan, &mut response_buf) {
+                    Ok(res) => res,
+                    Err(err) => {
+                        println!("Error receiving response: {}", err);
+                        continue;
+                    }
+                };
+                
+                if len > 0 {
+                    if let Ok(content) = core::str::from_utf8(&response_buf[..len]) {
+                        println!("{}", content);
+                    }
+                }
+            },
+            "cat" => {
+                let file = parts.next().unwrap_or("");
+                if file.is_empty() {
+                    println!("Usage: cat <filename>");
+                    continue;
+                }
+                
+                let msg = Message {
+                    tag: CMD_CAT,
+                    objects: [0; 4],
+                };
+                send_block(chan, &msg, file.as_bytes());
+                
+                let (len, _) = match recv_block(chan, &mut response_buf) {
+                    Ok(res) => res,
+                    Err(err) => {
+                        println!("Error receiving response: {}", err);
+                        continue;
+                    }
+                };
+                
+                if len == 0 {
+                    println!("File not found or empty");
+                } else {
+                    match core::str::from_utf8(&response_buf[..len]) {
+                        Ok(content) => println!("{}", content),
+                        Err(_) => println!("[Unprintable file content]"),
+                    }
+                }
+            },
+            "ls" => {
+                let msg = Message {
+                    tag: CMD_LS,
+                    objects: [0; 4],
+                };
+                send_block(chan, &msg, b"");
+                
+                let (len, _) = match recv_block(chan, &mut response_buf) {
+                    Ok(res) => res,
+                    Err(err) => {
+                        println!("Error receiving response: {}", err);
+                        continue;
+                    }
+                };
+                
+                if len > 0 {
+                    if let Ok(content) = core::str::from_utf8(&response_buf[..len]) {
+                        println!("{}", content);
+                    }
+                }
+            },
+            "cd" => {
+                let dir = parts.next().unwrap_or("");
+                let msg = Message {
+                    tag: CMD_CD,
+                    objects: [0; 4], 
+                };
+                send_block(chan, &msg, dir.as_bytes());
+                
+                let (len, _) = match recv_block(chan, &mut response_buf) {
+                    Ok(res) => res,
+                    Err(err) => {
+                        println!("Error receiving response: {}", err);
+                        continue;
+                    }
+                };
+                
+                if len > 0 {
+                    if let Ok(content) = core::str::from_utf8(&response_buf[..len]) {
+                        println!("{}", content);
+                    }
+                }
+            },
+            _ => {
+                if cmd.contains('/') || cmd.starts_with("./") {
+                    // looks like a file path, try to execute it
+                    println!("attempting to execute: {}", cmd);
+                    
+                    let msg = Message {
+                        tag: CMD_EXEC, 
+                        objects: [0; 4],
+                    };
+                    send_block(chan, &msg, cmd.as_bytes());
+                    
+                    let (len, _) = match recv_block(chan, &mut response_buf) {
+                        Ok(res) => res,
+                        Err(err) => {
+                            println!("Error receiving response: {}", err);
+                            continue;
+                        }
+                    };
+                    
+                    if len > 0 {
+                        if let Ok(content) = core::str::from_utf8(&response_buf[..len]) {
+                            println!("{}", content);
+                        }
+                    }
+                } else {
+                    println!("Unknown command: {}", cmd);
+                }
+            }
         }
     }
 

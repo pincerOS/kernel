@@ -2,14 +2,21 @@
 
 set -ex
 
+
 BIN="init"
 TARGET=aarch64-unknown-none-softfloat
 PROFILE=${PROFILE-"release"}
 
 mkdir -p fs
 
+chmod +x example.rs
 ./example.rs
 cp example.elf fs/
+
+# Compile and add the editor
+chmod +x editor.rs
+./editor.rs
+cp editor.elf fs/
 
 cargo run -q -p initfs --bin util \
     -- create --compress --out fs.arc --root fs fs

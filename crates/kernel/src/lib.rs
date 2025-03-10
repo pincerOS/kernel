@@ -1,6 +1,7 @@
 #![no_main]
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
+// #![feature(async_closure)]
 
 extern crate alloc;
 
