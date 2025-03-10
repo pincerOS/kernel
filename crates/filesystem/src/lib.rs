@@ -1738,16 +1738,15 @@ impl INodeWrapper {
         callback: &mut F,
         block_num: usize,
         dir_entries_data: &[u8],
+        inner_block_counter: &mut usize,
         deferred_writes: Option<&DeferredWriteMap>,
     ) -> Result<Option<O>, Ext2Error>
     where
         F: FnMut(DirectoryEntryWrapper) -> ControlFlow<O>,
     {
-        let mut i = 0;
-
-        while i < dir_entries_data.len() {
+        while *inner_block_counter < dir_entries_data.len() {
             // TODO: cleanly error on malformed directory entries
-            let entry_start = &dir_entries_data[i..];
+            let entry_start = &dir_entries_data[*inner_block_counter..];
             //assert!(entry_start.len() >= size_of::<DirectoryEntryData>());
             let entry_data = unsafe {
                 entry_start
@@ -1767,7 +1766,7 @@ impl INodeWrapper {
                     name_characters: [0; 256],
                 },
                 inode_block_num: block_num,
-                offset: i,
+                offset: *inner_block_counter,
             };
 
             assert!(entry_data.rec_len > 8);
@@ -1779,7 +1778,7 @@ impl INodeWrapper {
                 ControlFlow::Break(res) => return Ok(Some(res)),
             }
 
-            i += entry_data.rec_len as usize;
+            *inner_block_counter += entry_data.rec_len as usize;
         }
         
         Ok(None)
@@ -1800,18 +1799,24 @@ impl INodeWrapper {
         let dir_size: usize = self.size() as usize;
         let dir_blocks: usize = dir_size.div_ceil(block_size);
 
-        let mut i = 0;
+        let mut inner_block_offset = 0;
         let mut block_idx = 0;
 
         while block_idx < dir_blocks {
             self.read_block(block_idx, buffer.as_mut_slice(), ext2, deferred_writes)?;
 
-            self.get_dir_entries_inner(ext2, &mut callback, block_idx, 
-                                       &buffer[i..], deferred_writes)?;
+            let dir_entries_option: Option<O> = 
+                self.get_dir_entries_inner(ext2, &mut callback, block_idx, 
+                                       &buffer[inner_block_offset..],
+                                       &mut inner_block_offset, deferred_writes)?;
+            
+            if dir_entries_option.is_some() {
+                return Ok(dir_entries_option);
+            }
 
-            let skip_blocks = i / block_size;
+            let skip_blocks = inner_block_offset / block_size;
             block_idx += skip_blocks;
-            i -= block_size * skip_blocks;
+            inner_block_offset -= block_size * skip_blocks;
             assert_eq!(skip_blocks, 1);
         }
 
@@ -1823,6 +1828,7 @@ impl INodeWrapper {
         ext2: &mut Ext2<D>,
         name: &[u8],
     ) -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
+        let name_str: &str = std::str::from_utf8(name).unwrap();
         let inode_num: Option<u32> = self.get_dir_entries(
             ext2,
             |dir_entry| {
@@ -1939,6 +1945,7 @@ impl INodeWrapper {
             }
         }
 
+        let mut inner_block_offset: usize = 0;
         let inode_num: Option<u32> = self.get_dir_entries_inner(
             ext2,
             &mut |dir_entry| {
@@ -1955,6 +1962,7 @@ impl INodeWrapper {
             },
             target_htree_entry.block as usize,
             block_buffer.as_slice(),
+            &mut inner_block_offset,
             None,
         )?;
 
