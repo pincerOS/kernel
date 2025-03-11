@@ -317,6 +317,7 @@ pub fn HcdChannelSendWaitOne(
                 break;
             }
         }
+        println!("| HCD: Channel interrupt {:#x}\n", hcint);
 
         let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
         convert_into_host_transfer_size(
@@ -518,6 +519,7 @@ fn HcdChannelSendWait(
                     println!("| HCD: Retrying to packet.\n");
                     break;
                 }
+                println!("| DWC: Result is {:#?}", result);
                 return result;
             }
 
@@ -564,6 +566,60 @@ fn HcdChannelSendWait(
 
 pub fn ReadHPRT() -> u32 {
     read_volatile(DOTG_HPRT)
+}
+
+pub fn HcdSubmitInterruptMessage(
+    device: &mut UsbDevice,
+    channel: u8,
+    pipe: UsbPipeAddress,
+    buffer: *mut u8,
+    buffer_length: u32,
+    request: &mut UsbDeviceRequest,
+) -> ResultCode {
+
+    let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
+    device.error = UsbTransferError::Processing;
+    device.last_transfer = 0;
+
+
+    let mut tempPipe = UsbPipeAddress {
+        max_size: pipe.max_size,
+        speed: pipe.speed,
+        end_point: pipe.end_point,
+        device: pipe.device,
+        transfer_type: UsbTransfer::Interrupt,
+        direction: UsbDirection::In,
+        _reserved: 0,
+    };
+    let data_buffer = dwc_sc.databuffer.as_mut_ptr();
+    let result = HcdChannelSendWait(
+        device,
+        &mut tempPipe,
+        channel,
+        data_buffer,
+        buffer_length,
+        request,
+        PacketId::Data1,
+    );
+    if result != ResultCode::OK {
+        println!("| HCD: Coult not send data to device");
+        return result;
+    }
+
+    memory_copy(
+        dwc_sc.databuffer.as_mut_ptr(),
+        dwc_sc.dma_loc as *const u8,
+        device.last_transfer as usize,
+    );
+
+    memory_copy(
+        buffer,
+        dwc_sc.databuffer.as_ptr(),
+        device.last_transfer as usize,
+    );
+
+    device.error = UsbTransferError::NoError;
+    return ResultCode::OK;
 }
 
 pub fn HcdSubmitControlMessage(
@@ -1065,6 +1121,10 @@ pub fn read_volatile(reg: usize) -> u32 {
 }
 pub fn write_volatile(reg: usize, val: u32) {
     unsafe { core::ptr::write_volatile((dwc_otg_driver.base_addr + reg) as *mut u32, val) }
+}
+
+pub fn get_dwc_ptr(offset: usize) -> *mut u32 {
+    unsafe { (dwc_otg_driver.base_addr + offset) as *mut u32 }
 }
 
 pub fn dwc_otg_initialize_controller(base_addr: *mut ()) {

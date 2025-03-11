@@ -15,6 +15,7 @@
 use crate::device::system_timer::micro_delay;
 use crate::device::usb::hcd::dwc::dwc_otg::*;
 use crate::device::usb::hcd::dwc::roothub::memory_copy;
+use crate::syscall::channel;
 
 use alloc::boxed::Box;
 use alloc::vec;
@@ -69,6 +70,29 @@ pub fn UsbInitialise(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
     }
 
     result
+}
+
+pub fn UsbInterruptMessage(
+    device: &mut UsbDevice,
+    channel: u8,
+    pipe: UsbPipeAddress,
+    buffer: *mut u8,
+    buffer_length: u32,
+    timeout_: u32,
+) -> ResultCode {
+    let result = HcdSubmitInterruptMessage(device, channel, pipe, buffer, buffer_length, &mut UsbDeviceRequest {
+        request_type: 0,
+        request: UsbDeviceRequestRequest::GetStatus,
+        value: 0,
+        index: 0,
+        length: buffer_length as u16,
+    });
+
+    if result != ResultCode::OK {
+        println!("| Failed to send message result: {:?}", result);
+        return result;
+    }
+    return result;
 }
 
 pub fn UsbControlMessage(
@@ -185,8 +209,8 @@ fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
             0,
         );
     } else if device.speed == UsbSpeed::Full {
-        // device.descriptor.max_packet_size0 = 64;
-        device.descriptor.max_packet_size0 = 8;
+        device.descriptor.max_packet_size0 = 64;
+        // device.descriptor.max_packet_size0 = 8;
         result = UsbGetDescriptor(
             device,
             DescriptorType::Device,
@@ -215,8 +239,8 @@ fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
             0,
         );
     } else {
-        // device.descriptor.max_packet_size0 = 64;
-        device.descriptor.max_packet_size0 = 8;
+        device.descriptor.max_packet_size0 = 64;
+        // device.descriptor.max_packet_size0 = 8;
         return UsbGetDescriptor(
             device,
             DescriptorType::Device,
@@ -457,9 +481,18 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
     
 
     if (device.interfaces[0].class as usize) < INTERFACE_CLASS_ATTACH_COUNT {
+        for j in 0..device.configuration.interface_count {
+            println!("| USBD: Device interface {}:\n {:?}", j, device.interfaces[j as usize]);
+            for i in 0..device.interfaces[j as usize].endpoint_count {
+                println!("| USBD: Endpoint descriptor {} {}:\n {:#?}",j, i, device.endpoints[j as usize][i as usize]);
+            }
+
+        }
+
+
+
         if let Some(class_attach) = bus.interface_class_attach[device.interfaces[0].class as usize] {
             result = class_attach(device, 0);
-            // micro_delay(1000000);
             if result != ResultCode::OK {
                 println!("| USBD: Class attach handler failed");
                 return result;

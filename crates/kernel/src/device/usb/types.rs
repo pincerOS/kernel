@@ -60,7 +60,7 @@ pub enum UsbDirection {
 }
 
 impl UsbDirection {
-    pub fn from_u8(value: u8) -> Self {
+    pub const fn from_u8(value: u8) -> Self {
         match value {
             0 => UsbDirection::Out,
             1 => UsbDirection::In,
@@ -107,7 +107,7 @@ pub enum UsbTransfer {
 }
 
 impl UsbTransfer {
-    pub fn from_u8(value: u8) -> Self {
+    pub const fn from_u8(value: u8) -> Self {
         match value {
             0 => UsbTransfer::Control,
             1 => UsbTransfer::Isochronous,
