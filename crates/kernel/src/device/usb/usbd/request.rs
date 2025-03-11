@@ -48,7 +48,7 @@ pub enum UsbDeviceRequestRequest {
     SynchFrame = 12,
     // // HID requests
     // GetReport = 1,
-    // GetIdle = 2,
+    GetIdle = 2,
     // GetProtocol = 3,
     // SetReport = 9,
     // SetIdle = 10,
