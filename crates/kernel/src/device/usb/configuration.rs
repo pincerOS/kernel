@@ -17,10 +17,13 @@ use crate::device::usb::usbd::usbd::*;
 
 use crate::device::usb::device::hub::*;
 
+use super::device::hid::HidLoad;
+
 pub fn ConfigurationLoad(bus: &mut UsbBus) {
     UsbLoad(bus);
     // DeviceLoad(bus);
     // PipeLoad(bus);
     // RequestLoad(bus);
     HubLoad(bus);
+    HidLoad(bus);
 }

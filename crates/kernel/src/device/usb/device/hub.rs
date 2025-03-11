@@ -240,8 +240,8 @@ fn HubPortReset(device: &mut UsbDevice, port: u8) -> ResultCode {
 
 fn HubChildReset(device: &mut UsbDevice, child: &mut UsbDevice) -> ResultCode {
     let mut data = unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
-    println!("data {:#x} device {:#x}", data as *mut HubDevice as usize, device as *mut UsbDevice as usize);
-    data.MaxChildren = 1;
+    // println!("data {:#x} device {:#x}", data as *mut HubDevice as usize, device as *mut UsbDevice as usize);
+    // data.MaxChildren = 1;
     if child.parent == Some(device) && child.port_number >= 0 && child.port_number < data.MaxChildren as u8 && data.Children[child.port_number as usize] == child {
         return HubPortReset(device, child.port_number);
     } else {
