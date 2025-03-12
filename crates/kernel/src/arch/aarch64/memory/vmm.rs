@@ -319,6 +319,74 @@ pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result
     return Ok(());
 }
 
+#[derive(Debug)]
+pub enum UnMappingError {
+    HugePagePresent,
+    TableDescriptorNotValid,
+    LeafTableSpotNotValid,
+    NotInMemoryRange, //used with mmap
+}
+
+impl Display for MappingError {
+    fn fmt(&self, f: &mut Formatter) -> core::fmt::Result {
+        match self {
+            Self::HugePagePresent => write!(f, "A huge page is present instead of the table descriptor!"),
+            Self::TableDescriptorNotValid => write!(f, "The table descriptor for this page is not valid!"),
+            Self::LeafTableSpotNotValid => write!(f, "The leaf table entry for this page is not valid!"),
+            Self::NotInMemoryRange => write!(f, "The address in not in a mmapped memory range!"),
+        }
+    }
+}
+//This function unmaps a page from the virtual address space and returns its virtual addr so that
+//the page can be freed
+
+//TODO: add in a mechanism for freeing page tables
+//TODO: account for huge page case
+//TODO: in the future, change this to take in a mutable reference to the user translation table
+//instead of just ttrb0
+pub unsafe fn unmap_va_user(va: usize, ttbr0: usize) -> Result<usize, UnMappingError> {
+    
+    let translation_table: &mut UserTranslationTable =
+        unsafe { &mut *kernel_paddr_to_vaddr(ttbr0_pa).cast::<UserTranslationTable>() };
+
+    //TODO: stop using these constants
+    let mut index_bits = 25 - 21; //mildly redundant
+    let mut mask = (1 << index_bits) - 1;
+    //level 2 table index is bits 29-21
+    let mut table_index = (va >> 21) & mask;
+    let mut table_descriptor: TableDescriptor = unsafe { translation_table.0[table_index].table };
+    
+    if !table_descriptor.is_valid() {
+        //Error: the table descriptor for this page is not valid
+        return Err(UnMappingError::TableDescriptorNotValid);
+    } else if !table_descriptor.is_table_descriptor() {
+        //Error: Huge page instead of table descriptor
+        return Err(UnMappingError::HugePagePresent);
+    }
+
+
+    //Regular page case
+    let lvl3_pa: usize = table_descriptor.get_pa() << 12;
+    let lvl3_va: usize = lvl3_pa - PAGE_ALLOCATOR.get().table_pa + PAGE_ALLOCATOR.get().table_va;
+    let lvl3_table_ptr: *mut [LeafDescriptor; PG_SZ] = lvl3_va as *mut [LeafDescriptor; PG_SZ];
+
+    index_bits = 21 - 12;
+    mask = (1 << index_bits) - 1;
+    table_index = (va >> 12) & mask;
+
+    let table_base = lvl3_table_ptr.cast::<LeafDescriptor>();
+    let entry = table_base.wrapping_add(table_index);
+    if !(unsafe { entry.read() }.is_valid()) {
+        //Error: leaf table entry for this page is page is not present
+        return Err(UnMappingError::LeafTableSpotNotValid);
+    }
+
+    //Need to get virtual addr of page so that it can be returned
+    //then invalidate the leaf entry
+}
+
+//TODO: implement function to clear a page table and free all pages
+
 /// not thread safe
 pub unsafe fn map_device(pa: usize) -> NonNull<()> {
     let pa_aligned = (pa / PG_SZ) * PG_SZ;

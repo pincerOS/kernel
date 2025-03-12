@@ -371,6 +371,12 @@ impl LeafDescriptor {
             .union(Self::from_bits_retain(pa as u64))
     }
 
+    //usize or u64
+    //TODO: double check this
+    pub const fn get_pa(self) -> usize {
+        return ((self.bits() >> 12) & ((1 << 36) - 1)) as usize;
+    }
+    
     pub const fn clear_pxn(self) -> Self {
         self.difference(Self::PXN)
     }

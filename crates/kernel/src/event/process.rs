@@ -96,6 +96,8 @@ impl Process {
         
         //Temporary: allocate memory for the reserved range right away
         for virt_addr in start_addr..(start_addr + size) {
+            //TODO: make another version of alloc frame which uses the physical base to give pages
+            //instead of using the page table allocator
             let (_page_va, page_pa) = PAGE_ALLOCATOR.get().alloc_frame();
             unsafe { map_pa_to_va_user(page_pa, virt_addr, self.ttbr0_el1).unwrap(); }
         }
