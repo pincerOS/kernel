@@ -1,25 +1,65 @@
 #[cfg(feature = "std")]
 extern crate std;
 
-use crate::{linux::FileBlockDevice, Ext2, INodeWrapper};
+use crate::{linux::FileBlockDevice};
 use alloc::rc::Rc;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{File, ReadDir};
+use std::fs::File;
 use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::prelude::v1::{Box, String, ToString, Vec};
-use std::process::{Command, Output};
+use std::prelude::v1::{String, ToString, Vec};
+use std::process::Command;
 use std::{env, io, println, vec};
 use std::{format, fs};
+use crate::ext::Ext;
+use crate::inode::INodeWrapper;
 
-pub fn create_ext2_fs(
+fn create_fs_from_image(
+    img_name: &str,
+    ro: bool,
+) -> Ext<FileBlockDevice>  {
+    let file: File = File::options()
+        .read(true)
+        .write(!ro)
+        .open(img_name)
+        .unwrap();
+    let disk: FileBlockDevice = FileBlockDevice::new(file);
+
+    let mut ext = Ext::new(disk);
+
+    ext.unwrap()
+}
+
+fn create_ext4_fs(
+    dir_path: &str,
+    block_size: usize,
+    img_name: &str,
+    inode_size: usize,
+    ro: bool,
+    dir_size: &str
+) -> Ext<FileBlockDevice> {
+    let inode_size_string: String = inode_size.to_string();
+    let base_args: [&str; 15] = ["-q", "-b", &*block_size.to_string(), "-i",
+                             &*block_size.to_string(), "-d", &*dir_path, "-I",
+                             inode_size_string.as_str(), "-r", "1",
+                             "-t", "ext4", &*img_name, dir_size];
+
+    Command::new("mkfs.ext4")
+        .args(base_args)
+        .output()
+        .unwrap();
+
+    create_fs_from_image(img_name, ro)
+}
+
+fn create_ext2_fs(
     dir_path: &str,
     block_size: usize,
     img_name: &str,
     ro: bool,
-) -> Ext2<FileBlockDevice> {
+) -> Ext<FileBlockDevice> {
     Command::new("mkfs.ext2")
         .args([
             "-q",
@@ -41,16 +81,7 @@ pub fn create_ext2_fs(
         .output()
         .unwrap();
 
-    let file: File = File::options()
-        .read(true)
-        .write(!ro)
-        .open(img_name)
-        .unwrap();
-    let disk: FileBlockDevice = FileBlockDevice::new(file);
-
-    let mut ext2 = Ext2::new(disk);
-
-    ext2.unwrap()
+    create_fs_from_image(img_name, ro)
 }
 
 #[derive(PartialEq, Eq)]
@@ -156,7 +187,7 @@ fn read_and_verify_via_fuse_test(verify_requests: &Vec<VerifyRequest>, image_pat
 }
 
 fn read_and_verify_test(
-    ext2: &mut Ext2<FileBlockDevice>,
+    ext2: &mut Ext<FileBlockDevice>,
     verify_requests: &Vec<VerifyRequest>,
     image_path: &str,
 ) {
@@ -183,7 +214,7 @@ fn read_and_verify_test(
 }
 
 fn write_and_verify_test(
-    ext2: &mut Ext2<FileBlockDevice>,
+    ext2: &mut Ext<FileBlockDevice>,
     verify_requests: &Vec<VerifyRequest>,
     image_path: &str,
 ) {
@@ -286,7 +317,11 @@ fn create_new_test_folder(test_folder_name: &str, base_folder: Option<&str>) -> 
         std::fs::remove_dir_all(&path).unwrap();
     }
 
-    copy_dir_all(base_folder.unwrap(), &path).unwrap();
+    if base_folder.is_some() {
+        copy_dir_all(base_folder.unwrap(), &path).unwrap();
+    } else {
+        std::fs::create_dir_all(&path).unwrap();
+    }
 
     path
 }
@@ -634,4 +669,90 @@ fn dir_tree_test() {
     ];
 
     write_and_verify_test(&mut ext2, &verify_requests, image_path);
+}
+
+#[test]
+fn ext4_ro_sanity_test() {
+    let image_path = "ro.img";
+    let mut ext4 = create_ext4_fs("../../test/example_1.dir", 1024, 
+                                  image_path, 256, true, "64m");
+
+    let verify_requests = vec![
+        VerifyRequest {
+            file_path: b"test.txt",
+            data: b"asldfalsjdkfvnlasdfvnka,dsfvmna",
+            expect_data: None,
+            write_mode: WriteMode::None,
+            create_dirs_if_nonexistent: false,
+        },
+        VerifyRequest {
+            file_path: b"folder/asdf.txt",
+            data: b"Hi",
+            expect_data: None,
+            write_mode: WriteMode::None,
+            create_dirs_if_nonexistent: false,
+        },
+    ];
+
+    read_and_verify_test(&mut ext4, &verify_requests, image_path);
+}
+
+#[test]
+fn ext4_ro_hash_dir_find_test() {
+    const NUM_OF_FILES: usize = 10000;
+    const NUM_OF_FILES_TO_CHECK: usize = 50;
+
+    let mut files_to_check: [String; NUM_OF_FILES_TO_CHECK] = [const { String::new() };NUM_OF_FILES_TO_CHECK];
+    let mut bytes_of_files_to_check: [[u8; 1]; NUM_OF_FILES_TO_CHECK] = [[0; 1]; NUM_OF_FILES_TO_CHECK];
+    let mut verify_requests: Vec<VerifyRequest> = Vec::with_capacity(NUM_OF_FILES_TO_CHECK);
+
+    for i in 0..NUM_OF_FILES {
+        //let mut test_file_path: PathBuf = test_folder_path.clone();
+        let file_name: String = i.to_string() + ".txt";
+
+        //test_file_path.push(file_name.clone());
+
+        //let mut f = File::create_new(test_file_path).unwrap();
+        let val_to_write: [u8; 1] = [(i % 256) as u8];
+
+        if (i % (NUM_OF_FILES / NUM_OF_FILES_TO_CHECK)) == 0 {
+            let files_to_check_index = i / (NUM_OF_FILES / NUM_OF_FILES_TO_CHECK);
+
+            files_to_check[files_to_check_index] = file_name;
+            bytes_of_files_to_check[files_to_check_index] = val_to_write;
+        }
+
+        //f.write(&val_to_write).unwrap();
+    }
+
+    for i in 0..NUM_OF_FILES_TO_CHECK {
+        verify_requests.push(VerifyRequest {
+            file_path: files_to_check[i].as_bytes(),
+            data: &bytes_of_files_to_check[i],
+            expect_data: None,
+            write_mode: WriteMode::None,
+            create_dirs_if_nonexistent: false,
+        });
+    }
+
+    // TODO(Bobby): find someway to automate hashed directory filesystem creation (mkfs.ext4 doesn't make them)
+    /*let base_test_folder_path: PathBuf = create_new_test_folder(
+        "ext4_hash_dir_find_test",
+        None,
+    );
+    let test_folder_path: PathBuf = base_test_folder_path.join("test");
+
+    std::fs::create_dir_all(&test_folder_path).unwrap();
+
+    let features: [&str; 1] = ["dir_index"];
+
+    let mut ext4 =
+        create_ext4_fs(base_test_folder_path.to_str().unwrap(), 1024, image_path,
+               128, true, "128m");*/
+
+    let image_path = "ext4_sanity_read.img";
+
+    let mut ext4 = create_fs_from_image(image_path, true);
+
+    read_and_verify_test(&mut ext4, &verify_requests, image_path);
 }

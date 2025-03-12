@@ -1,0 +1,33 @@
+grouped together into implementation phases
+
+64bit: need this for both read and write, although I'm not sure if this is just another no-op extension or not
+flex_bg: need this for both read and write, changes how block groups are read
+filetype: need this for both read and write, adds file_type u8 to dir entries
+
+ext_attr:
+extra_isize: handling s_min_extra_isize and s_want_extra_isizes_want_extra_isize in superblock, needed for read and write
+
+
+--------------------------------------------------------------
+dir_index
+--------------------------------------------------------------
+
+has_journal: journaling
+
+orphan_file: stores orphan inodes in a file instead of a linked list, can wait until fsck/journaling (also relatively new feature to ext4)
+needs_recovery
+extent
+
+sparse_super: should be fine to ignore until journaling (superblock backups are not in every block group)
+
+large_file: unknown difficulty (could be no-op as long as we have 64 bit support?), only triggers on >2GB files
+
+metadata_csum: checksumming for all of the data-structures, write impl needed
+
+huge_file: should be fine ignoring this for now, we don't need to store files >2TB
+
+dir_nlink: if links >65000, we set n_links = 1. write impl should be trivial, nothing needed for read
+resize_inode: nothing needed to do (handled by mkfs and resizing utilities)
+metadata_csum_seed: can be no-op for now, only applies if we are changing UUID of FS
+
+orphan_present: ???

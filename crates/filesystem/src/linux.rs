@@ -1,7 +1,7 @@
 #[cfg(feature = "std")]
 extern crate std;
 
-use crate::{BlockDevice, BlockDeviceError, SECTOR_SIZE};
+use crate::block_device::{BlockDevice, BlockDeviceError, SECTOR_SIZE};
 
 pub struct FileBlockDevice {
     file: std::fs::File,
