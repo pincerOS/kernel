@@ -1123,6 +1123,10 @@ pub fn write_volatile(reg: usize, val: u32) {
     unsafe { core::ptr::write_volatile((dwc_otg_driver.base_addr + reg) as *mut u32, val) }
 }
 
+pub fn get_dwc_ptr(offset: usize) -> *mut u32 {
+    unsafe { (dwc_otg_driver.base_addr + offset) as *mut u32 }
+}
+
 pub fn dwc_otg_initialize_controller(base_addr: *mut ()) {
     unsafe {
         dwc_otg_driver = DWC_OTG::init(base_addr);

@@ -29,6 +29,8 @@ use crate::device::usb::types::*;
 use crate::device::usb::hcd::hub::*;
 use crate::device::usb::usbd::pipe::*;
 use crate::device::usb::usbd::request::*;
+use crate::device::usb::hcd::dwc::roothub::*;
+use crate::device::usb::*;
 
 pub const HidMessageTimeout:u32 = 10;
 
@@ -203,6 +205,9 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         println!("| HID: GRXSTSPD: {:x}", grxstspd);
 
         println!("| HID: endpoint result: {:?}", result);
+
+        memory_copy(buffer.as_mut_ptr(), get_dwc_ptr(DOTG_DFIFO(1) as usize) as *const u8, 8);
+
         for i in 0..8 {
             print!("{:x} ", buffer[i]);
         }
