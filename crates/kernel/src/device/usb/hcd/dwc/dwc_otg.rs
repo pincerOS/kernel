@@ -317,6 +317,7 @@ pub fn HcdChannelSendWaitOne(
                 break;
             }
         }
+        println!("| HCD: Channel interrupt {:#x}\n", hcint);
 
         let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
         convert_into_host_transfer_size(
@@ -518,6 +519,7 @@ fn HcdChannelSendWait(
                     println!("| HCD: Retrying to packet.\n");
                     break;
                 }
+                println!("| DWC: Result is {:#?}", result);
                 return result;
             }
 

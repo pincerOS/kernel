@@ -23,6 +23,8 @@ use super::super::usbd::usbd::*;
 use alloc::vec;
 use alloc::boxed::Box;
 use crate::device::system_timer::micro_delay;
+use crate::device::usb::hcd::dwc::dwc_otg::read_volatile;
+use crate::device::usb::hcd::dwc::dwc_otgreg::*;
 use crate::device::usb::types::*;
 use crate::device::usb::hcd::hub::*;
 use crate::device::usb::usbd::pipe::*;
@@ -176,6 +178,7 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 
     micro_delay(500000);
 
+    println!("| HID: endpoint address: {:x}", endpoint_address_to_num(device.endpoints[interface_number as usize][0 as usize].endpoint_address));
 
     loop {
         let result = UsbInterruptMessage(device, 1, 
@@ -183,6 +186,7 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
                 transfer_type: UsbTransfer::Interrupt,
                 speed: device.speed,
                 end_point: endpoint_address_to_num(device.endpoints[interface_number as usize][0 as usize].endpoint_address),
+                // end_point: device.endpoints[interface_number as usize][0 as usize].endpoint_address.Number,
                 device: device.number as u8,
                 direction: UsbDirection::In,
                 max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
@@ -191,6 +195,13 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
             buffer.as_mut_ptr(), 8,
             HidMessageTimeout
         );
+
+        let grxstsr = read_volatile(DOTG_GRXSTSRH);
+        println!("| HID: GRXSTSR: {:x}", grxstsr);
+
+        let grxstspd = read_volatile(DOTG_GRXSTSPD);
+        println!("| HID: GRXSTSPD: {:x}", grxstspd);
+
         println!("| HID: endpoint result: {:?}", result);
         for i in 0..8 {
             print!("{:x} ", buffer[i]);
