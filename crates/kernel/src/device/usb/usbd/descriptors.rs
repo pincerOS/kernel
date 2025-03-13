@@ -11,6 +11,8 @@
 *	describe various aspects of USB.
 ******************************************************************************/
 
+use crate::device::usb::types::{UsbDirection, UsbTransfer};
+
 #[repr(u8)]
 #[derive(Default, Debug, Clone, Copy)]
 pub enum DescriptorType {
@@ -198,6 +200,14 @@ pub struct UsbEndpointAddress {
     pub Number: u8,
 }
 
+pub const fn endpoint_address_to_num(ep: UsbEndpointAddress) -> u8 {
+    ep.Number & 0xf
+}
+
+pub const fn endpoint_address_to_dir(ep: UsbEndpointAddress) -> UsbDirection {
+    UsbDirection::from_u8(ep.Number >> 7)
+}
+
 #[repr(C, packed)]
 #[derive(Default, Debug, Clone, Copy)]
 pub struct UsbEndpointAttributes {
@@ -224,6 +234,10 @@ pub struct UsbEndpointAttributes {
     // 	unsigned _reserved6_7 : 2; // @6
     // } __attribute__ ((__packed__)) Attributes; // +0x3
     pub Type: u8,
+}
+
+pub const fn endpoint_attributes_to_type(ep: UsbEndpointAttributes) -> UsbTransfer {
+    UsbTransfer::from_u8(ep.Type & 0x3)
 }
 
 #[repr(C)]

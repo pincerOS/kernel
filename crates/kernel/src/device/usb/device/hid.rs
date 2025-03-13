@@ -14,6 +14,8 @@
 *	whatnot would no doubt be very useful.
 ******************************************************************************/
 
+pub mod keyboard;
+
 use super::super::usbd::device::*;
 use super::super::usbd::descriptors::*;
 use super::super::usbd::usbd::*;
@@ -100,7 +102,7 @@ fn HidGetReport(device: &mut UsbDevice, report_type: HidReportType, report_id: u
 pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 
     println!("| HID: Attaching to interface {}.", interface_number);
-
+    let mut result;
 
     if device.interfaces[interface_number as usize].class != InterfaceClass::InterfaceClassHid {
         println!("HID: Interface {} is not a HID interface.", interface_number);
@@ -146,24 +148,60 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         if device.interfaces[interface_number as usize].protocol == 0x01 {
             println!("| HID: Keyboard detected.");
         }
+        else {
+            println!("| HID: Unknown HID device detected: {:#x}", device.interfaces[interface_number as usize].protocol);
+            return ResultCode::ErrorArgument;
+        }
+
+        result = HidSetProtocol(device, interface_number as u8, 1);
+        if result != ResultCode::OK {
+            println!("| HID: Could not revert to report mode from HID mode");
+            return result;
+        }
+    }   
 
 
-    }
-
+    let header = device.full_configuration.as_mut().unwrap().as_mut_ptr() as *mut UsbDescriptorHeader;
     let mut buffer = Box::new([0u8; 10]);
-
+    //https://github.com/tmk/tmk_keyboard/wiki/USB%3A-HID-Usage-Table
+    
+    
     let result = HidGetReport(device, HidReportType::Feature, 0, interface_number as u8, 8, buffer.as_mut_ptr());
+    println!("| HID: Get report result: {:?}", result);
+    //print 8 bytes of buffer
+    for i in 0..8 {
+        print!("{:x} ", buffer[i]);
+    }
+    println!();
+
+    micro_delay(500000);
+
 
     loop {
-        println!("| HID: Get report result: {:?}", result);
-        //print 8 bytes of buffer
+        let result = UsbInterruptMessage(device, 1, 
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Interrupt,
+                speed: device.speed,
+                end_point: endpoint_address_to_num(device.endpoints[interface_number as usize][0 as usize].endpoint_address),
+                device: device.number as u8,
+                direction: UsbDirection::In,
+                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
+                _reserved: 0,
+            }, 
+            buffer.as_mut_ptr(), 8,
+            HidMessageTimeout
+        );
+        println!("| HID: endpoint result: {:?}", result);
         for i in 0..8 {
             print!("{:x} ", buffer[i]);
         }
         println!();
-
+    
         micro_delay(500000);
     }
+
+
+    
 
     return ResultCode::OK;
 }

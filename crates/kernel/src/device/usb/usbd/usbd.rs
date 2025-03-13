@@ -15,6 +15,7 @@
 use crate::device::system_timer::micro_delay;
 use crate::device::usb::hcd::dwc::dwc_otg::*;
 use crate::device::usb::hcd::dwc::roothub::memory_copy;
+use crate::syscall::channel;
 
 use alloc::boxed::Box;
 use alloc::vec;
@@ -69,6 +70,29 @@ pub fn UsbInitialise(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
     }
 
     result
+}
+
+pub fn UsbInterruptMessage(
+    device: &mut UsbDevice,
+    channel: u8,
+    pipe: UsbPipeAddress,
+    buffer: *mut u8,
+    buffer_length: u32,
+    timeout_: u32,
+) -> ResultCode {
+    let result = HcdSubmitInterruptMessage(device, channel, pipe, buffer, buffer_length, &mut UsbDeviceRequest {
+        request_type: 0,
+        request: UsbDeviceRequestRequest::GetStatus,
+        value: 0,
+        index: 0,
+        length: buffer_length as u16,
+    });
+
+    if result != ResultCode::OK {
+        println!("| Failed to send message result: {:?}", result);
+        return result;
+    }
+    return result;
 }
 
 pub fn UsbControlMessage(
