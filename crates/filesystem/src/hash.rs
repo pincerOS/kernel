@@ -68,10 +68,11 @@ const TEA_ROUNDS: u32 = 32;
 
 fn tea_encrypt(mut values: [u32; 2], keys: [u32; 4]) -> [u32; 2] {
     for i in 0..TEA_ROUNDS {
-        values[0] =
-            values[0] + ((values[1] << 4) + keys[0]) ^ (values[1] + (i * TEA_DELTA))
-                ^ (values[1] >> 5) + keys[1];
-        values[1] = values[1] + ((values[0] << 4) + keys[2]) ^ (values[0] + (i * TEA_DELTA))
+        values[0] = values[0] + ((values[1] << 4) + keys[0])
+            ^ (values[1] + (i * TEA_DELTA))
+            ^ (values[1] >> 5) + keys[1];
+        values[1] = values[1] + ((values[0] << 4) + keys[2])
+            ^ (values[0] + (i * TEA_DELTA))
             ^ (values[0] >> 5) + keys[3];
     }
 
@@ -80,12 +81,12 @@ fn tea_encrypt(mut values: [u32; 2], keys: [u32; 4]) -> [u32; 2] {
 
 fn tea_decrypt(mut values: [u32; 2], keys: [u32; 4]) -> [u32; 2] {
     for i in (0..TEA_ROUNDS).rev() {
-        values[1] =
-            values[1] - ((values[0] << 4) + keys[2]) ^ (values[0] + (i * TEA_DELTA))
-                ^ (values[0] << 5) + keys[3];
-        values[0] =
-            values[0] - ((values[1] << 4) + keys[0]) ^ (values[1] + (i * TEA_DELTA))
-                ^ (values[1] >> 5) + keys[1];
+        values[1] = values[1] - ((values[0] << 4) + keys[2])
+            ^ (values[0] + (i * TEA_DELTA))
+            ^ (values[0] << 5) + keys[3];
+        values[0] = values[0] - ((values[1] << 4) + keys[0])
+            ^ (values[1] + (i * TEA_DELTA))
+            ^ (values[1] >> 5) + keys[1];
     }
 
     values

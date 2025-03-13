@@ -1,17 +1,17 @@
-use alloc::rc::{Rc, Weak};
-use std::cell::RefCell;
-use std::collections::BTreeMap;
-use std::prelude::rust_2015::Vec;
-use std::{print, vec};
-use std::ops::ControlFlow;
-use bytemuck::bytes_of;
-use crate::{get_epoch_time, BlockDeviceError, DeferredWriteMap, Ext2Error};
 use crate::bgd::BGD;
 use crate::block_device::{BlockDevice, SECTOR_SIZE};
 use crate::dir::{DirectoryEntryConstants, DirectoryEntryData, DirectoryEntryWrapper};
-use crate::inode::{i_flags, i_mode, INode, INodeBlockInfo, INodeWrapper};
 use crate::inode::i_mode::{EXT2_S_IFDIR, EXT2_S_IFREG};
+use crate::inode::{i_flags, i_mode, INode, INodeBlockInfo, INodeWrapper};
 use crate::superblock::Superblock;
+use crate::{get_epoch_time, BlockDeviceError, DeferredWriteMap, Ext2Error};
+use alloc::rc::{Rc, Weak};
+use bytemuck::bytes_of;
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::ops::ControlFlow;
+use std::prelude::rust_2015::Vec;
+use std::{print, vec};
 
 pub struct Ext<Device> {
     pub(crate) device: Device,
@@ -512,8 +512,8 @@ where
             for (inode_bitmap_byte_index, inode_bitmap_byte) in block_buffer.iter().enumerate() {
                 for i in 0..8 {
                     let current_relative_inode_num = (inode_bitmap_byte_index * 8) + i;
-                    let inode_reserved =
-                        current_relative_inode_num >= first_non_reserved_inode && found_block_group_index == 0;
+                    let inode_reserved = current_relative_inode_num >= first_non_reserved_inode
+                        && found_block_group_index == 0;
 
                     inode_byte_offset = 7 - i;
 
@@ -676,7 +676,7 @@ where
             i_file_acl: 0,
             i_size_high: 0,
             i_obso_faddr: 0,
-            i_osd2: [0; 12]
+            i_osd2: [0; 12],
         };
 
         if name.len() > DirectoryEntryConstants::MAX_FILE_NAME_LEN {
@@ -732,8 +732,8 @@ where
 
                 if dir_entry_wrapper.entry.rec_len as usize
                     >= prior_dir_entry_allocated_size
-                    + dir_entry_padding
-                    + new_dir_entry_wrapper.entry.rec_len as usize
+                        + dir_entry_padding
+                        + new_dir_entry_wrapper.entry.rec_len as usize
                 {
                     // resizing prior directory entry to allow our new directory entry
                     let prior_dir_entry_new_size =

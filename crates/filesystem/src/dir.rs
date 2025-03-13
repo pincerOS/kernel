@@ -1,7 +1,7 @@
-use crate::{DeferredWriteMap,Ext2Error};
 use crate::block_device::BlockDevice;
 use crate::ext::Ext;
 use crate::inode::INodeWrapper;
+use crate::{DeferredWriteMap, Ext2Error};
 
 pub mod file_type {
     pub const EXT2_FT_UNKNOWN: u8 = 0;
@@ -67,7 +67,7 @@ pub struct HTreeDirectoryEntryNode {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct HTreeDirectoryEntry {
     pub(crate) hash: u32,
-    pub(crate) block: u32
+    pub(crate) block: u32,
 }
 
 //const _: () = assert!(size_of::<HTreeDirectoryEntryRoot>() == 128);

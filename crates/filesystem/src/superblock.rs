@@ -32,18 +32,18 @@ pub struct Superblock {
     pub s_feature_compat: u32,
     pub s_feature_incompat: u32,
     pub s_feature_ro_compat: u32,
-    pub s_uuid: [u32;4],
-    pub s_volume_name: [u32;4],
-    pub s_last_mounted: [u32;16],
+    pub s_uuid: [u32; 4],
+    pub s_volume_name: [u32; 4],
+    pub s_last_mounted: [u32; 16],
     pub s_algorithm_usage_bitmap: u32,
     pub s_prealloc_blocks: u8,
     pub s_prealloc_dir_blocks: u8,
     pub s_reserved_gdt_blocks: u16,
-    pub s_journal_uuid: [u32;4],
+    pub s_journal_uuid: [u32; 4],
     pub s_journal_inum: u32,
     pub s_journal_dev: u32,
     pub s_last_orphan: u32,
-    pub s_hash_seed: [u32;4],
+    pub s_hash_seed: [u32; 4],
     pub s_def_hash_version: u8,
     pub s_jnl_backup_type: u8,
     pub s_desc_size: u16,
@@ -52,7 +52,7 @@ pub struct Superblock {
 
     // new fancy ext4 flags wow
     pub s_mkfs_time: u32,
-    pub s_jnl_blocks: [u32;17],
+    pub s_jnl_blocks: [u32; 17],
     pub s_blocks_count_hi: u32,
     pub s_r_blocks_count_hi: u32,
     pub s_free_blocks_count_hi: u32,
@@ -101,7 +101,7 @@ pub struct Superblock {
     pub s_pad: u16,
     pub s_reserved: [u32; 96],
     pub s_checksum: u32,
-    pub s_pad_2: u32
+    pub s_pad_2: u32,
 }
 
 impl Superblock {

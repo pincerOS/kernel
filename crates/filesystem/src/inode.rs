@@ -1,15 +1,18 @@
+use crate::bgd::BGD;
+use crate::block_device::BlockDevice;
+use crate::dir::{
+    dirhash, DirectoryEntryData, DirectoryEntryWrapper, HTreeDirectoryEntry,
+    HTreeDirectoryEntryNode, HTreeDirectoryEntryRoot,
+};
+use crate::ext::Ext;
+use crate::Ext2Error::{FileNotFound, NotEnoughDeviceSpace};
+use crate::{hash, DeferredWriteMap, Ext2Error, UNALLOCATED_BLOCK_SLOT};
 use alloc::rc::Rc;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 use std::prelude::rust_2015::Vec;
 use std::{print, slice, vec};
-use crate::block_device::BlockDevice;
-use crate::{hash, DeferredWriteMap, Ext2Error, UNALLOCATED_BLOCK_SLOT};
-use crate::bgd::BGD;
-use crate::dir::{dirhash, DirectoryEntryData, DirectoryEntryWrapper, HTreeDirectoryEntry, HTreeDirectoryEntryNode, HTreeDirectoryEntryRoot};
-use crate::Ext2Error::{FileNotFound, NotEnoughDeviceSpace};
-use crate::ext::Ext;
 
 pub mod i_mode {
     pub const EXT2_S_IFSOCK: u16 = 0xC000;
@@ -53,6 +56,40 @@ pub mod i_flags {
     pub const EXT2_RESERVED_FL: u32 = 0x80000000;
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct ext4_extent_header {
+    eh_magic: u16,
+    eh_entries: u16,
+    eh_max: u16,
+    eh_depth: u16,
+    eh_generation: u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct ext4_extent_idx {
+    ei_block: u32,
+    ei_leaf_lo: u32,
+    ei_leaf_hi: u16,
+    ei_unused: u16,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct ext4_extent {
+    ee_block: u32,
+    ee_len: u16,
+    ee_start_hi: u16,
+    ee_start_lo: u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct ext4_extent_tail {
+    eb_checksum: u32,
+}
+
 pub(crate) struct INodeBlockInfo {
     pub(crate) block_num: usize,
     pub(crate) block_offset: usize,
@@ -73,12 +110,16 @@ pub struct INode {
     i_blocks: u32,
     pub(crate) i_flags: u32,
     i_osd1: u32,
-    i_block: [u64; 15], // 12 direct, single, double, triple. The upper 32-bits are only used if the 64bit function is active
+    i_block: [u32; 15], // 12 direct, single, double, triple.
+    // even in 64-bit mode i_block are 32-bit. HOWEVER,
+    // "Files not using extents (i.e. files using block maps) must be placed within the first
+    // 2^32 blocks of a filesystem. Files with extents must be placed within the first 2^48
+    // blocks of a filesystem. It’s not clear what happens with larger filesystems."
     i_generation: u32,
     i_file_acl: u32,
     i_size_high: u32,
     i_obso_faddr: u32, // obsolete
-    i_osd2: [u8;12],
+    i_osd2: [u8; 12],
 
     i_extra_isize: u16,
     i_checksum_hi: u16,
@@ -88,7 +129,7 @@ pub struct INode {
     i_crtime: u32,
     i_crtime_extra: u32,
     i_version_hi: u32,
-    i_projid: u32
+    i_projid: u32,
 }
 
 #[derive(Debug)]
@@ -179,8 +220,8 @@ impl INodeWrapper {
 
         if number
             >= (Self::SINGLE_LINK_BLOCK_PTR_INDEX
-            + block_inode_list_size
-            + block_inode_list_size_squared)
+                + block_inode_list_size
+                + block_inode_list_size_squared)
         {
             // hard mode: go through link to list of link of list of links to list of direct
             // block ptrs
@@ -272,22 +313,31 @@ impl INodeWrapper {
     ) -> Result<(), Ext2Error> {
         // TODO: caching
         let block_size = ext2.superblock.get_block_size();
-        let file_size: u32 = self.size() as u32;
+        let file_size: usize = self.size() as usize;
+        assert_eq!(buffer.len() % block_size, 0);
 
         if file_size <= 60 {
-            for i in 0..(file_size / size_of::<u32>()) {
-                //
-            }
-        }
+            // ext4's inline data feature in i_blocks
+            // TODO(Bobby): implement inline data in ext attributes
 
-        assert_eq!(buffer.len() % block_size, 0);
-        for (buf_segment, block_idx) in buffer
-            .chunks_exact_mut(block_size)
-            .zip(logical_block_start..)
-        {
-            let logical_block_num: usize =
-                self.get_inode_block_num(block_idx, ext2, deferred_writes)? as usize;
-            ext2.read_logical_block(logical_block_num, buf_segment, deferred_writes)?;
+            for i in 0..(file_size / size_of::<u32>()) {
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        self.inode.i_block[i..(i + 1)].as_ptr().cast(),
+                        buffer[(i * size_of::<u32>())..((i + 1) * size_of::<u32>())].as_mut_ptr(),
+                        size_of::<u32>(),
+                    )
+                }
+            }
+        } else {
+            for (buf_segment, block_idx) in buffer
+                .chunks_exact_mut(block_size)
+                .zip(logical_block_start..)
+            {
+                let logical_block_num: usize =
+                    self.get_inode_block_num(block_idx, ext2, deferred_writes)? as usize;
+                ext2.read_logical_block(logical_block_num, buf_segment, deferred_writes)?;
+            }
         }
 
         Ok(())
@@ -379,10 +429,14 @@ impl INodeWrapper {
         while block_idx < dir_blocks {
             self.read_block(block_idx, buffer.as_mut_slice(), ext2, deferred_writes)?;
 
-            let dir_entries_option: Option<O> =
-                self.get_dir_entries_inner(ext2, &mut callback, block_idx,
-                                           &buffer[inner_block_offset..],
-                                           &mut inner_block_offset, deferred_writes)?;
+            let dir_entries_option: Option<O> = self.get_dir_entries_inner(
+                ext2,
+                &mut callback,
+                block_idx,
+                &buffer[inner_block_offset..],
+                &mut inner_block_offset,
+                deferred_writes,
+            )?;
 
             if dir_entries_option.is_some() {
                 return Ok(dir_entries_option);
@@ -421,17 +475,15 @@ impl INodeWrapper {
         )?;
         let inode_num: u32 = inode_num.ok_or(Ext2Error::FileNotFound)?;
 
-        let inode: INode = ext2.get_inode_self(
-            inode_num as usize,
-            None,
-        )?;
+        let inode: INode = ext2.get_inode_self(inode_num as usize, None)?;
 
         let return_value: Rc<RefCell<INodeWrapper>> = Rc::new(RefCell::new(INodeWrapper {
             inode,
             _inode_num: inode_num,
         }));
 
-        ext2.inode_map.insert(inode_num as usize, Rc::downgrade(&return_value));
+        ext2.inode_map
+            .insert(inode_num as usize, Rc::downgrade(&return_value));
 
         Ok(return_value)
     }
@@ -439,13 +491,12 @@ impl INodeWrapper {
     pub(crate) fn find_dir_entry_hashed<D: BlockDevice>(
         &self,
         ext2: &mut Ext<D>,
-        name: &[u8]
+        name: &[u8],
     ) -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
         let block_size: usize = ext2.superblock.get_block_size();
         let mut block_buffer = alloc::vec![0; block_size];
 
         self.read_block(0, block_buffer.as_mut_slice(), ext2, None)?;
-
 
         let mut filename_hash: u32 = 0;
 
@@ -456,7 +507,10 @@ impl INodeWrapper {
 
         {
             let dir_entry_root: &HTreeDirectoryEntryRoot = unsafe {
-                &block_buffer.as_slice().align_to::<HTreeDirectoryEntryRoot>().1[0]
+                &block_buffer
+                    .as_slice()
+                    .align_to::<HTreeDirectoryEntryRoot>()
+                    .1[0]
             };
 
             let filename_hash_result: Result<u32, Ext2Error> =
@@ -470,16 +524,15 @@ impl INodeWrapper {
 
             current_tree_level = 0;
             current_node_length = dir_entry_root.count as usize;
-            target_htree_entry = HTreeDirectoryEntry{hash: 0, block: dir_entry_root.block};
+            target_htree_entry = HTreeDirectoryEntry {
+                hash: 0,
+                block: dir_entry_root.block,
+            };
             indirect_levels = dir_entry_root.indirect_levels as usize;
         }
 
         while current_tree_level < indirect_levels {
-            let htree_entry_start: usize = if current_tree_level == 0 {
-                0x28
-            } else {
-                0x12
-            };
+            let htree_entry_start: usize = if current_tree_level == 0 { 0x28 } else { 0x12 };
             let (_, mut htree_slice, _) = unsafe {
                 block_buffer.as_mut_slice()[htree_entry_start..].align_to::<HTreeDirectoryEntry>()
             };
@@ -491,7 +544,8 @@ impl INodeWrapper {
                 let index: usize = (start + end) / 2;
                 let current_tree_entry: HTreeDirectoryEntry = htree_slice[index];
 
-                if index != (current_node_length - 1) && filename_hash > htree_slice[index + 1].hash {
+                if index != (current_node_length - 1) && filename_hash > htree_slice[index + 1].hash
+                {
                     start = index + 1;
                 } else if htree_slice[index].hash > filename_hash {
                     end = index - 1;
@@ -503,15 +557,22 @@ impl INodeWrapper {
 
             current_tree_level += 1;
 
-            self.read_block(target_htree_entry.block as usize,
-                            block_buffer.as_mut_slice(), ext2, None)?;
+            self.read_block(
+                target_htree_entry.block as usize,
+                block_buffer.as_mut_slice(),
+                ext2,
+                None,
+            )?;
 
             if current_tree_level < indirect_levels {
                 // the inode number must be zero to appear like this entry isn't in use
                 assert_eq!(Self::get_word(&block_buffer[0..4]), 0);
 
                 let htree_dir_entry_node: &HTreeDirectoryEntryNode = unsafe {
-                    &block_buffer.as_slice().align_to::<HTreeDirectoryEntryNode>().1[0]
+                    &block_buffer
+                        .as_slice()
+                        .align_to::<HTreeDirectoryEntryNode>()
+                        .1[0]
                 };
 
                 current_node_length = htree_dir_entry_node.count as usize;
@@ -547,16 +608,14 @@ impl INodeWrapper {
 
         let inode_num: u32 = inode_num.ok_or(Ext2Error::FileNotFound)?;
 
-        let inode: INode = ext2.get_inode_self(
-            inode_num as usize,
-            None,
-        )?;
+        let inode: INode = ext2.get_inode_self(inode_num as usize, None)?;
         let return_value: Rc<RefCell<INodeWrapper>> = Rc::new(RefCell::new(INodeWrapper {
             inode,
             _inode_num: inode_num,
         }));
 
-        ext2.inode_map.insert(inode_num as usize, Rc::downgrade(&return_value));
+        ext2.inode_map
+            .insert(inode_num as usize, Rc::downgrade(&return_value));
 
         Ok(return_value)
     }
@@ -1368,12 +1427,8 @@ impl INodeWrapper {
             dirhash::LEGACY | dirhash::LEGACY_UNSIGNED => {
                 Ok(hash::hash_legacy(name, hash_version == dirhash::LEGACY))
             }
-            dirhash::HALF_MD4 | dirhash::HALF_MD4_UNSIGNED => {
-                Err(Ext2Error::NotYetImplemented)
-            },
-            dirhash::TEA | dirhash::TEA_UNSIGNED => {
-                Err(Ext2Error::NotYetImplemented)
-            }
+            dirhash::HALF_MD4 | dirhash::HALF_MD4_UNSIGNED => Err(Ext2Error::NotYetImplemented),
+            dirhash::TEA | dirhash::TEA_UNSIGNED => Err(Ext2Error::NotYetImplemented),
             _ => Err(Ext2Error::UnsupportedDirHashVersion),
         }
     }

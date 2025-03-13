@@ -1,7 +1,9 @@
 #[cfg(feature = "std")]
 extern crate std;
 
-use crate::{linux::FileBlockDevice};
+use crate::ext::Ext;
+use crate::inode::INodeWrapper;
+use crate::linux::FileBlockDevice;
 use alloc::rc::Rc;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,13 +15,8 @@ use std::prelude::v1::{String, ToString, Vec};
 use std::process::Command;
 use std::{env, io, println, vec};
 use std::{format, fs};
-use crate::ext::Ext;
-use crate::inode::INodeWrapper;
 
-fn create_fs_from_image(
-    img_name: &str,
-    ro: bool,
-) -> Ext<FileBlockDevice>  {
+fn create_fs_from_image(img_name: &str, ro: bool) -> Ext<FileBlockDevice> {
     let file: File = File::options()
         .read(true)
         .write(!ro)
@@ -38,18 +35,28 @@ fn create_ext4_fs(
     img_name: &str,
     inode_size: usize,
     ro: bool,
-    dir_size: &str
+    dir_size: &str,
 ) -> Ext<FileBlockDevice> {
     let inode_size_string: String = inode_size.to_string();
-    let base_args: [&str; 15] = ["-q", "-b", &*block_size.to_string(), "-i",
-                             &*block_size.to_string(), "-d", &*dir_path, "-I",
-                             inode_size_string.as_str(), "-r", "1",
-                             "-t", "ext4", &*img_name, dir_size];
+    let base_args: [&str; 15] = [
+        "-q",
+        "-b",
+        &*block_size.to_string(),
+        "-i",
+        &*block_size.to_string(),
+        "-d",
+        &*dir_path,
+        "-I",
+        inode_size_string.as_str(),
+        "-r",
+        "1",
+        "-t",
+        "ext4",
+        &*img_name,
+        dir_size,
+    ];
 
-    Command::new("mkfs.ext4")
-        .args(base_args)
-        .output()
-        .unwrap();
+    Command::new("mkfs.ext4").args(base_args).output().unwrap();
 
     create_fs_from_image(img_name, ro)
 }
@@ -674,8 +681,14 @@ fn dir_tree_test() {
 #[test]
 fn ext4_ro_sanity_test() {
     let image_path = "ro.img";
-    let mut ext4 = create_ext4_fs("../../test/example_1.dir", 1024, 
-                                  image_path, 256, true, "64m");
+    let mut ext4 = create_ext4_fs(
+        "../../test/example_1.dir",
+        1024,
+        image_path,
+        256,
+        true,
+        "64m",
+    );
 
     let verify_requests = vec![
         VerifyRequest {
@@ -702,8 +715,10 @@ fn ext4_ro_hash_dir_find_test() {
     const NUM_OF_FILES: usize = 10000;
     const NUM_OF_FILES_TO_CHECK: usize = 50;
 
-    let mut files_to_check: [String; NUM_OF_FILES_TO_CHECK] = [const { String::new() };NUM_OF_FILES_TO_CHECK];
-    let mut bytes_of_files_to_check: [[u8; 1]; NUM_OF_FILES_TO_CHECK] = [[0; 1]; NUM_OF_FILES_TO_CHECK];
+    let mut files_to_check: [String; NUM_OF_FILES_TO_CHECK] =
+        [const { String::new() }; NUM_OF_FILES_TO_CHECK];
+    let mut bytes_of_files_to_check: [[u8; 1]; NUM_OF_FILES_TO_CHECK] =
+        [[0; 1]; NUM_OF_FILES_TO_CHECK];
     let mut verify_requests: Vec<VerifyRequest> = Vec::with_capacity(NUM_OF_FILES_TO_CHECK);
 
     for i in 0..NUM_OF_FILES {

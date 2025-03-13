@@ -23,25 +23,25 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+use crate::block_device::BlockDeviceError;
 use alloc::vec::Vec;
 use std::cmp::PartialEq;
 use std::collections::BTreeMap;
 use std::ops::Div;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::block_device::BlockDeviceError;
 
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "std")]
-pub mod linux;
-pub(crate) mod hash;
-pub(crate) mod inode;
+pub(crate) mod bgd;
+pub(crate) mod block_device;
 pub(crate) mod dir;
 pub(crate) mod ext;
-pub(crate) mod bgd;
+pub(crate) mod hash;
+pub(crate) mod inode;
+#[cfg(feature = "std")]
+pub mod linux;
 pub(crate) mod superblock;
-pub(crate) mod block_device;
 
 #[derive(Debug, PartialEq)]
 pub enum Ext2Error {
@@ -68,8 +68,6 @@ type DeferredWriteMap = BTreeMap<usize, Vec<u8>>;
 
 // https://www.nongnu.org/ext2-doc/ext2.html
 
-
-
 pub mod reserved_inodes {
     pub const EXT2_BAD_INO: u32 = 1;
     pub const EXT2_ROOT_INO: u32 = 2;
@@ -78,7 +76,6 @@ pub mod reserved_inodes {
     pub const EXT2_BOOT_LOADER_INO: u32 = 5;
     pub const EXT2_UNDEL_DIR_INO: u32 = 6;
 }
-
 
 const UNALLOCATED_BLOCK_SLOT: u32 = 0;
 
@@ -89,7 +86,3 @@ fn get_epoch_time() -> usize {
         .unwrap()
         .as_secs() as usize
 }
-
-
-
-
