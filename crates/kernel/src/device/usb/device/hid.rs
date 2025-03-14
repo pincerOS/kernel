@@ -186,7 +186,7 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     //TODO: Hardcoded for keyboard atm
     //https://github.com/tmk/tmk_keyboard/wiki/USB%3A-HID-Usage-Table
     register_interrupt_endpoint(
-        device, 
+        device,
         device.endpoints[interface_number as usize][0 as usize].interval as u32, 
         endpoint_address_to_num(device.endpoints[interface_number as usize][0 as usize].endpoint_address), 
         UsbDirection::In, 

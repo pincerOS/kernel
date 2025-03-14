@@ -24,8 +24,9 @@ pub fn KeyboardAnalyze(buffer: *mut u8) {
             keys.push(key);
         }
     }
-    println!("{:?}", keys);
+    // println!("{:?}", keys);
     unsafe { KeyboardBuffer = keys };
+    // println!("hi");
 }
 
 pub fn ModifierToKeys(byte: u8) -> Vec<Key> {
@@ -106,7 +107,7 @@ pub fn ByteToKey(byte: u8) -> Key{
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
     NotDefined,
     A,

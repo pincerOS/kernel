@@ -120,6 +120,25 @@ impl ArmGenericTimer {
         }
     }
 
+    pub fn set_timer_abs(&mut self, time: u64) {
+        match self.timer_state {
+            TimerState::Uninit => {
+                //TODO: Error handling
+                println!("Set Timer: Timer not initialized")
+            }
+            TimerState::Disabled => {
+                self.timer_state = TimerState::Enabled;
+                unsafe {
+                    write_cntp_cval(time);
+                    enable_cntp();
+                }
+            }
+            TimerState::Enabled => {
+                unsafe { write_cntp_cval(time) };
+            }
+        }
+    }
+
     pub fn set_timer_seconds(&mut self, seconds: u64) {
         let time = seconds * self.freq;
         self.set_timer(time);
@@ -206,15 +225,21 @@ pub fn timer_scheduler_handler(_ctx: &mut Context) {
         for event in events.iter_mut() {
             if event.timer_timer <= time {
                 (event.callback)(event.endpoint);
+                // println!("Timer time: {} cur time {} repeat time {} new time {}", event.timer_timer, time, (event.repeat_time as u64) * TIMER_SCHEDULER.timer_freq / 1000, time + (event.repeat_time as u64) * TIMER_SCHEDULER.timer_freq / 1000);
                 event.timer_timer = time + (event.repeat_time as u64) * TIMER_SCHEDULER.timer_freq / 1000;
             }
         }
-
+        TIMER_SCHEDULER.min_time = u64::MAX;
         for event in events.iter() {
             if event.timer_timer < TIMER_SCHEDULER.min_time {
                 TIMER_SCHEDULER.min_time = event.timer_timer;
             }
         }
+        // println!("Freq: {}", TIMER_SCHEDULER.timer_freq);
+        // println!("Timer: {} cur time {}", TIMER_SCHEDULER.min_time, time);
+        ARM_GENERIC_TIMERS.with_current(|timer| {
+            timer.set_timer_abs(TIMER_SCHEDULER.min_time);
+        });
     }
 }
 
@@ -262,7 +287,7 @@ impl TimerScheduler {
         }
 
         ARM_GENERIC_TIMERS.with_current(|timer| {
-            timer.set_timer(self.min_time);
+            timer.set_timer_abs(self.min_time);
         });
     }
 }
