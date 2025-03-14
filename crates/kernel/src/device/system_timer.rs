@@ -9,12 +9,21 @@
 //!
 use crate::event::context::Context;
 use crate::sync::{ConstInit, PerCore, UnsafeInit, Volatile};
+use alloc::vec::Vec;
 use core::arch::asm;
+use core::cell::UnsafeCell;
 use core::panic;
+use crate::SpinLock;
+use super::usb::usbd::device::UsbDevice;
+use super::usb::usbd::endpoint::endpoint_descriptor;
 
 pub static SYSTEM_TIMER: UnsafeInit<Bcm2835SysTmr> = unsafe { UnsafeInit::uninit() };
 
 pub static ARM_GENERIC_TIMERS: PerCore<ArmGenericTimer> = PerCore::new();
+
+pub static mut TIMER_SCHEDULER: TimerScheduler = TimerScheduler::new();
+
+unsafe impl Sync for UsbDevice {}
 
 pub fn get_time() -> u64 {
     SYSTEM_TIMER.get().get_time()
@@ -111,6 +120,25 @@ impl ArmGenericTimer {
         }
     }
 
+    pub fn set_timer_abs(&mut self, time: u64) {
+        match self.timer_state {
+            TimerState::Uninit => {
+                //TODO: Error handling
+                println!("Set Timer: Timer not initialized")
+            }
+            TimerState::Disabled => {
+                self.timer_state = TimerState::Enabled;
+                unsafe {
+                    write_cntp_cval(time);
+                    enable_cntp();
+                }
+            }
+            TimerState::Enabled => {
+                unsafe { write_cntp_cval(time) };
+            }
+        }
+    }
+
     pub fn set_timer_seconds(&mut self, seconds: u64) {
         let time = seconds * self.freq;
         self.set_timer(time);
@@ -188,6 +216,95 @@ impl Bcm2835SysTmr {
     fn reg(&self, reg: usize) -> Volatile<u32> {
         Volatile((self.base as *mut u32).wrapping_byte_add(reg).cast::<u32>())
     }
+}
+
+pub fn timer_scheduler_handler(_ctx: &mut Context) {
+    let time = ARM_GENERIC_TIMERS.with_current(|timer| timer.get_time());
+    unsafe { 
+        let mut events = &mut TIMER_SCHEDULER.timer_events;
+        for event in events.iter_mut() {
+            if event.timer_timer <= time {
+                (event.callback)(event.endpoint);
+                // println!("Timer time: {} cur time {} repeat time {} new time {}", event.timer_timer, time, (event.repeat_time as u64) * TIMER_SCHEDULER.timer_freq / 1000, time + (event.repeat_time as u64) * TIMER_SCHEDULER.timer_freq / 1000);
+                event.timer_timer = time + (event.repeat_time as u64) * TIMER_SCHEDULER.timer_freq / 1000;
+            }
+        }
+        TIMER_SCHEDULER.min_time = u64::MAX;
+        for event in events.iter() {
+            if event.timer_timer < TIMER_SCHEDULER.min_time {
+                TIMER_SCHEDULER.min_time = event.timer_timer;
+            }
+        }
+        // println!("Freq: {}", TIMER_SCHEDULER.timer_freq);
+        // println!("Timer: {} cur time {}", TIMER_SCHEDULER.min_time, time);
+        ARM_GENERIC_TIMERS.with_current(|timer| {
+            timer.set_timer_abs(TIMER_SCHEDULER.min_time);
+        });
+    }
+}
+
+pub fn timer_scheduler_add_timer_event(time: u32, callback: fn(endpoint_descriptor), endpoint: endpoint_descriptor) {
+    // let system_timer = get_time();
+    // let generic_timer = ARM_GENERIC_TIMERS.with_current(|timer| timer.get_time());
+    // micro_delay(10000);
+    
+    // let system_timer_end = get_time();
+    // let generic_timer_end = ARM_GENERIC_TIMERS.with_current(|timer| timer.get_time());
+    // let generic_freq = ARM_GENERIC_TIMERS.with_current(|timer| timer.freq);
+    // println!("System Timer: {} Generic Timer: {} Freq: {}", system_timer_end - system_timer, generic_timer_end - generic_timer, generic_freq);
+    // micro_delay(5000000);
+    unsafe { TIMER_SCHEDULER.add_timer_event(time, callback, endpoint) };
+}
+
+impl TimerScheduler {
+    pub const fn new() -> Self {
+        Self {
+            timer_events: Vec::new(),
+            timer_freq: 0,
+            min_time: u64::MAX,
+        }
+    }
+
+    pub fn intialize_timer(&mut self) {
+        self.timer_freq = unsafe { read_cntfrq() };
+        //register handler
+    }
+
+    //the time is the interval in milliseconds, callback is the function to call, device is the device that the timer is associated with
+    pub fn add_timer_event(&mut self, time: u32, callback: fn(endpoint_descriptor), endpoint: endpoint_descriptor) {
+        let cur_timer = ARM_GENERIC_TIMERS.with_current(|timer| timer.get_time());
+        self.timer_events.push(TimerEvent {
+            timer_timer: cur_timer + (time as u64) * self.timer_freq / 1000,
+            repeat_time: time,
+            callback,
+            endpoint: endpoint,
+        });
+
+        for event in self.timer_events.iter() {
+            if event.timer_timer < self.min_time {
+                self.min_time = event.timer_timer;
+            }
+        }
+
+        ARM_GENERIC_TIMERS.with_current(|timer| {
+            timer.set_timer_abs(self.min_time);
+        });
+    }
+}
+
+unsafe impl Sync for TimerEvent {}
+
+pub struct TimerEvent {
+    timer_timer: u64,
+    repeat_time: u32,
+    callback: fn(endpoint_descriptor),
+    endpoint: endpoint_descriptor,
+}
+
+pub struct TimerScheduler {
+    timer_events: Vec<TimerEvent>,
+    timer_freq: u64,
+    min_time: u64,
 }
 
 pub struct Bcm2835SysTmr {

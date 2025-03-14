@@ -78,20 +78,23 @@ pub fn UsbInterruptMessage(
     pipe: UsbPipeAddress,
     buffer: *mut u8,
     buffer_length: u32,
+    packet_id: PacketId,
     timeout_: u32,
 ) -> ResultCode {
+
     let result = HcdSubmitInterruptMessage(device, channel, pipe, buffer, buffer_length, &mut UsbDeviceRequest {
         request_type: 0,
         request: UsbDeviceRequestRequest::GetStatus,
         value: 0,
         index: 0,
         length: buffer_length as u16,
-    });
+    }, packet_id);
 
     if result != ResultCode::OK {
-        println!("| Failed to send message result: {:?}", result);
+        println!("| USBD: Failed to send interrupt message: {:?}", result);
         return result;
     }
+
     return result;
 }
 

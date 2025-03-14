@@ -27,6 +27,9 @@ use crate::device::usb::hcd::dwc::dwc_otg::read_volatile;
 use crate::device::usb::hcd::dwc::dwc_otgreg::*;
 use crate::device::usb::types::*;
 use crate::device::usb::hcd::hub::*;
+use crate::device::usb::device::hid::keyboard::*;
+use crate::device::usb::usbd::endpoint::register_interrupt_endpoint;
+use crate::device::usb::usbd::endpoint::*;
 use crate::device::usb::usbd::pipe::*;
 use crate::device::usb::usbd::request::*;
 use crate::device::usb::hcd::dwc::roothub::*;
@@ -166,58 +169,31 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 
 
     let header = device.full_configuration.as_mut().unwrap().as_mut_ptr() as *mut UsbDescriptorHeader;
-    let mut buffer = Box::new([0u8; 10]);
+    {
+        let mut buffer = Box::new([0u8; 30]);
+        let result = HidGetReport(device, HidReportType::Feature, 0, interface_number as u8, 8, buffer.as_mut_ptr());
+    }
+
+    let boxed = Box::new(UsbEndpointDevice::new());
+    let boxed_bytes = Box::into_raw(boxed);
+    let byte_slice = unsafe { core::slice::from_raw_parts_mut(boxed_bytes as *mut u8, size_of::<HubDevice>()) };
+    let byte_bytes = unsafe { Box::from_raw(byte_slice as *mut [u8]) };
+    //TODO: I have no clue what I'm doing
+    device.driver_data = Some(byte_bytes);
+
+    let mut endpoint_device = unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut UsbEndpointDevice) };
+    endpoint_device.endpoints[0] = Some(KeyboardAnalyze);
+    //TODO: Hardcoded for keyboard atm
     //https://github.com/tmk/tmk_keyboard/wiki/USB%3A-HID-Usage-Table
-    
-    
-    let result = HidGetReport(device, HidReportType::Feature, 0, interface_number as u8, 8, buffer.as_mut_ptr());
-    println!("| HID: Get report result: {:?}", result);
-    //print 8 bytes of buffer
-    for i in 0..8 {
-        print!("{:x} ", buffer[i]);
-    }
-    println!();
-
-    micro_delay(500000);
-
-    println!("| HID: endpoint address: {:x}", endpoint_address_to_num(device.endpoints[interface_number as usize][0 as usize].endpoint_address));
-
-    loop {
-        let result = UsbInterruptMessage(device, 1, 
-            UsbPipeAddress {
-                transfer_type: UsbTransfer::Interrupt,
-                speed: device.speed,
-                end_point: endpoint_address_to_num(device.endpoints[interface_number as usize][0 as usize].endpoint_address),
-                // end_point: device.endpoints[interface_number as usize][0 as usize].endpoint_address.Number,
-                device: device.number as u8,
-                direction: UsbDirection::In,
-                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
-                _reserved: 0,
-            }, 
-            buffer.as_mut_ptr(), 8,
-            HidMessageTimeout
-        );
-
-        let grxstsr = read_volatile(DOTG_GRXSTSRH);
-        println!("| HID: GRXSTSR: {:x}", grxstsr);
-
-        let grxstspd = read_volatile(DOTG_GRXSTSPD);
-        println!("| HID: GRXSTSPD: {:x}", grxstspd);
-
-        println!("| HID: endpoint result: {:?}", result);
-
-        memory_copy(buffer.as_mut_ptr(), get_dwc_ptr(DOTG_DFIFO(1) as usize) as *const u8, 8);
-
-        for i in 0..8 {
-            print!("{:x} ", buffer[i]);
-        }
-        println!();
-    
-        micro_delay(500000);
-    }
-
-
-    
+    register_interrupt_endpoint(
+        device,
+        device.endpoints[interface_number as usize][0 as usize].interval as u32, 
+        endpoint_address_to_num(device.endpoints[interface_number as usize][0 as usize].endpoint_address), 
+        UsbDirection::In, 
+        size_from_number(device.descriptor.max_packet_size0 as u32),
+        0,
+        HidMessageTimeout
+    );
 
     return ResultCode::OK;
 }
