@@ -28,6 +28,7 @@ use crate::device::mailbox;
 use crate::device::mailbox::PropSetPowerState;
 use crate::device::system_timer::micro_delay;
 use crate::memory;
+use core::ptr;
 use crate::shutdown;
 
 pub const ChannelCount: usize = 16;
@@ -85,7 +86,7 @@ fn HcdPrepareChannel(
     dwc_sc.channel[channel as usize].characteristics.Enable = false;
     dwc_sc.channel[channel as usize].characteristics.Disable = false;
     dwc_sc.channel[channel as usize].characteristics.OddFrame = false;
-    dwc_sc.channel[channel as usize].characteristics.PacketsPerFrame = 0;
+    dwc_sc.channel[channel as usize].characteristics.PacketsPerFrame = 1;
 
     let hcchar = convert_host_characteristics(dwc_sc.channel[channel as usize].characteristics);
     write_volatile(DOTG_HCCHAR(channel as usize), hcchar);
@@ -317,7 +318,7 @@ pub fn HcdChannelSendWaitOne(
                 break;
             }
         }
-        println!("| HCD: Channel interrupt {:#x}\n", hcint);
+        // println!("| HCD: Channel interrupt {:#x}\n", hcint);
 
         let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
         convert_into_host_transfer_size(
@@ -327,7 +328,7 @@ pub fn HcdChannelSendWaitOne(
         hcint = read_volatile(DOTG_HCINT(channel as usize));
 
         if pipe.speed != UsbSpeed::High {
-            if hcint & HCINT_ACK != 0 && dwc_sc.channel[channel as usize].split_control.SplitEnable{
+            if hcint & HCINT_ACK != 0 && dwc_sc.channel[channel as usize].split_control.SplitEnable {
                 // Try to complete the split up to 3 times.
                 println!("| HCD: Completing split to device with ACK\n");
                 for tries_i in 0..3 {
@@ -380,6 +381,15 @@ pub fn HcdChannelSendWaitOne(
                 } else if hcint & HCINT_XACTERR != 0 {
                     micro_delay(25000);
                     continue;
+                }
+
+                let dma_buffer = read_volatile(DOTG_HCDMA(channel as usize));
+                // let dma_ptr = (dwc_sc.dma_loc + (0x2FF0000 - dma_buffer) as usize) as *mut u8;
+                let dma_ptr = dwc_sc.dma_loc as *mut u8;
+                println!("dma_buffer2 {:#x} dma_ptr {:#x} dma_loc {:#x}", dma_buffer, dma_ptr as usize, dwc_sc.dma_loc as usize);
+                //print the first 8 bytes of the dma buffer
+                unsafe {
+                    println!("DMA Buffer2: {:#x} {:#x} {:#x} {:#x} {:#x} {:#x} {:#x} {:#x}", *(dma_ptr), *((dma_ptr as *const u8).offset(1)), *((dma_ptr as *const u8).offset(2)), *((dma_ptr as *const u8).offset(3)), *((dma_ptr as *const u8).offset(4)), *((dma_ptr as *const u8).offset(5)), *((dma_ptr as *const u8).offset(6)), *((dma_ptr as *const u8).offset(7)));
                 }
 
                 result = HcdChannelInterruptToError(device, hcint, false);
@@ -536,7 +546,7 @@ fn HcdChannelSendWait(
             // println!("| HCD: Transfer to packet progress: {}/{} with packets {} from {}\n", transfer, buffer_length, dwc_sc.channel[channel as usize].transfer_size.PacketCount, packets);
             // If the packet count hasn’t changed, break out of the loop.
             if packets == dwc_sc.channel[channel as usize].transfer_size.PacketCount {
-                println!("| HCD: Transfer to packet got stuck.");
+                // println!("| HCD: Transfer to packet got stuck.");
                 break;
             }
             // Continue looping if there are still packets in progress.
@@ -553,7 +563,15 @@ fn HcdChannelSendWait(
 
         // Check for a stuck transfer.
         if packets == dwc_sc.channel[channel as usize].transfer_size.PacketCount {
-            device.error = UsbTransferError::ConnectionError;
+
+            //TODO: Hacky fix for a NAK on interrupt endpoint transfer
+            let hcint = read_volatile(DOTG_HCINT(channel as usize));
+            if hcint & HCINT_NAK != 0 {
+                device.error = UsbTransferError::NoAcknowledge;
+            } else {
+                device.error = UsbTransferError::ConnectionError;
+            }
+
             return ResultCode::ErrorDevice;
         }
 
@@ -575,13 +593,13 @@ pub fn HcdSubmitInterruptMessage(
     buffer: *mut u8,
     buffer_length: u32,
     request: &mut UsbDeviceRequest,
+    packet_id: PacketId,
 ) -> ResultCode {
 
     let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
     device.error = UsbTransferError::Processing;
     device.last_transfer = 0;
-
-
+    
     let mut tempPipe = UsbPipeAddress {
         max_size: pipe.max_size,
         speed: pipe.speed,
@@ -599,24 +617,47 @@ pub fn HcdSubmitInterruptMessage(
         data_buffer,
         buffer_length,
         request,
-        PacketId::Data1,
+        packet_id,
     );
+
+
     if result != ResultCode::OK {
-        println!("| HCD: Coult not send data to device");
+        // println!("| HCD: Coult not send data to device {:#?}", result);
+        if device.error == UsbTransferError::NoAcknowledge {
+            //set buffer to 0
+            unsafe { ptr::write_bytes(buffer, 0, buffer_length as usize) };
+            device.error = UsbTransferError::NoError;
+            return ResultCode::OK;
+        }
         return result;
     }
 
-    memory_copy(
-        dwc_sc.databuffer.as_mut_ptr(),
-        dwc_sc.dma_loc as *const u8,
-        device.last_transfer as usize,
-    );
+    let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
+        // dwc_sc.channel[0].transfer_size.TransferSize = hctsiz & 0x7ffff;
+    convert_into_host_transfer_size(hctsiz, &mut dwc_sc.channel[channel as usize].transfer_size);
+    if pipe.direction == UsbDirection::In {
+        if dwc_sc.channel[0].transfer_size.TransferSize <= buffer_length {
+            device.last_transfer = buffer_length - dwc_sc.channel[channel as usize].transfer_size.TransferSize;
+        } else {
+            println!("| HCD: Weird transfer size\n");
+            device.last_transfer = buffer_length;
+        }
 
-    memory_copy(
-        buffer,
-        dwc_sc.databuffer.as_ptr(),
-        device.last_transfer as usize,
-    );
+        memory_copy(
+            dwc_sc.databuffer.as_mut_ptr(),
+            dwc_sc.dma_loc as *const u8,
+            device.last_transfer as usize,
+        );
+
+        memory_copy(
+            buffer,
+            dwc_sc.databuffer.as_ptr(),
+            device.last_transfer as usize,
+        );
+
+    } else {
+        device.last_transfer = buffer_length;
+    }
 
     device.error = UsbTransferError::NoError;
     return ResultCode::OK;
@@ -1269,7 +1310,7 @@ impl dwc_hub {
 
 #[repr(u8)]
 #[derive(Default, Copy, Clone)]
-enum PacketId {
+pub enum PacketId {
     #[default]
     Data0 = 0,
     Data1 = 2,
