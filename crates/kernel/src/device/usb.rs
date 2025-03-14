@@ -4,6 +4,9 @@ pub mod types;
 pub mod usbd;
 pub mod device;
 
+use crate::device::usb::device::hid::keyboard::Key;
+use alloc::vec::Vec;
+
 use alloc::boxed::Box;
 use hcd::dwc::dwc_otg::*;
 use usbd::device::*;
@@ -24,4 +27,8 @@ pub fn usb_init(base_addr: *mut ()) -> UsbBus {
 
 pub fn usb_check_for_change(bus: &mut UsbBus) {
     // UsbCheckForChange(bus);
+}
+
+pub fn usb_retrieve_keys() -> Vec<Key> {
+    return unsafe { device::hid::keyboard::KeyboardBuffer.clone() };
 }
