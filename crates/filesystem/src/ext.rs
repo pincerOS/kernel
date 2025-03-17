@@ -2,12 +2,12 @@ use crate::bgd::BGD;
 use crate::block_device::{BlockDevice, SECTOR_SIZE};
 use crate::dir::{DirectoryEntryConstants, DirectoryEntryData, DirectoryEntryWrapper};
 use crate::inode::i_mode::{EXT2_S_IFDIR, EXT2_S_IFREG};
-use crate::inode::{i_flags, i_mode, INode, INodeBlockInfo, INodeWrapper};
+use crate::inode::{ext4_xattr_entry_data, i_flags, i_mode, INode, INodeBlockInfo, INodeWrapper, REV_0_INODE_SIZE};
 use crate::superblock::Superblock;
 use crate::{get_epoch_time, BlockDeviceError, DeferredWriteMap, Ext2Error};
 use alloc::rc::{Rc, Weak};
 use bytemuck::bytes_of;
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 use std::prelude::rust_2015::Vec;
@@ -211,13 +211,14 @@ where
         }
     }
 
-    fn get_inode(
+    fn get_inode_wrapper_inner(
         device: &mut D,
         superblock: &Superblock,
         block_group_descriptor_tables: &Vec<BGD>,
+        inode_map: &mut BTreeMap<usize, Weak<RefCell<INodeWrapper>>>,
         inode_num: usize,
         deferred_writes: Option<&DeferredWriteMap>,
-    ) -> Result<INode, Ext2Error> {
+    ) -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
         let inode_block_info: INodeBlockInfo = Ext::get_block_that_has_inode(
             device,
             superblock,
@@ -234,30 +235,71 @@ where
             deferred_writes,
         )?;
 
-        //if superblock.s_feature_ro_compat
+        let mut inode = INode::new();
+        let inode_bytes: &mut [u8] = bytemuck::bytes_of_mut(&mut inode);
+        let inode_size: usize = if superblock.s_rev_level == 0 {
+            REV_0_INODE_SIZE
+        } else {
+            std::cmp::min(size_of::<INode>(), superblock.s_inode_size as usize)
+        };
 
-        let mut inode_data: [u8; size_of::<INode>()] = [0x00; size_of::<INode>()];
-
-        inode_data.copy_from_slice(
+        inode_bytes[0..inode_size].copy_from_slice(
             &block_buffer
-                [inode_block_info.block_offset..inode_block_info.block_offset + size_of::<INode>()],
+                [inode_block_info.block_offset..inode_block_info.block_offset + inode_size],
         );
 
-        let inode: INode =
-            unsafe { core::mem::transmute::<[u8; size_of::<INode>()], INode>(inode_data) };
+        let mut inode_xattrs_data: Vec<ext4_xattr_entry_data> = Vec::new();
+        let mut inode_xattr_name_data: Vec<u8> = Vec::new();
+        let inode_xattr_data_start: usize = inode_size + (4 - (inode_size % 4));
+        let inode_xattr_data_end: usize = (inode.i_extra_isize as usize) + REV_0_INODE_SIZE;
+        let mut i: usize = inode_xattr_data_start;
 
-        Ok(inode)
+        while inode_xattr_data_end > i {
+            let mut xattr = crate::inode::ext4_xattr_entry_data{
+                e_name_len: 0,
+                e_name_index: 0,
+                e_value_offs: 0,
+                e_value_inum: 0,
+                e_value_size: 0,
+                e_hash: 0,
+                e_name: [],
+            };
+            let xattr_slice_end = i+size_of::<ext4_xattr_entry_data>();
+            let xattr_name_end = xattr_slice_end + (xattr.e_name_len as usize);
+            let mut xattr_bytes = bytemuck::bytes_of_mut(&mut xattr);
+
+            xattr_bytes[0..].copy_from_slice(&block_buffer[i..xattr_slice_end]);
+
+            inode_xattrs_data.push(xattr);
+
+            inode_xattr_name_data.extend_from_slice(
+                &block_buffer[xattr_slice_end..xattr_name_end]);
+
+            i = xattr_name_end;
+        }
+
+        let inode_wrapper = Rc::new(RefCell::new(INodeWrapper{
+            inode,
+            _inode_num: inode_num as u32,
+            inode_xattrs_data,
+            inode_xattr_name_data,
+        }));
+        
+        inode_map.insert(inode_num, Rc::downgrade(&inode_wrapper));
+        
+        Ok(inode_wrapper)
     }
 
-    pub fn get_inode_self(
+    pub fn get_inode_wrapper(
         &mut self,
         inode_num: usize,
         deferred_writes: Option<&DeferredWriteMap>,
-    ) -> Result<INode, Ext2Error> {
-        Self::get_inode(
+    ) -> Result<Rc<RefCell<INodeWrapper>>, Ext2Error> {
+        Self::get_inode_wrapper_inner(
             &mut self.device,
             &self.superblock,
             &self.block_group_descriptor_tables,
+            &mut self.inode_map,
             inode_num,
             deferred_writes,
         )
@@ -372,20 +414,16 @@ where
             None,
         )?;
 
-        let root_inode: INode = Self::get_inode(
+        let mut inode_map: BTreeMap<usize, Weak<RefCell<INodeWrapper>>> = BTreeMap::new();
+
+        let root_inode_wrapper: Rc<RefCell<INodeWrapper>> = Self::get_inode_wrapper_inner(
             &mut device,
             &superblock,
             &block_group_descriptor_tables,
+            &mut inode_map,
             2,
             None,
         )?;
-        let root_inode_wrapper: Rc<RefCell<INodeWrapper>> = Rc::new(RefCell::new(INodeWrapper {
-            inode: root_inode,
-            _inode_num: 2,
-        }));
-        let mut inode_map: BTreeMap<usize, Weak<RefCell<INodeWrapper>>> = BTreeMap::new();
-
-        inode_map.insert(2, Rc::downgrade(&root_inode_wrapper));
 
         Ok(Self {
             device,
@@ -584,6 +622,8 @@ where
             return Ok(Rc::new(RefCell::new(INodeWrapper {
                 inode: inode_data,
                 _inode_num: new_inode_num as u32,
+                inode_xattrs_data: vec![],
+                inode_xattr_name_data: vec![],
             })));
         }
 
@@ -658,26 +698,7 @@ where
 
         let epoch_time: usize = get_epoch_time();
 
-        let new_inode = INode {
-            i_mode,
-            i_uid: 0x0,
-            i_size: 0,
-            i_atime: epoch_time as u32,
-            i_ctime: epoch_time as u32,
-            i_mtime: epoch_time as u32,
-            i_dtime: 0,
-            i_gid: 0x0,
-            i_links_count: 1,
-            i_blocks: 0,
-            i_flags: 0,
-            i_osd1: 0,
-            i_block: [0; 15],
-            i_generation: 0,
-            i_file_acl: 0,
-            i_size_high: 0,
-            i_obso_faddr: 0,
-            i_osd2: [0; 12],
-        };
+        let new_inode = INode::new();
 
         if name.len() > DirectoryEntryConstants::MAX_FILE_NAME_LEN {
             return Err(Ext2Error::TooLongFileName);

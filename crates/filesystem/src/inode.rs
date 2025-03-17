@@ -8,11 +8,12 @@ use crate::ext::Ext;
 use crate::Ext2Error::{FileNotFound, NotEnoughDeviceSpace};
 use crate::{hash, DeferredWriteMap, Ext2Error, UNALLOCATED_BLOCK_SLOT};
 use alloc::rc::Rc;
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 use std::prelude::rust_2015::Vec;
 use std::{print, slice, vec};
+use bytemuck::{Pod, Zeroable};
 
 pub mod i_mode {
     pub const EXT2_S_IFSOCK: u16 = 0xC000;
@@ -95,8 +96,10 @@ pub(crate) struct INodeBlockInfo {
     pub(crate) block_offset: usize,
 }
 
+pub const REV_0_INODE_SIZE: usize = 128;
+
 #[repr(C)]
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct INode {
     i_mode: u16,
     i_uid: u16,
@@ -121,7 +124,8 @@ pub struct INode {
     i_obso_faddr: u32, // obsolete
     i_osd2: [u8; 12],
 
-    i_extra_isize: u16,
+    // end of original 128-sized inodes. everything below only applies to ext2 revision 1 and up
+    pub(crate) i_extra_isize: u16,
     i_checksum_hi: u16,
     i_ctime_extra: u32,
     i_mtime_extra: u32,
@@ -132,11 +136,82 @@ pub struct INode {
     i_projid: u32,
 }
 
+impl INode {
+    pub(crate) fn new() -> INode {
+        INode {
+            i_mode: 0,
+            i_uid: 0,
+            i_size: 0,
+            i_atime: 0,
+            i_ctime: 0,
+            i_mtime: 0,
+            i_dtime: 0,
+            i_gid: 0,
+            i_links_count: 0,
+            i_blocks: 0,
+            i_flags: 0,
+            i_osd1: 0,
+            i_block: [0; 15],
+            i_generation: 0,
+            i_file_acl: 0,
+            i_size_high: 0,
+            i_obso_faddr: 0,
+            i_osd2: [0; 12],
+            i_extra_isize: 0,
+            i_checksum_hi: 0,
+            i_ctime_extra: 0,
+            i_mtime_extra: 0,
+            i_atime_extra: 0,
+            i_crtime: 0,
+            i_crtime_extra: 0,
+            i_version_hi: 0,
+            i_projid: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+struct ext4_xattr_header {
+    h_magic: u32,
+    h_refcount: u32,
+    h_blocks: u32,
+    h_hash: u32,
+    h_checksum: u32,
+    h_reserved: [u32; 2]
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub(crate) struct ext4_xattr_entry_data {
+    pub(crate) e_name_len: u8,
+    pub(crate) e_name_index: u8,
+    pub(crate) e_value_offs: u16,
+    pub(crate) e_value_inum: u32,
+    pub(crate) e_value_size: u32,
+    pub(crate) e_hash: u32,
+    pub(crate) e_name: [u8; 0]
+}
+
+struct ext4_xattr_entry<'a> {
+    e_name_len: u8,
+    e_name_index: u8,
+    e_value_offs: u16,
+    e_value_inum: u32,
+    e_value_size: u32,
+    e_hash: u32,
+    e_name: &'a [u8]
+}
+
+#[repr(C)]
 #[derive(Debug)]
 pub struct INodeWrapper {
     pub(crate) inode: INode,
     pub(crate) _inode_num: u32,
-}
+
+    pub(crate) inode_xattrs_data: Vec<ext4_xattr_entry_data>,
+    pub(crate) inode_xattr_name_data: Vec<u8>
+}   
 
 impl INodeWrapper {
     pub fn is_dir(&self) -> bool {
@@ -171,12 +246,57 @@ impl INodeWrapper {
             self._inode_num as usize,
         );
         let inode_bytes = bytemuck::bytes_of(&self.inode);
+        let inode_byte_slice: &[u8] = if ext2.superblock.s_rev_level == 0 {
+            &inode_bytes[0..REV_0_INODE_SIZE]
+        } else {
+            &inode_bytes[0..ext2.superblock.s_inode_size as usize]
+        };
 
         ext2.add_write_to_deferred_writes_map(
             deferred_write_map,
             inode_block_info.block_num,
             inode_block_info.block_offset,
-            inode_bytes,
+            inode_byte_slice,
+            None,
+        )?;
+
+        let x_attr_start = ext2.superblock.s_inode_size as usize;
+        let x_attr_byte_size = (self.inode.i_extra_isize as usize) - x_attr_start;
+        let mut i: usize = 0;
+        let mut x_attr_index: usize = 0;
+        let mut name_index: usize = 0;
+        let mut x_attr_buffer: Vec<u8> = Vec::new();
+
+        x_attr_buffer.resize(x_attr_byte_size, 0);
+
+        // extended attributes have to start at aa 4-byte alignment
+        i += (4 - (ext2.superblock.s_inode_size % 4)) as usize;
+
+        while x_attr_byte_size > i {
+            let current_x_attr: &ext4_xattr_entry_data = &self.inode_xattrs_data[x_attr_index];
+            let current_x_attr_bytes: &[u8] =
+                bytemuck::bytes_of(current_x_attr);
+
+            x_attr_buffer[i..(i + current_x_attr_bytes.len())].copy_from_slice(current_x_attr_bytes);
+
+            i += size_of::<ext4_xattr_entry>();
+
+            let x_attr_slice_end = i + (current_x_attr.e_name_len as usize);
+            let string_slice_end = name_index + (current_x_attr.e_name_len as usize);
+            
+            x_attr_buffer[i..x_attr_slice_end].copy_from_slice(
+                &self.inode_xattr_name_data[name_index..string_slice_end]);
+
+            x_attr_index += 1;
+            name_index += current_x_attr.e_name_len as usize;
+            i += current_x_attr.e_name_len as usize;
+        }
+
+        ext2.add_write_to_deferred_writes_map(
+            deferred_write_map,
+            inode_block_info.block_num,
+            inode_block_info.block_offset + x_attr_start,
+            x_attr_buffer.as_slice(),
             None,
         )?;
 
@@ -475,12 +595,7 @@ impl INodeWrapper {
         )?;
         let inode_num: u32 = inode_num.ok_or(Ext2Error::FileNotFound)?;
 
-        let inode: INode = ext2.get_inode_self(inode_num as usize, None)?;
-
-        let return_value: Rc<RefCell<INodeWrapper>> = Rc::new(RefCell::new(INodeWrapper {
-            inode,
-            _inode_num: inode_num,
-        }));
+        let return_value: Rc<RefCell<INodeWrapper>> = ext2.get_inode_wrapper(inode_num as usize, None)?;
 
         ext2.inode_map
             .insert(inode_num as usize, Rc::downgrade(&return_value));
@@ -608,11 +723,8 @@ impl INodeWrapper {
 
         let inode_num: u32 = inode_num.ok_or(Ext2Error::FileNotFound)?;
 
-        let inode: INode = ext2.get_inode_self(inode_num as usize, None)?;
-        let return_value: Rc<RefCell<INodeWrapper>> = Rc::new(RefCell::new(INodeWrapper {
-            inode,
-            _inode_num: inode_num,
-        }));
+        let return_value: Rc<RefCell<INodeWrapper>> = 
+            ext2.get_inode_wrapper(inode_num as usize, None)?;
 
         ext2.inode_map
             .insert(inode_num as usize, Rc::downgrade(&return_value));
