@@ -80,6 +80,10 @@ syscall!(10 => pub fn pread(fd: usize, buf: *mut u8, buf_len: usize, offset: u64
 syscall!(11 => pub fn pwrite(fd: usize, buf: *const u8, buf_len: usize, offset: u64) -> isize);
 syscall!(12 => pub fn close(fd: usize) -> isize);
 syscall!(13 => pub fn dup3(old_fd: usize, new_fd: usize, flags: usize) -> isize);
+syscall!(14 => pub fn pipe(flags: usize) -> PipeValues);
+
+#[repr(C)]
+pub struct PipeValues([isize; 2]);
 
 pub unsafe fn pwrite_all(fd: usize, buf: &[u8], offset: u64) -> isize {
     let mut remaining = buf;
