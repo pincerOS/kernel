@@ -4,9 +4,9 @@
 extern crate alloc;
 extern crate kernel;
 
-use core::arch::asm;
 use alloc::sync::Arc;
-use event::{context, task, thread, process::Process};
+use core::arch::asm;
+use event::{context, process::Process, task, thread};
 use kernel::sync::BlockingLock;
 use kernel::*;
 
@@ -119,7 +119,10 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
 
     let new_proc: Arc<BlockingLock<Process>> = Arc::new(BlockingLock::new(Process::new(ttbr0)));
     //TODO: fix this to not be hard coded
-    new_proc.lock().reserve_memory_range(0x20_000, 0x_20_000 * 7).unwrap();
+    new_proc
+        .lock()
+        .reserve_memory_range(0x20_000, 0x_20_000 * 7)
+        .unwrap();
     let user_thread = unsafe { thread::Thread::new_user(user_sp, user_entry, ttbr0, new_proc) };
 
     event::SCHEDULER.add_task(event::Event::ScheduleThread(user_thread));

@@ -1,10 +1,10 @@
 pub mod async_handler;
 pub mod context;
 pub mod exceptions;
+pub mod process;
 pub mod scheduler;
 pub mod task;
 pub mod thread;
-pub mod process;
 
 use alloc::boxed::Box;
 

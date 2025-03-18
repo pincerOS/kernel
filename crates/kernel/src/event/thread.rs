@@ -1,10 +1,10 @@
+use super::context::{context_switch, Context, SwitchAction, CORES};
+use super::process::Process;
+use super::{Event, SCHEDULER};
+use crate::sync::BlockingLock;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use core::ptr::NonNull;
-use crate::sync::BlockingLock;
-use super::context::{context_switch, Context, SwitchAction, CORES};
-use super::{Event, SCHEDULER};
-use super::process::Process;
 
 /// A handle for a kernel or user thread, which owns its stack, and
 /// while the thread isn't running, stores the saved register state of
@@ -57,7 +57,12 @@ impl Thread {
 
     /// Create a new user thread with the given stack pointer, initial
     /// program counter, and initial page table (`ttbr0`).
-    pub unsafe fn new_user(sp: usize, entry: usize, ttbr0: usize, proc: Arc<BlockingLock<Process>>) -> Box<Self> {
+    pub unsafe fn new_user(
+        sp: usize,
+        entry: usize,
+        ttbr0: usize,
+        proc: Arc<BlockingLock<Process>>,
+    ) -> Box<Self> {
         let data = Context {
             regs: [0; 31],
             sp: 0,
