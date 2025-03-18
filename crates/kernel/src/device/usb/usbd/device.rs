@@ -90,7 +90,7 @@ pub struct UsbDevice {
         [[UsbEndpointDescriptor; MAX_ENDPOINTS_PER_DEVICE]; MAX_INTERFACES_PER_DEVICE],
     pub parent: Option<*mut UsbDevice>,
     pub full_configuration: Option<Box<[u8]>>, //TODO: the setupfor this is probably very bad
-    pub driver_data: Option<Box<[u8]>>, //TODO: the setupfor this is probably very bad
+    pub driver_data: DriverData,
     pub soft_sc: *mut (),
     pub bus: *mut UsbBus,
     pub last_transfer: u32,
@@ -119,11 +119,25 @@ impl UsbDevice {
             interfaces: [UsbInterfaceDescriptor::default(); MAX_INTERFACES_PER_DEVICE],
             endpoints: core::array::from_fn(|_| core::array::from_fn(|_| UsbEndpointDescriptor::default())),
             full_configuration: None,
-            driver_data: None,
+            driver_data: DriverData::empty(),
             soft_sc: unsafe { (*bus).dwc_sc.as_mut() as *mut dwc_hub as *mut () },
             bus: bus,
             last_transfer: 0,
         }
+    }
+}
+
+pub struct DriverData(Option<Box<dyn core::any::Any>>);
+
+impl DriverData {
+    pub fn empty() -> Self {
+        Self(None)
+    }
+    pub fn new<T: core::any::Any>(data: Box<T>) -> Self {
+        Self(Some(data as Box<dyn core::any::Any>))
+    }
+    pub fn downcast<T: core::any::Any>(&mut self) -> Option<&mut T> {
+        self.0.as_mut().and_then(|d| d.downcast_mut::<T>())
     }
 }
 

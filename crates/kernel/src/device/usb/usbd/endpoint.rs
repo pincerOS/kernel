@@ -38,7 +38,7 @@ pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
     //     print!("{:02X} ", buffer[i]);
     // }
     // print!("\n");
-    let mut endpoint_device = unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut UsbEndpointDevice) };
+    let mut endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     if let Some(callback) = endpoint_device.endpoints[endpoint.device_endpoint_number as usize] {
         callback(buffer.as_mut_ptr());
