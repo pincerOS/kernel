@@ -118,7 +118,6 @@ pub fn irq_not_handled(_ctx: &mut Context) {
 
 /// Handles the interrupt and asks handler to handle it
 /// Level-triggered interrupts must be cleared by associaetd irq handler or else it will be called again
-#[no_mangle]
 pub unsafe extern "C" fn gic_irq_handler(
     ctx: &mut Context,
     _elr: u64,
@@ -247,7 +246,7 @@ impl Gic400Driver {
     pub fn init_distributor(&self) {
         unsafe { self.reg_write_dist(GICD_CTLR, GICD_DISABLE) };
 
-        let mut cpumask = CPU_MASK | CPU_MASK << 8;
+        let mut cpumask = CPU_MASK | (CPU_MASK << 8);
         cpumask |= cpumask << 16;
 
         for i in (32..IRQ_COUNT).step_by(4) {
@@ -490,5 +489,5 @@ impl Gic400Driver {
 
 #[inline]
 fn repeat_byte(byte: u8) -> u32 {
-    byte as u32 | (byte as u32) << 8 | (byte as u32) << 16 | (byte as u32) << 24
+    u32::from_ne_bytes([byte; 4])
 }

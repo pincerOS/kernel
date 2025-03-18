@@ -37,7 +37,7 @@ fn spawn_elf(elf: elf::Elf<'_>) -> sys::ChannelDesc {
     local
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn main() {
     let archive = initfs::Archive::load(ARCHIVE).unwrap();
 

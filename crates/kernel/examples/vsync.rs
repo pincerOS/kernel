@@ -22,7 +22,7 @@ extern "Rust" fn kernel_main(tree: device_tree::DeviceTree) {
     println!("| acquiring framebuffer");
     let mut surface = unsafe { mailbox.get_framebuffer() };
 
-    println!("| starting vsync demo; make sure to run with ./scripts/run-ui.sh");
+    println!("| starting vsync demo; make sure to run with 'just run-ui'");
     vsync_tearing_demo(&mut surface);
 }
 
@@ -31,7 +31,7 @@ fn vsync_tearing_demo(surface: &mut mailbox::Surface) {
 
     for i in 0.. {
         let color = 0xFFFF0000 | (i as i32 % 512 - 256).abs().min(255) as u32;
-        let color2 = 0xFF0000FF | ((i as i32 % 512 - 256).abs().min(255) as u32) << 16;
+        let color2 = 0xFF0000FF | (((i as i32 % 512 - 256).abs().min(255) as u32) << 16);
         let stripe_width = width / 20;
         let offset = i * (120 / surface.framerate());
         for r in 0..height {

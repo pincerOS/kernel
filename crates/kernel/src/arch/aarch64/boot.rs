@@ -2,7 +2,7 @@ use super::memory::{INIT_TCR_EL1, INIT_TRANSLATION};
 use core::arch::global_asm;
 
 #[allow(unused)]
-extern "C" {
+unsafe extern "C" {
     pub fn kernel_entry();
     pub fn kernel_entry_alt();
 }
@@ -10,8 +10,8 @@ extern "C" {
 const STACK_SIZE_LOG2: usize = 16;
 const STACK_SIZE: usize = 1 << STACK_SIZE_LOG2;
 
-#[no_mangle]
-#[link_section = ".bss"]
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".bss")]
 pub static mut STACKS: [[u128; STACK_SIZE / 16]; 4] = [[0u128; STACK_SIZE / 16]; 4];
 
 global_asm!(

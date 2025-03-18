@@ -330,16 +330,16 @@ impl TableDescriptor {
             .union(Self::from_bits_retain(pa as u64))
     }
 
-    //usize or u64
+    // usize or u64
     pub const fn get_pa(self) -> usize {
-        return ((self.bits() >> 12) & ((1 << 36) - 1)) as usize;
+        ((self.bits() >> 12) & ((1 << 36) - 1)) as usize
     }
 
     pub const fn is_valid(self) -> bool {
         self.contains(Self::VALID)
     }
 
-    //temporary, should be moved to more proper location
+    // temporary, should be moved to more proper location
     pub const fn is_table_descriptor(self) -> bool {
         self.contains(Self::IS_TABLE_DESCRIPTOR)
     }

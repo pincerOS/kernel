@@ -163,7 +163,9 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         unsafe { bcm2836_intc::LOCAL_INTC.init(intc) };
 
         unsafe {
-            crate::event::exceptions::override_irq_handler(bcm2836_intc::exception_handler_irq)
+            crate::event::exceptions::override_irq_handler(
+                bcm2836_intc::exception_handler_bcm2836_intc_irq,
+            )
         }
     }
 
@@ -188,7 +190,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
             .unwrap();
         let (gpio_addr, _) = find_device_addr(gpio).unwrap().unwrap();
         let gpio_base = unsafe { map_device(gpio_addr) }.as_ptr();
-        println!("| GPIO controller addr: {:#010x}", gpio_addr as usize);
+        println!("| GPIO controller addr: {:#010x}", gpio_addr);
         println!("| GPIO controller base: {:#010x}", gpio_base as usize);
         let gpio = unsafe { gpio::bcm2711_gpio_driver::init_with_defaults(gpio_base, true) };
         unsafe { GPIO.init(SpinLock::new(gpio)) };

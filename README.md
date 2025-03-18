@@ -18,14 +18,14 @@
   <a href="#development-status-">Development Status</a> •
   <a href="#credits-">Credits</a> •
   <a href="#license-">License</a>
-</p>  
+</p>
 
 <!--
 <p align="center">
   add clip here when we have something cool to show
 ![screenshot](clip.gif)
-</p>                                                                                                                             
-                                                                                                                                                      
+</p>
+
 
                                                                                                                                                       -->
 # About The Project 🦀
@@ -59,32 +59,34 @@ Currently, the project can be tested on QEMU version 9.0 or higher. If your pack
 ## Dependencies
 - Rust toolchain (https://www.rust-lang.org/tools/install)
 - QEMU >= 9.0 (https://www.qemu.org/download/)
-
-<!--
-- llvm (https://llvm.org/docs/GettingStarted.html):
-```brew install llvm``` or ```sudo apt-get install llvm```
-
-**MacOS**
-For a temporary fix on MacOS for issues related to llvm-objcopy:
-```brew install binutils```
-```sudo ln -s $(which gobjcopy) /usr/local/bin/llvm-objcopy```
--->
+- Just (https://github.com/casey/just?tab=readme-ov-file#packages)
 
 ## Setup
-1. Install Rust target:
-```rustup target add aarch64-unknown-none-softfloat```
+<!-- 1. Install Rust target:
+```rustup target add aarch64-unknown-none-softfloat``` -->
 
-2. Clone the repository:
+1. Clone the repository:
 ```git clone https://github.com/pincerOS/kernel.git```
 
-3. Build the kernel and run:
+2. Build the kernel and run:
 ```cd crates/kernel```
-```./scripts/build.sh``` to build and
-```./scripts/run.sh``` to run.
+```just build-and-run``` to build and run the `main` example.
 
 We also provide scripts for debugging and running with ui:
-`build-debug.sh`, `debug-ui.sh`, `run-rpi3b.sh`, `run-ui.sh`.
-
+```bash
+just --list
+Available recipes:
+    build example=example profile=profile target=target # Build the kernel
+    build-and-run example=example profile=profile # Build and run in one command
+    build-and-run-debug example=example           # Build and run with debug profile
+    build-debug example=example target=target     # Build with debug profile
+    debug                                         # Run with debug mode (wait for debugger)
+    debug-ui                                      # Run with debug mode and UI display
+    default                                       # Default: build and run the kernel
+    run qemu_target=qemu_target qemu_debug=qemu_debug qemu_display=qemu_display debug_args=debug_args # Run the kernel in QEMU
+    run-rpi3b                                     # Run on Raspberry Pi 3B
+    run-ui                                        # Run with UI display
+```
 
 # Development Status 🚧
 
