@@ -323,34 +323,14 @@ where
 {
     fn read_logical_block_inner(
         device: &mut D,
-        superblock: &Superblock,
+        block_size: usize,
         logical_block_start: usize,
         buffer: &mut [u8],
     ) -> Result<(), Ext2Error> {
-        assert_eq!(buffer.len(), superblock.get_block_size());
-        let start_sector_numerator: usize = logical_block_start * superblock.get_block_size();
+        assert_eq!(buffer.len(), block_size);
+        let start_sector_numerator: usize = logical_block_start * block_size;
         let start_sector: usize = start_sector_numerator / SECTOR_SIZE;
         device.read_sectors(start_sector as u64, buffer)?;
-        Ok(())
-    }
-
-    fn read_logical_blocks_inner(
-        device: &mut D,
-        superblock: &Superblock,
-        logical_block_start: usize,
-        buffer: &mut [u8],
-    ) -> Result<(), Ext2Error> {
-        assert_eq!(buffer.len() % superblock.get_block_size(), 0);
-
-        for i in 0..(buffer.len() / superblock.get_block_size()) {
-            Self::read_logical_block_inner(
-                device,
-                superblock,
-                logical_block_start,
-                &mut buffer[i * superblock.get_block_size()..(i + 1) * superblock.get_block_size()],
-            )?;
-        }
-
         Ok(())
     }
 
@@ -361,20 +341,7 @@ where
     ) -> Result<(), Ext2Error> {
         Self::read_logical_block_inner(
             &mut self.device,
-            &self.superblock,
-            logical_block_start,
-            buffer,
-        )
-    }
-
-    pub fn read_logical_blocks(
-        &mut self,
-        logical_block_start: usize,
-        buffer: &mut [u8],
-    ) -> Result<(), Ext2Error> {
-        Self::read_logical_blocks_inner(
-            &mut self.device,
-            &self.superblock,
+            self.superblock.get_block_size(),
             logical_block_start,
             buffer,
         )
@@ -387,6 +354,7 @@ where
         inode_num: usize,
     ) -> Result<INode, Ext2Error> {
         let inode_size = superblock.s_inode_size as usize;
+        let block_size = superblock.get_block_size();
 
         let block_group_number = (inode_num - 1) / superblock.s_inodes_per_group as usize;
         let inode_table_block =
@@ -394,18 +362,19 @@ where
 
         let inode_table_index: usize = (inode_num - 1) % (superblock.s_inodes_per_group as usize);
         let inode_table_block_with_offset: usize =
-            ((inode_table_index * inode_size) / superblock.get_block_size()) + inode_table_block;
-        let inode_table_interblock_offset: usize =
-            (inode_table_index * inode_size) % superblock.get_block_size();
+            ((inode_table_index * inode_size) / block_size) + inode_table_block;
+        let inode_table_interblock_offset: usize = (inode_table_index * inode_size) % block_size;
 
-        let mut block_buffer: Vec<u8> = vec![0; superblock.get_block_size()];
+        let mut block_buffer: Vec<u8> = vec![0; block_size];
 
-        Self::read_logical_blocks_inner(
-            device,
-            superblock,
-            inode_table_block_with_offset,
-            block_buffer.as_mut_slice(),
-        )?;
+        for (i, chunk) in block_buffer.chunks_exact_mut(block_size).enumerate() {
+            Self::read_logical_block_inner(
+                device,
+                block_size,
+                inode_table_block_with_offset + i,
+                chunk,
+            )?;
+        }
 
         let mut inode_data: [u8; size_of::<INode>()] = [0x00; size_of::<INode>()];
 
@@ -467,12 +436,17 @@ where
             )
         };
 
-        Self::read_logical_blocks_inner(
-            &mut device,
-            &superblock,
-            block_group_descriptor_block,
-            descriptor_table_bytes_slice,
-        )?;
+        for (i, chunk) in descriptor_table_bytes_slice
+            .chunks_exact_mut(superblock.get_block_size())
+            .enumerate()
+        {
+            Self::read_logical_block_inner(
+                &mut device,
+                block_size,
+                block_group_descriptor_block + i,
+                chunk,
+            )?;
+        }
 
         block_group_descriptor_tables.truncate(descriptor_count);
 
