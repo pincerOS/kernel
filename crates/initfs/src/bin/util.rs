@@ -1,8 +1,22 @@
-use std::collections::BinaryHeap;
-use std::error::Error;
+#![no_std]
+
+extern crate alloc;
+extern crate core;
+extern crate std;
+
+use core::error::Error;
+
+use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
+use alloc::collections::BinaryHeap;
+use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
+
 use std::io::{Read, Seek};
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
+use std::{eprintln, println};
 
 use initfs::ArchiveHeader;
 
@@ -105,7 +119,7 @@ impl CommandParser {
 }
 
 fn parse_args(args: impl Iterator<Item = String>) -> Result<Option<CommandParser>, Box<dyn Error>> {
-    let parser = std::cell::RefCell::new(CommandParser {
+    let parser = core::cell::RefCell::new(CommandParser {
         command: Command::None,
         verbose: false,
     });
@@ -177,7 +191,7 @@ fn create_archive(
         }
     }
     impl core::cmp::Ord for QueueEntry {
-        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        fn cmp(&self, other: &Self) -> core::cmp::Ordering {
             match (self, other) {
                 (QueueEntry::File(a), QueueEntry::File(b)) => a.cmp(b).reverse(),
                 (QueueEntry::File(a), QueueEntry::EndDir(b, _)) => {

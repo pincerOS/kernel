@@ -71,12 +71,12 @@ impl PageAlloc {
     fn alloc_frame(&self) -> (usize, usize) {
         let va: usize = self.table_va + self.alloc_offset.fetch_add(PG_SZ, Ordering::Relaxed);
         let pa: usize = va - self.table_va + self.table_pa;
-        return (va, pa);
+        (va, pa)
     }
 }
 
 unsafe fn kernel_paddr_to_vaddr(paddr: usize) -> *mut () {
-    return (paddr + (virt_addr_base().as_ptr() as usize)) as *mut ();
+    core::ptr::with_exposed_provenance_mut(paddr + (virt_addr_base().as_ptr() as usize))
 }
 
 static PAGE_ALLOCATOR: UnsafeInit<PageAlloc> = unsafe { UnsafeInit::uninit() };
@@ -253,7 +253,7 @@ pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> Result<(), MappingErr
         }
     }
 
-    return Ok(());
+    Ok(())
 }
 
 //TODO: add option to map huge page
@@ -312,7 +312,7 @@ pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result
         }
     }
 
-    return Ok(());
+    Ok(())
 }
 
 /// not thread safe
