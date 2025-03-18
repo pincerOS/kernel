@@ -64,11 +64,18 @@ dependencies = [
  "bytemuck",
  "device-tree",
  "endian",
+ "smallbox",
 ]
 
 [[package]]
 name = "lz4"
 version = "0.1.0"
+
+[[package]]
+name = "smallbox"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43d92e0947c1c04c508c9fd39608a1557226141410fd33b5b314d73fa76508d3"
 
 [[package]]
 name = "ulib"

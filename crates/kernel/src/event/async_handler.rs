@@ -127,13 +127,16 @@ pub struct HandlerContext<'a> {
 }
 
 impl HandlerContext<'_> {
-    fn cur_thread_mut(&mut self) -> &mut Option<Box<thread::Thread>> {
+    pub fn cur_thread_mut(&mut self) -> &mut Option<Box<thread::Thread>> {
         unsafe { &mut *self.outer_data.thread.get() }
     }
-    fn cur_thread(&self) -> &thread::Thread {
+    pub fn cur_thread(&self) -> &thread::Thread {
         unsafe { &*self.outer_data.thread.get() }
             .as_deref()
             .unwrap()
+    }
+    pub fn cur_process(&self) -> Option<&alloc::sync::Arc<crate::process::Process>> {
+        self.cur_thread().process.as_ref()
     }
 
     pub async fn resume(mut self) -> ResumedContext {

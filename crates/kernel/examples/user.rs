@@ -118,6 +118,14 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     // "Done copying user data, took 868749µs"
     println!("Done copying user data, took {:4}µs", end - start);
 
+    {
+        let mut fds = process.file_descriptors.lock();
+        let uart_fd = Arc::new(process::fd::UartFd(device::uart::UART.get())) as Arc<_>;
+        let _ = fds.set(0, Arc::clone(&uart_fd));
+        let _ = fds.set(1, Arc::clone(&uart_fd));
+        let _ = fds.set(2, uart_fd);
+    }
+
     let user_sp = 0x100_0000;
     let user_entry = 0x20_0000;
 

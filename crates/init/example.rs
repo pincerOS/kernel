@@ -87,6 +87,20 @@ fn readline(reader: &mut LineReader) -> Result<&[u8], isize> {
 fn main(chan: ChannelDesc) {
     println!("Starting 🐚");
 
+    let stdout = 1;
+    let buf = b"Stdout write test\n";
+    unsafe { ulib::sys::pwrite_all(stdout, buf, 0) };
+
+    let stdin = 0;
+    loop {
+        let mut buf = 0u8;
+        let res = unsafe { ulib::sys::pread(stdin, &mut buf, 1, 0) };
+        if res <= 0 {
+            break;
+        }
+        println!("Got char: {}", buf);
+    }
+
     let mut buf = [0; 1024];
     let (len, msg) = recv_block(chan, &mut buf).unwrap();
     let data = &buf[..len];

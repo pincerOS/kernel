@@ -75,3 +75,24 @@ pub fn recv_block(desc: ChannelDesc, buf: &mut [u8]) -> Result<(usize, Message),
         Err(res)
     }
 }
+
+syscall!(10 => pub fn pread(fd: usize, buf: *mut u8, buf_len: usize, offset: u64) -> isize);
+syscall!(11 => pub fn pwrite(fd: usize, buf: *const u8, buf_len: usize, offset: u64) -> isize);
+syscall!(12 => pub fn close(fd: usize) -> isize);
+syscall!(13 => pub fn dup3(old_fd: usize, new_fd: usize, flags: usize) -> isize);
+
+pub unsafe fn pwrite_all(fd: usize, buf: &[u8], offset: u64) -> isize {
+    let mut remaining = buf;
+    let mut written = 0;
+    while !remaining.is_empty() {
+        match unsafe { pwrite(fd, remaining.as_ptr(), remaining.len(), offset + written) } {
+            i @ (..=-1) => return i,
+            i @ (1..) => {
+                written += i as u64;
+                remaining = &remaining[i as usize..];
+            }
+            0 => return -1, // EOF
+        }
+    }
+    written as isize
+}
