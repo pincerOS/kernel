@@ -12,12 +12,10 @@
 ******************************************************************************/
 
 use super::descriptors::*;
-use super::pipe::*;
 use alloc::boxed::Box;
 // use super::super::types::*;
 use super::super::hcd::dwc::dwc_otg::*;
 use super::super::types::{ResultCode, UsbSpeed};
-use alloc::vec::Vec;
 
 /// The maximum number of children a device could have,
 /// which is the maximum number of ports a hub supports.
@@ -86,11 +84,10 @@ pub struct UsbDevice {
     pub descriptor: UsbDeviceDescriptor,
     pub configuration: UsbConfigurationDescriptor,
     pub interfaces: [UsbInterfaceDescriptor; MAX_INTERFACES_PER_DEVICE],
-    pub endpoints:
-        [[UsbEndpointDescriptor; MAX_ENDPOINTS_PER_DEVICE]; MAX_INTERFACES_PER_DEVICE],
+    pub endpoints: [[UsbEndpointDescriptor; MAX_ENDPOINTS_PER_DEVICE]; MAX_INTERFACES_PER_DEVICE],
     pub parent: Option<*mut UsbDevice>,
     pub full_configuration: Option<Box<[u8]>>, //TODO: the setupfor this is probably very bad
-    pub driver_data: Option<Box<[u8]>>, //TODO: the setupfor this is probably very bad
+    pub driver_data: Option<Box<[u8]>>,        //TODO: the setupfor this is probably very bad
     pub soft_sc: *mut (),
     pub bus: *mut UsbBus,
     pub last_transfer: u32,
@@ -117,7 +114,9 @@ impl UsbDevice {
             descriptor: UsbDeviceDescriptor::default(),
             configuration: UsbConfigurationDescriptor::default(),
             interfaces: [UsbInterfaceDescriptor::default(); MAX_INTERFACES_PER_DEVICE],
-            endpoints: core::array::from_fn(|_| core::array::from_fn(|_| UsbEndpointDescriptor::default())),
+            endpoints: core::array::from_fn(|_| {
+                core::array::from_fn(|_| UsbEndpointDescriptor::default())
+            }),
             full_configuration: None,
             driver_data: None,
             soft_sc: unsafe { (*bus).dwc_sc.as_mut() as *mut dwc_hub as *mut () },

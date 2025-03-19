@@ -208,6 +208,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
     }
 
     {
+        println!("| Initializing USB");
         let usb = discover_compatible(tree, b"brcm,bcm2708-usb")
             .unwrap()
             .next()
@@ -215,10 +216,8 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
 
         let (usb_addr, _) = find_device_addr(usb).unwrap().unwrap();
         let usb_base = unsafe { map_device_block(usb_addr, 0x13000) }.as_ptr(); ////TODO: Get actual size
-        println!("| USB controller addr: {:#010x}", usb_addr as usize);
-        println!("| USB controller base: {:#010x}", usb_base as usize);
 
-        let mut bus = usb::usb_init(usb_base);
+        let _bus = usb::usb_init(usb_base);
 
         // usb::usb_check_for_change(&mut bus);
     }
@@ -228,7 +227,9 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
     if gic::GIC.is_initialized() {
         init_fns.push(Box::new(|| {
             // gic::GIC.get().register_isr(30, timer_handler);
-            gic::GIC.get().register_isr(30, system_timer::timer_scheduler_handler);
+            gic::GIC
+                .get()
+                .register_isr(30, system_timer::timer_scheduler_handler);
         }));
     } else {
         let irq = bcm2836_intc::LOCAL_INTC.get();

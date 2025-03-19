@@ -144,7 +144,9 @@ pub unsafe extern "C" fn gic_irq_handler(
             panic!("Invalid IRQ number");
         }
 
+        //TODO: This may cause a few issues on the USB handling side, may need to push back
         unsafe { gic.reg_write_cpui(GICC_EOIR, iar) };
+
         //acknowledge the interrupt
         //fence
         //TODO: Switch to dsb?

@@ -2,6 +2,9 @@
 *	device/hub.h
 *	 by Alex Chadwick
 *
+*   Converted to Rust by Aaron Lo
+*
+*
 *	A light weight implementation of the USB protocol stack fit for a simple
 *	driver.
 *
@@ -12,7 +15,6 @@ use crate::device::usb::usbd::descriptors::DescriptorType;
 use crate::device::usb::UsbDriverDataHeader;
 use crate::device::usb::*;
 
-use alloc::vec::Vec;
 use bitflags::bitflags;
 
 /**
@@ -76,7 +78,6 @@ pub struct HubFullStatus {
     pub Change: HubStatusChange,
 }
 
-
 bitflags! {
     /**
     \brief Encapsulates the current status of a hub port.
@@ -112,13 +113,12 @@ bitflags! {
     }
 }
 
-
 /**
     \brief Encapsulates the full status of a hub port.
     The hub port status structure defined in 11.24.2.7 of the USB2.0 standard.
 */
 #[repr(C, packed)]
-#[derive(Default,Clone,  Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct HubPortFullStatus {
     pub Status: HubPortStatus,
     pub Change: HubPortStatusChange,
@@ -171,7 +171,7 @@ impl HubDevice {
             Descriptor: None,
             MaxChildren: 1,
             PortStatus: [HubPortFullStatus::default(); MAX_CHILDREN_PER_DEVICE],
-            Children: [core::ptr::null_mut(); MAX_CHILDREN_PER_DEVICE]
+            Children: [core::ptr::null_mut(); MAX_CHILDREN_PER_DEVICE],
         }
     }
 }

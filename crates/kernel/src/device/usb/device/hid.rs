@@ -5,10 +5,13 @@
 *	A light weight implementation of the USB protocol stack fit for a simple
 *	driver.
 *
-*	device/hid/hid.c contains code relating to the generic USB human interface 
+*   Converted to Rust by Aaron Lo
+*
+*
+*	device/hid/hid.c contains code relating to the generic USB human interface
 *	device driver. Human interface devices have another standard on top of USB
 *	(oh boy!) which is actually very neat. It allows human interface devices to
-*	describe their buttons, sliders and dials in great detail, and allows a 
+*	describe their buttons, sliders and dials in great detail, and allows a
 *	flexible driver to handle them all. This driver merely provides methods to
 *	deal with these reports. More abstracted drivers for keyboards and mice and
 *	whatnot would no doubt be very useful.
@@ -16,26 +19,19 @@
 
 pub mod keyboard;
 
-use super::super::usbd::device::*;
 use super::super::usbd::descriptors::*;
+use super::super::usbd::device::*;
 use super::super::usbd::usbd::*;
 
-use alloc::vec;
-use alloc::boxed::Box;
-use crate::device::system_timer::micro_delay;
-use crate::device::usb::hcd::dwc::dwc_otg::read_volatile;
-use crate::device::usb::hcd::dwc::dwc_otgreg::*;
-use crate::device::usb::types::*;
-use crate::device::usb::hcd::hub::*;
 use crate::device::usb::device::hid::keyboard::*;
+use crate::device::usb::types::*;
 use crate::device::usb::usbd::endpoint::register_interrupt_endpoint;
 use crate::device::usb::usbd::endpoint::*;
 use crate::device::usb::usbd::pipe::*;
 use crate::device::usb::usbd::request::*;
-use crate::device::usb::hcd::dwc::roothub::*;
-use crate::device::usb::*;
+use alloc::boxed::Box;
 
-pub const HidMessageTimeout:u32 = 10;
+pub const HidMessageTimeout: u32 = 10;
 
 pub fn HidLoad(bus: &mut UsbBus) {
     bus.interface_class_attach[InterfaceClass::InterfaceClassHid as usize] = Some(HidAttach);
@@ -73,9 +69,16 @@ fn HidSetProtocol(device: &mut UsbDevice, interface: u8, protocol: u16) -> Resul
     return ResultCode::OK;
 }
 
-fn HidGetReport(device: &mut UsbDevice, report_type: HidReportType, report_id: u8, interface: u8, buffer_length: u32, buffer:  *mut u8) -> ResultCode {
+fn HidGetReport(
+    device: &mut UsbDevice,
+    report_type: HidReportType,
+    report_id: u8,
+    interface: u8,
+    buffer_length: u32,
+    buffer: *mut u8,
+) -> ResultCode {
     let result = UsbControlMessage(
-        device, 
+        device,
         UsbPipeAddress {
             transfer_type: UsbTransfer::Control,
             speed: device.speed,
@@ -84,17 +87,17 @@ fn HidGetReport(device: &mut UsbDevice, report_type: HidReportType, report_id: u
             direction: UsbDirection::In,
             max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
             _reserved: 0,
-        }, 
-        buffer, 
-        buffer_length, 
+        },
+        buffer,
+        buffer_length,
         &mut UsbDeviceRequest {
             request_type: 0xa1,
             request: UsbDeviceHidRequest::convert_request(UsbDeviceHidRequest::GetReport),
             index: interface as u16,
             value: (report_type as u16) << 8 | report_id as u16,
             length: buffer_length as u16,
-        }, 
-        HidMessageTimeout
+        },
+        HidMessageTimeout,
     );
 
     if result != ResultCode::OK {
@@ -105,14 +108,15 @@ fn HidGetReport(device: &mut UsbDevice, report_type: HidReportType, report_id: u
     return ResultCode::OK;
 }
 
-
 pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
-
     println!("| HID: Attaching to interface {}.", interface_number);
-    let mut result;
+    let result;
 
     if device.interfaces[interface_number as usize].class != InterfaceClass::InterfaceClassHid {
-        println!("HID: Interface {} is not a HID interface.", interface_number);
+        println!(
+            "HID: Interface {} is not a HID interface.",
+            interface_number
+        );
         return ResultCode::ErrorArgument;
     }
 
@@ -124,27 +128,37 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // if device.endpoints[interface_number as usize][0].endpoint_address
 
     //print Subclass and Protocol
-    println!("| HID: Subclass: {:x}, Protocol: {:x}", device.interfaces[interface_number as usize].subclass, device.interfaces[interface_number as usize].protocol);
+    println!(
+        "| HID: Subclass: {:x}, Protocol: {:x}",
+        device.interfaces[interface_number as usize].subclass,
+        device.interfaces[interface_number as usize].protocol
+    );
 
-    println!("| HID information:\n{:#?}", device.interfaces[interface_number as usize]);
+    println!(
+        "| HID information:\n{:#?}",
+        device.interfaces[interface_number as usize]
+    );
 
     for i in 0..device.interfaces[interface_number as usize].endpoint_count {
-        println!("| HID: Endpoint {} information:\n{:#?}", i, device.endpoints[interface_number as usize][i as usize]);
+        println!(
+            "| HID: Endpoint {} information:\n{:#?}",
+            i, device.endpoints[interface_number as usize][i as usize]
+        );
     }
 
     //TODO: ignore for now
     // if (device->Endpoints[interfaceNumber][0].EndpointAddress.Direction != In ||
-	// 	device->Endpoints[interfaceNumber][0].Attributes.Type != Interrupt) {
-	// 	LOG("HID: Invalid HID device with unusual endpoints (0).\n");
-	// 	return ErrorIncompatible;
-	// }
-	// if (device->Interfaces[interfaceNumber].EndpointCount >= 2) {
-	// 	if (device->Endpoints[interfaceNumber][1].EndpointAddress.Direction != Out ||
-	// 		device->Endpoints[interfaceNumber][1].Attributes.Type != Interrupt) {
-	// 		LOG("HID: Invalid HID device with unusual endpoints (1).\n");
-	// 		return ErrorIncompatible;
-	// 	}	
-	// }
+    // 	device->Endpoints[interfaceNumber][0].Attributes.Type != Interrupt) {
+    // 	LOG("HID: Invalid HID device with unusual endpoints (0).\n");
+    // 	return ErrorIncompatible;
+    // }
+    // if (device->Interfaces[interfaceNumber].EndpointCount >= 2) {
+    // 	if (device->Endpoints[interfaceNumber][1].EndpointAddress.Direction != Out ||
+    // 		device->Endpoints[interfaceNumber][1].Attributes.Type != Interrupt) {
+    // 		LOG("HID: Invalid HID device with unusual endpoints (1).\n");
+    // 		return ErrorIncompatible;
+    // 	}
+    // }
 
     if device.status != UsbDeviceStatus::Configured {
         println!("| HID: Device is not configured.");
@@ -154,9 +168,11 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     if device.interfaces[interface_number as usize].subclass == 0x01 {
         if device.interfaces[interface_number as usize].protocol == 0x01 {
             println!("| HID: Keyboard detected.");
-        }
-        else {
-            println!("| HID: Unknown HID device detected: {:#x}", device.interfaces[interface_number as usize].protocol);
+        } else {
+            println!(
+                "| HID: Unknown HID device detected: {:#x}",
+                device.interfaces[interface_number as usize].protocol
+            );
             return ResultCode::ErrorArgument;
         }
 
@@ -165,34 +181,52 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
             println!("| HID: Could not revert to report mode from HID mode");
             return result;
         }
-    }   
+    }
 
-
-    let header = device.full_configuration.as_mut().unwrap().as_mut_ptr() as *mut UsbDescriptorHeader;
+    let _header =
+        device.full_configuration.as_mut().unwrap().as_mut_ptr() as *mut UsbDescriptorHeader;
     {
         let mut buffer = Box::new([0u8; 30]);
-        let result = HidGetReport(device, HidReportType::Feature, 0, interface_number as u8, 8, buffer.as_mut_ptr());
+        let _result = HidGetReport(
+            device,
+            HidReportType::Feature,
+            0,
+            interface_number as u8,
+            8,
+            buffer.as_mut_ptr(),
+        );
     }
 
     let boxed = Box::new(UsbEndpointDevice::new());
     let boxed_bytes = Box::into_raw(boxed);
-    let byte_slice = unsafe { core::slice::from_raw_parts_mut(boxed_bytes as *mut u8, size_of::<HubDevice>()) };
+    let byte_slice = unsafe {
+        core::slice::from_raw_parts_mut(boxed_bytes as *mut u8, size_of::<UsbEndpointDevice>())
+    };
     let byte_bytes = unsafe { Box::from_raw(byte_slice as *mut [u8]) };
     //TODO: I have no clue what I'm doing
     device.driver_data = Some(byte_bytes);
 
-    let mut endpoint_device = unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut UsbEndpointDevice) };
+    let endpoint_device = unsafe {
+        &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut UsbEndpointDevice)
+    };
     endpoint_device.endpoints[0] = Some(KeyboardAnalyze);
     //TODO: Hardcoded for keyboard atm
     //https://github.com/tmk/tmk_keyboard/wiki/USB%3A-HID-Usage-Table
     register_interrupt_endpoint(
         device,
-        device.endpoints[interface_number as usize][0 as usize].interval as u32, 
-        endpoint_address_to_num(device.endpoints[interface_number as usize][0 as usize].endpoint_address), 
-        UsbDirection::In, 
-        size_from_number(device.descriptor.max_packet_size0 as u32),
+        1,
+        device.endpoints[interface_number as usize][0 as usize].interval as u32,
+        endpoint_address_to_num(
+            device.endpoints[interface_number as usize][0 as usize].endpoint_address,
+        ),
+        UsbDirection::In,
+        size_from_number(
+            device.endpoints[interface_number as usize][0 as usize]
+                .packet
+                .MaxSize as u32,
+        ),
         0,
-        HidMessageTimeout
+        HidMessageTimeout,
     );
 
     return ResultCode::OK;

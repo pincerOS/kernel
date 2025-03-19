@@ -1,10 +1,14 @@
+#![allow(nonstandard_style)]
+
 pub mod configuration;
+pub mod device;
 pub mod hcd;
 pub mod types;
 pub mod usbd;
-pub mod device;
 
 use crate::device::usb::device::hid::keyboard::Key;
+use crate::device::usb::device::net::NetSendPacket;
+use crate::device::usb::device::net::RegisterNetReceiveCallback;
 use alloc::vec::Vec;
 
 use alloc::boxed::Box;
@@ -25,10 +29,18 @@ pub fn usb_init(base_addr: *mut ()) -> UsbBus {
     return bus;
 }
 
-pub fn usb_check_for_change(bus: &mut UsbBus) {
+pub fn usb_check_for_change(_bus: &mut UsbBus) {
     // UsbCheckForChange(bus);
 }
 
 pub fn usb_retrieve_keys() -> Vec<Key> {
-    return unsafe { device::hid::keyboard::KeyboardBuffer.clone() };
+    return device::hid::keyboard::KeyboardBuffer.lock().clone();
+}
+
+pub fn usb_register_net_callback(callback: fn(*mut u8, u32)) {
+    RegisterNetReceiveCallback(callback);
+}
+
+pub fn usb_send_packet(buffer: *mut u8, buffer_length: u32) {
+    NetSendPacket(buffer, buffer_length);
 }
