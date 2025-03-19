@@ -108,3 +108,18 @@ syscall!(15 => pub fn openat(
     flags: usize,
     mode: usize,
 ) -> isize);
+
+#[repr(C)]
+pub struct ArgStr {
+    len: usize,
+    ptr: *const u8,
+}
+
+syscall!(16 => pub fn execve_fd(
+    fd: usize,
+    flags: usize,
+    argc: usize,
+    argv: *const ArgStr,
+    envc: usize,
+    envp: *const ArgStr,
+) -> isize);

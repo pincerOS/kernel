@@ -3,6 +3,7 @@ use crate::process::Process;
 use alloc::sync::Arc;
 
 pub mod channel;
+pub mod exec;
 pub mod file;
 pub mod pipe;
 pub mod proc;
@@ -27,6 +28,7 @@ pub unsafe fn register_syscalls() {
         register_syscall_handler(14, pipe::sys_pipe);
 
         register_syscall_handler(15, file::sys_openat);
+        register_syscall_handler(16, exec::sys_execve_fd);
     }
 }
 

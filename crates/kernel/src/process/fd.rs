@@ -150,6 +150,7 @@ impl FileDescriptor for UartFd {
 pub async fn read_all(fd: &(dyn FileDescriptor + Send + Sync)) -> Result<alloc::vec::Vec<u8>, ()> {
     // TODO: specify limits
     let size = fd.size().await.as_result().map_err(|_e| ())?;
+    assert!(usize::try_from(size).is_ok());
     let mut file_data = alloc::vec![0; size as usize];
     let mut read = 0;
     while read < size {
