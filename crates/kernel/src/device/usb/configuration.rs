@@ -5,6 +5,8 @@
 *	A light weight implementation of the USB protocol stack fit for a simple
 *	driver.
 *
+*   Converted to Rust by Aaron Lo
+*
 *	configuration.c contains code to load all components. In order to
 *	allow the actual source files to be completely independent, one file must
 *	exist which depends upon all of them, to perform static initialisation.
@@ -18,6 +20,7 @@ use crate::device::usb::usbd::usbd::*;
 use crate::device::usb::device::hub::*;
 
 use super::device::hid::HidLoad;
+use crate::device::usb::device::net::NetLoad;
 
 pub fn ConfigurationLoad(bus: &mut UsbBus) {
     UsbLoad(bus);
@@ -26,4 +29,5 @@ pub fn ConfigurationLoad(bus: &mut UsbBus) {
     // RequestLoad(bus);
     HubLoad(bus);
     HidLoad(bus);
+    NetLoad(bus);
 }

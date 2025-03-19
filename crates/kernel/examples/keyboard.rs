@@ -4,8 +4,8 @@
 extern crate alloc;
 extern crate kernel;
 
-use kernel::device::usb::device::hid::keyboard::Key;
 use kernel::device::system_timer::micro_delay;
+use kernel::device::usb::device::hid::keyboard::Key;
 use kernel::event::thread;
 use kernel::*;
 

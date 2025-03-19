@@ -462,10 +462,10 @@ pub const fn GRXSTSRD_CHNUM_GET(x: u32) -> u32 {
     (x) & 15
 }
 pub const fn GHWCFG2_NUMHSTCHNL_GET(x: u32) -> u32 {
-    ((((x) >> 14) & 15) + 1)
+    (((x) >> 14) & 15) + 1
 }
 pub const fn GHWCFG2_NUMDEVEPS_GET(x: u32) -> u32 {
-    ((((x) >> 10) & 15) + 1)
+    (((x) >> 10) & 15) + 1
 }
 pub const fn GHWCFG3_DFIFODEPTH_GET(x: u32) -> u32 {
     (x) >> 16
@@ -477,7 +477,7 @@ pub const fn GHWCFG3_XFRRSIZE_GET(x: u32) -> u32 {
     0x400 << (((x) >> 0) & 15)
 }
 pub const fn GHWCFG4_NUM_IN_EP_GET(x: u32) -> u32 {
-    ((((x) >> 26) & 15) + 1)
+    (((x) >> 26) & 15) + 1
 }
 pub const fn GHWCFG4_NUMCTLEPS_GET(x: u32) -> u32 {
     ((x) >> 16) & 15

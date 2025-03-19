@@ -143,7 +143,7 @@ pub enum InterfaceClass {
 }
 
 impl InterfaceClass {
-    pub fn interface_class_to_num(ints: InterfaceClass) -> u8{
+    pub fn interface_class_to_num(ints: InterfaceClass) -> u8 {
         match ints {
             InterfaceClass::InterfaceClassReserved => 0x00,
             InterfaceClass::InterfaceClassAudio => 0x01,
@@ -168,8 +168,6 @@ impl InterfaceClass {
         }
     }
 }
-
-
 
 #[repr(C, packed)]
 #[derive(Default, Debug, Clone, Copy)]

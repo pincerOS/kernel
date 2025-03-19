@@ -5,6 +5,9 @@
 *	A light weight implementation of the USB protocol stack fit for a simple
 *	driver.
 *
+*   Converted to Rust by Aaron Lo
+*
+*
 *	hcd/dwc/roothub.c contains code to control the DesignWare® Hi-Speed USB 2.0
 *	On-The-Go (HS OTG) Controller's virtual root hub. The physical USB
 *	connection to the computer is treated as a virtual 1 port USB hub for
@@ -23,7 +26,7 @@ use crate::device::usb::usbd::descriptors::*;
 use crate::device::usb::usbd::device::*;
 use crate::device::usb::usbd::pipe::*;
 use crate::device::usb::usbd::request::*;
-use crate::device::usb::usbd::usbd::*;
+
 use core::cmp::min;
 use core::mem::size_of;
 use core::ptr::copy;
@@ -108,6 +111,7 @@ const CONFIGURATION_DESCRIPTOR: ConfigurationDescriptor = ConfigurationDescripto
     },
 };
 
+#[allow(dead_code)]
 const STRING_0: UsbStringDescriptor = UsbStringDescriptor {
     descriptor_length: 4,
     descriptor_type: DescriptorType::String,
@@ -188,7 +192,8 @@ pub fn HcdProcessRootHubMessage(
                         {
                             status |= 1 << 9;
                         }
-                        status |= ((hprt & (1 << HPRT_PRTTSTCTL_SHIFT)) >> HPRT_PRTTSTCTL_SHIFT) << 11;
+                        status |=
+                            ((hprt & (1 << HPRT_PRTTSTCTL_SHIFT)) >> HPRT_PRTTSTCTL_SHIFT) << 11;
 
                         let mut change = 0;
                         change |= ((hprt & HPRT_PRTCONNDET) >> 1) << 0;
@@ -196,9 +201,13 @@ pub fn HcdProcessRootHubMessage(
                         change |= ((hprt & HPRT_PRTOVRCURRCHNG) >> 5) << 3;
                         change |= 1 << 4;
                         //Don't even ask about this code, I hope its write
-                        println!("| HCD.Hub: HPRT: {:#x} Status: {:#x} Change: {:#x}", hprt, status, change);
+                        println!(
+                            "| HCD.Hub: HPRT: {:#x} Status: {:#x} Change: {:#x}",
+                            hprt, status, change
+                        );
                         (*stat_buff).Status = HubPortStatus::from_bits_truncate(status as u16);
-                        (*stat_buff).Change = HubPortStatusChange::from_bits_truncate(change as u16);
+                        (*stat_buff).Change =
+                            HubPortStatusChange::from_bits_truncate(change as u16);
                         reply_length = 4;
                     }
                 }
@@ -303,7 +312,7 @@ pub fn HcdProcessRootHubMessage(
         UsbDeviceRequestRequest::SetAddress => {
             reply_length = 0;
             let address = request.value as u32;
-            let mut bus = unsafe { &mut (*device.bus) };
+            let bus = unsafe { &mut (*device.bus) };
             bus.roothub_device_number = address;
         }
         UsbDeviceRequestRequest::GetDescriptor => {
