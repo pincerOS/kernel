@@ -126,7 +126,7 @@ pub struct HandlerContext<'a> {
     outer_data: &'a OuterData,
 }
 
-impl HandlerContext<'_> {
+impl<'outer> HandlerContext<'outer> {
     pub fn cur_thread_mut(&mut self) -> &mut Option<Box<thread::Thread>> {
         unsafe { &mut *self.outer_data.thread.get() }
     }
@@ -157,21 +157,17 @@ impl HandlerContext<'_> {
         ResumedContext(())
     }
 
-    pub fn regs(&mut self) -> ContextRef<'_> {
+    pub fn regs(&mut self) -> ThreadRefMut<'_, Context> {
         let thread = self.cur_thread_mut().as_mut().unwrap();
-        ContextRef {
+        ThreadRefMut {
             inner: unsafe { thread.last_context.as_mut() },
             marker: core::marker::PhantomData,
         }
     }
 
-    pub fn with_user_vmem<F, O>(&self, callback: F) -> O
-    where
-        F: FnOnce() -> O,
-    {
+    fn enable_user_vmem(&self) {
         if self.outer_data.in_handler.get() {
             // User virtual memory is still enabled, haven't yielded yet
-            callback()
         } else {
             // This handler has already yielded; user virtual memory likely
             // hasn't been switched back to the correct address space.
@@ -188,27 +184,62 @@ impl HandlerContext<'_> {
                     asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) user_ttbr0)
                 };
             }
+        }
+    }
 
-            callback()
+    pub fn with_user_vmem<F, O>(&self, callback: F) -> O
+    where
+        F: FnOnce() -> O,
+    {
+        self.enable_user_vmem();
+        callback()
+    }
+
+    pub fn with_user_vmem_async<F, O>(
+        &self,
+        callback: F,
+    ) -> impl Future<Output = O> + use<'outer, F, O>
+    where
+        F: Future<Output = O>,
+    {
+        struct UserVmemWrap<'a, F> {
+            this: HandlerContext<'a>,
+            fut: F,
+        }
+        impl<'a, F, O> Future for UserVmemWrap<'a, F>
+        where
+            F: Future<Output = O>,
+        {
+            type Output = O;
+            fn poll(self: Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
+                self.as_ref().this.enable_user_vmem();
+                let inner = unsafe { self.map_unchecked_mut(|f| &mut f.fut) };
+                inner.poll(cx)
+            }
+        }
+        UserVmemWrap {
+            this: HandlerContext {
+                outer_data: self.outer_data,
+            },
+            fut: callback,
         }
     }
 }
 
 unsafe impl Send for HandlerContext<'_> {}
 
-pub struct ContextRef<'a> {
-    inner: &'a mut Context,
-    // To ensure ContextRef: !Send, and can't be kept across await points.
+pub struct ThreadRefMut<'a, T> {
+    inner: &'a mut T,
+    // To ensure ThreadRefMut: !Send, and can't be kept across await points.
     marker: core::marker::PhantomData<*mut ()>,
 }
-
-impl core::ops::Deref for ContextRef<'_> {
-    type Target = Context;
+impl<T> core::ops::Deref for ThreadRefMut<'_, T> {
+    type Target = T;
     fn deref(&self) -> &Self::Target {
         &*self.inner
     }
 }
-impl core::ops::DerefMut for ContextRef<'_> {
+impl<T> core::ops::DerefMut for ThreadRefMut<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut *self.inner
     }
