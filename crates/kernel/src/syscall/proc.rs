@@ -75,8 +75,10 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
     //TODO: fix this to not be hard coded
     new_proc
         .lock()
-        .reserve_memory_range(0x20_000, 0x_20_000 * 7)
+        .reserve_memory_range(0x20_000, 0x_20_000 * 7, false)
         .unwrap();
+    new_proc.lock().set_range_as_physical(0x20_000);
+
     let mut user_thread =
         unsafe { thread::Thread::new_user(user_sp, user_entry, page_dir, new_proc) };
     user_thread.context.as_mut().unwrap().regs[0] = user_x0;
@@ -86,8 +88,10 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
 }
 
 pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
-    let req_start_addr = ctx.regs[0];
-    let req_size = ctx.regs[1];
+    let req_start_addr: usize = ctx.regs[0];
+    let req_size: usize = ctx.regs[1];
+    //TODO: update this to be flags later
+    let fill_pages: bool = ctx.regs[2] == 1;
 
     let curr_proc: Arc<BlockingLock<Process>> = CORES.with_current(|core| {
         let thread = core.thread.take().unwrap();
@@ -96,11 +100,35 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
         pcb
     });
 
-    let range_start: usize = match curr_proc
-        .lock()
-        .reserve_memory_range(req_start_addr, req_size)
-    {
-        Ok(start_addr) => start_addr,
+    let range_start: usize =
+        match curr_proc
+            .lock()
+            .reserve_memory_range(req_start_addr, req_size, fill_pages)
+        {
+            Ok(start_addr) => start_addr,
+            Err(e) => {
+                //For debug
+                println!("Error: {}", e);
+                //TODO: find a better way to tell the user what went wrong
+                usize::MAX
+            }
+        };
+    ctx.regs[0] = range_start;
+    ctx
+}
+
+pub unsafe fn sys_munmap(ctx: &mut Context) -> *mut Context {
+    let req_addr: usize = ctx.regs[0];
+
+    let curr_proc: Arc<BlockingLock<Process>> = CORES.with_current(|core| {
+        let thread = core.thread.take().unwrap();
+        let pcb = thread.process.as_ref().unwrap().clone();
+        core.thread.set(Some(thread));
+        pcb
+    });
+
+    let retval: usize = match curr_proc.lock().unmap_memory_range(req_addr) {
+        Ok(()) => 0,
         Err(e) => {
             //For debug
             println!("Error: {}", e);
@@ -108,6 +136,6 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
             usize::MAX
         }
     };
-    ctx.regs[0] = range_start;
+    ctx.regs[0] = retval;
     ctx
 }

@@ -121,8 +121,9 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     //TODO: fix this to not be hard coded
     new_proc
         .lock()
-        .reserve_memory_range(0x20_000, 0x_20_000 * 7)
+        .reserve_memory_range(0x20_000, 0x_20_000 * 7, false)
         .unwrap();
+    new_proc.lock().set_range_as_physical(0x20_000);
     let user_thread = unsafe { thread::Thread::new_user(user_sp, user_entry, ttbr0, new_proc) };
 
     event::SCHEDULER.add_task(event::Event::ScheduleThread(user_thread));
