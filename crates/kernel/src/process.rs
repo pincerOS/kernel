@@ -19,6 +19,7 @@ pub struct FileDescriptorList {
 
 pub struct Process {
     pub page_table: UserPageTable,
+    pub root: Option<fd::ArcFd>,
     pub file_descriptors: SpinLock<FileDescriptorList>,
 }
 
@@ -35,6 +36,7 @@ impl Process {
 
         Process {
             page_table,
+            root: None,
             file_descriptors: SpinLock::new(FileDescriptorList { desc: Vec::new() }),
         }
     }

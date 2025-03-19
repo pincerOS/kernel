@@ -25,6 +25,8 @@ pub unsafe fn register_syscalls() {
         register_syscall_handler(12, file::sys_close);
         register_syscall_handler(13, file::sys_dup3);
         register_syscall_handler(14, pipe::sys_pipe);
+
+        register_syscall_handler(15, file::sys_openat);
     }
 }
 

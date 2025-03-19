@@ -58,6 +58,11 @@ pub trait FileDescriptor: Any {
     fn size<'a>(&'a self) -> SmallFuture<'a, FileDescResult>;
     fn mmap_page(&self, offset: u64) -> SmallFuture<Option<FileDescResult>>;
 
+    fn open<'a>(&'a self, name: &'a [u8]) -> SmallFuture<'a, Result<ArcFd, ()>> {
+        let _ = name;
+        boxed_future(async move { Err(()).into() })
+    }
+
     // TODO: unneeded after rust 1.86 by trait upcasting
     fn as_any(&self) -> &dyn Any;
 }
@@ -140,4 +145,23 @@ impl FileDescriptor for UartFd {
     fn as_any(&self) -> &dyn Any {
         self
     }
+}
+
+pub async fn read_all(fd: &(dyn FileDescriptor + Send + Sync)) -> Result<alloc::vec::Vec<u8>, ()> {
+    // TODO: specify limits
+    let size = fd.size().await.as_result().map_err(|_e| ())?;
+    let mut file_data = alloc::vec![0; size as usize];
+    let mut read = 0;
+    while read < size {
+        match fd
+            .read(read, &mut file_data[read as usize..])
+            .await
+            .as_result()
+        {
+            Ok(0) => return Err(()),
+            Ok(s) => read += s,
+            Err(_e) => return Err(()),
+        }
+    }
+    Ok(file_data)
 }

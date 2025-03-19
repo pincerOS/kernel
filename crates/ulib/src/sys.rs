@@ -100,3 +100,11 @@ pub unsafe fn pwrite_all(fd: usize, buf: &[u8], offset: u64) -> isize {
     }
     written as isize
 }
+
+syscall!(15 => pub fn openat(
+    dir_fd: usize,
+    path_len: usize,
+    path_ptr: *const u8,
+    flags: usize,
+    mode: usize,
+) -> isize);
