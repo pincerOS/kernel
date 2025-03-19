@@ -116,28 +116,47 @@ impl Thread {
         })
     }
 
-    /// Save the given register context into the thread's state;
-    /// if the thread is a user thread, it copies the register context
-    /// into a space in the [`Thread`] struct (as the context is stored
-    /// on the temporary kernel stack).  If the thread is a kernel thread,
-    /// the context is stored on the kernel stack, so this can leave the
-    /// context in-place on the thread's stack.
+    pub fn is_kernel_thread(&self) -> bool {
+        self.user_regs.as_ref().map(|u| !u.usermode).unwrap_or(true)
+    }
+    pub fn is_user_thread(&self) -> bool {
+        !self.is_kernel_thread()
+    }
+
+    /// Save the given register context into the thread's state.
+    ///
+    /// `stable` indicates whether `context` points to a stable location
+    /// that will be accessible at the next call to `enter_thread`.  If
+    /// you aren't sure, false is always a safe option.
+    ///
+    /// `stable` should be true if the thread is a kernel thread, as the
+    /// context will be saved at the top of the stack associated with
+    /// this thread.
+    /// `stable` should be false if the thread is a user thread, or if
+    /// the context for a kernel thread was saved anywhere but the top
+    /// of its stack.
+    ///
+    /// If `stable` is false, this copies the register context into a
+    /// space in the [`Thread`] struct; otherwise, it saves a pointer to
+    /// the provided context.
     ///
     /// If this is a user thread, it saves the *current* values of
     /// `TTBR0_EL1` and `SP_EL0` into the user's stack.
-    pub unsafe fn save_context(&mut self, context: NonNull<Context>) {
+    pub unsafe fn save_context(&mut self, context: NonNull<Context>, stable: bool) {
         if let Some(user) = &mut self.user_regs {
             unsafe { core::arch::asm!("mrs {}, TTBR0_EL1", out(reg) user.ttbr0_el1) };
             unsafe { core::arch::asm!("mrs {}, SP_EL0", out(reg) user.sp_el0) };
+        }
 
+        if stable {
+            // context is on the allocated stack in the heap, not the per-core
+            // stack; it will not be overwritten before being used again.
+            self.last_context = context;
+        } else {
             // context is on the temporary kernel stack, so we have to copy it
             // into a more permanent location
             self.context = Some(unsafe { context.read() });
             self.last_context = self.context.as_mut().unwrap().into();
-        } else {
-            // context is on the allocated stack in the heap, not the per-core
-            // stack; it will not be overwritten before being used again.
-            self.last_context = context;
         }
     }
 

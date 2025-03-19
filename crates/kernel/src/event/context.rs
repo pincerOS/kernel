@@ -81,6 +81,29 @@ pub struct Context {
     pub spsr: usize,
 }
 
+#[derive(Debug, PartialEq, PartialOrd)]
+pub enum ExceptionLevel {
+    EL0 = 0,
+    EL1 = 1,
+    EL2 = 2,
+    EL3 = 3,
+}
+
+impl Context {
+    pub fn current_el(&self) -> ExceptionLevel {
+        let m = self.spsr & 0b1111;
+        let el = m >> 2;
+        let _sp_el0 = (m & 1) == 0;
+        match el {
+            0 => ExceptionLevel::EL0,
+            1 => ExceptionLevel::EL1,
+            2 => ExceptionLevel::EL2,
+            3 => ExceptionLevel::EL3,
+            _ => unreachable!(),
+        }
+    }
+}
+
 type EventQueue = super::scheduler::Queue<Event>;
 
 /// An action to take on the thread descheduled by [`context_switch`].
@@ -108,6 +131,10 @@ pub enum DescheduleAction {
 pub fn context_switch(mut action: SwitchAction) {
     let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
     let thread = thread.expect("attempt to context switch from an event");
+    assert!(
+        thread.is_kernel_thread(),
+        "attempt to context switch with a user thread TCB"
+    );
     unsafe { asm_context_switch(Some(thread), Some(&mut action), core_sp) }
 }
 

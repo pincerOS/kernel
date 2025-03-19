@@ -71,18 +71,28 @@ pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
 
     let thread = CORES.with_current(|core| core.thread.take());
 
-    if let Some(mut thread) = thread {
+    let Some(mut thread) = thread else {
+        // Not running a thread
+        return ctx;
+    };
+
+    if thread.is_user_thread() && ctx.current_el() > context::ExceptionLevel::EL0 {
+        // Currently in an exception handler in a user thread
+        return ctx;
+    }
+
+    if ctx.current_el() == context::ExceptionLevel::EL1 {
         let stacks = &raw const crate::arch::boot::STACKS;
         let ptr_range = stacks as usize..stacks.wrapping_add(1) as usize;
-        // TODO: ensure that this can't happen
-        if ptr_range.contains(&ctx.sp) {
-            CORES.with_current(|core| core.thread.set(Some(thread)));
-            return ctx;
-        }
-
-        unsafe { thread.save_context(ctx.into()) };
-        unsafe { deschedule_thread(DescheduleAction::Yield, Some(thread)) };
-    } else {
-        ctx
+        assert!(
+            !ptr_range.contains(&ctx.sp),
+            "Attempted to preempt core on kernel stack; kernel-thread: {:?}, el: {:?}, sp: {:?}",
+            thread.is_kernel_thread(),
+            ctx.current_el(),
+            ctx.sp
+        );
     }
+
+    unsafe { thread.save_context(ctx.into(), thread.is_kernel_thread()) };
+    unsafe { deschedule_thread(DescheduleAction::Yield, Some(thread)) };
 }

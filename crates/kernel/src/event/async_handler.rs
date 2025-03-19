@@ -102,7 +102,7 @@ where
                 // The handler yielded; suspend the current thread, and set
                 // up the future to reschedule the thread when it finishes.
                 let thread = unsafe { &mut *future.data.thread.get() }.as_mut().unwrap();
-                unsafe { thread.save_context(ctx.into()) };
+                unsafe { thread.save_context(ctx.into(), thread.is_kernel_thread()) };
 
                 let woken = task::TASKS.return_task(task_id, task::Task::new(future));
                 if woken {
