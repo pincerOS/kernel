@@ -176,7 +176,7 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 
     let boxed = Box::new(UsbEndpointDevice::new());
     let boxed_bytes = Box::into_raw(boxed);
-    let byte_slice = unsafe { core::slice::from_raw_parts_mut(boxed_bytes as *mut u8, size_of::<HubDevice>()) };
+    let byte_slice = unsafe { core::slice::from_raw_parts_mut(boxed_bytes as *mut u8, size_of::<UsbEndpointDevice>()) };
     let byte_bytes = unsafe { Box::from_raw(byte_slice as *mut [u8]) };
     //TODO: I have no clue what I'm doing
     device.driver_data = Some(byte_bytes);
@@ -190,7 +190,7 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         device.endpoints[interface_number as usize][0 as usize].interval as u32, 
         endpoint_address_to_num(device.endpoints[interface_number as usize][0 as usize].endpoint_address), 
         UsbDirection::In, 
-        size_from_number(device.descriptor.max_packet_size0 as u32),
+        size_from_number(device.endpoints[interface_number as usize][0 as usize].packet.MaxSize as u32),
         0,
         HidMessageTimeout
     );

@@ -15,6 +15,7 @@
 use crate::device::system_timer::micro_delay;
 use crate::device::usb::hcd::dwc::dwc_otg::*;
 use crate::device::usb::hcd::dwc::roothub::memory_copy;
+use crate::shutdown;
 use crate::syscall::channel;
 
 use alloc::boxed::Box;
@@ -70,6 +71,32 @@ pub fn UsbInitialise(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
     }
 
     result
+}
+
+pub fn UsbBulkMessage(
+    device: &mut UsbDevice,
+    channel: u8,
+    pipe: UsbPipeAddress,
+    buffer: *mut u8,
+    buffer_length: u32,
+    packet_id: PacketId,
+    timeout_: u32,
+) -> ResultCode {
+
+    let result = HcdSubmitBulkMessage(device, channel, pipe, buffer, buffer_length, &mut UsbDeviceRequest {
+        request_type: 0,
+        request: UsbDeviceRequestRequest::GetStatus,
+        value: 0,
+        index: 0,
+        length: buffer_length as u16,
+    }, packet_id);
+
+    if result != ResultCode::OK {
+        println!("| USBD: Failed to send bulk message: {:?}", result);
+        return result;
+    }
+
+    return result;
 }
 
 pub fn UsbInterruptMessage(
@@ -492,8 +519,6 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
 
         }
 
-
-
         if let Some(class_attach) = bus.interface_class_attach[device.interfaces[0].class as usize] {
             result = class_attach(device, 0);
             if result != ResultCode::OK {
@@ -502,6 +527,7 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
             }
         } else {
             println!("| USBD: No class attach handler");
+            shutdown();
         }
     } else {
         println!("| USBD: Invalid interface class");

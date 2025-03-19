@@ -268,6 +268,7 @@ fn HcdChannelInterruptToError(device: &mut UsbDevice, hcint: u32, isComplete: bo
 }
 
 pub const RequestTimeout: u32 = 5000;
+
 pub fn HcdChannelSendWaitOne(
     device: &mut UsbDevice,
     pipe: &mut UsbPipeAddress,
@@ -586,6 +587,79 @@ pub fn ReadHPRT() -> u32 {
     read_volatile(DOTG_HPRT)
 }
 
+pub fn HcdSubmitBulkMessage(
+    device: &mut UsbDevice,
+    channel: u8,
+    pipe: UsbPipeAddress,
+    buffer: *mut u8,
+    buffer_length: u32,
+    request: &mut UsbDeviceRequest,
+    packet_id: PacketId,
+) -> ResultCode {
+
+    let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
+    device.error = UsbTransferError::Processing;
+    device.last_transfer = 0;
+    
+    let mut tempPipe = UsbPipeAddress {
+        max_size: pipe.max_size,
+        speed: pipe.speed,
+        end_point: pipe.end_point,
+        device: pipe.device,
+        transfer_type: UsbTransfer::Bulk,
+        direction: pipe.direction,
+        _reserved: 0,
+    };
+    // let data_buffer = dwc_sc.databuffer.as_mut_ptr();
+    let result = HcdChannelSendWait(
+        device,
+        &mut tempPipe,
+        channel,
+        buffer,
+        buffer_length,
+        request,
+        packet_id,
+    );
+
+    if result != ResultCode::OK {
+        // println!("| HCD: Coult not send data to device {:#?}", result);
+        if device.error == UsbTransferError::NoAcknowledge {
+            //set buffer to 0
+            unsafe { ptr::write_bytes(buffer, 0, buffer_length as usize) };
+            device.error = UsbTransferError::NoError;
+            println!( "HCD: No Acknowledge on interrupt transfer.\n");
+            shutdown(); //TODO: This shouldn't run
+            return ResultCode::OK;
+        }
+        return result;
+    }
+
+    let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
+        // dwc_sc.channel[0].transfer_size.TransferSize = hctsiz & 0x7ffff;
+    convert_into_host_transfer_size(hctsiz, &mut dwc_sc.channel[channel as usize].transfer_size);
+
+    if pipe.direction == UsbDirection::In {
+        if dwc_sc.channel[0].transfer_size.TransferSize <= buffer_length {
+            device.last_transfer = buffer_length - dwc_sc.channel[channel as usize].transfer_size.TransferSize;
+        } else {
+            println!("| HCD: Weird transfer size\n");
+            device.last_transfer = buffer_length;
+        }
+
+        memory_copy(
+            buffer,
+            dwc_sc.dma_loc as *const u8,
+            device.last_transfer as usize,
+        );
+
+    } else {
+        device.last_transfer = buffer_length;
+    }
+
+    device.error = UsbTransferError::NoError;
+    return ResultCode::OK;
+}
+
 pub fn HcdSubmitInterruptMessage(
     device: &mut UsbDevice,
     channel: u8,
@@ -625,8 +699,13 @@ pub fn HcdSubmitInterruptMessage(
         // println!("| HCD: Coult not send data to device {:#?}", result);
         if device.error == UsbTransferError::NoAcknowledge {
             //set buffer to 0
+            let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
+            // dwc_sc.channel[0].transfer_size.TransferSize = hctsiz & 0x7ffff;
+            convert_into_host_transfer_size(hctsiz, &mut dwc_sc.channel[channel as usize].transfer_size);
+            println!("| HCD: Transfer size {:#x}", dwc_sc.channel[channel as usize].transfer_size.TransferSize);
             unsafe { ptr::write_bytes(buffer, 0, buffer_length as usize) };
             device.error = UsbTransferError::NoError;
+            println!( "HCD: No Acknowledge on interrupt transfer.\n");
             return ResultCode::OK;
         }
         return result;

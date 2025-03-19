@@ -18,6 +18,7 @@ use crate::device::usb::usbd::usbd::*;
 use crate::device::usb::device::hub::*;
 
 use super::device::hid::HidLoad;
+use crate::device::usb::device::net::NetLoad;
 
 pub fn ConfigurationLoad(bus: &mut UsbBus) {
     UsbLoad(bus);
@@ -26,4 +27,5 @@ pub fn ConfigurationLoad(bus: &mut UsbBus) {
     // RequestLoad(bus);
     HubLoad(bus);
     HidLoad(bus);
+    NetLoad(bus);
 }

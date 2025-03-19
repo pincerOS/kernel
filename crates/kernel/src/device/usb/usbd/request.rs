@@ -53,6 +53,15 @@ pub enum UsbDeviceRequestRequest {
     // SetReport = 9,
     // SetIdle = 10,
     // SetProtocol = 11,
+    // // CDC requests
+    // SendEncapsulatedCommand = 0x00,
+    // GetEncapsulatedResponse = 0x01,
+    // SetCommFeature = 0x02,
+    // GetCommFeature = 0x03,
+    SetLineCoding = 0x20,
+    GetLineCoding = 0x21,
+    SetControlLineState = 0x22,
+    SendBreak = 0x23,
 }
 
 impl Default for UsbDeviceRequestRequest {
