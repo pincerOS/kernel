@@ -20,6 +20,7 @@ fn spawn_elf(elf: elf::Elf<'_>) -> sys::ChannelDesc {
             let memsize = (phdr.p_memsz as usize).next_multiple_of(4096).max(4096);
 
             // TODO: mmap
+            unsafe { sys::mmap(phdr.p_vaddr as usize, memsize, false); }
             let addr = (phdr.p_vaddr as usize) as *mut u8;
             let mapping: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(addr, memsize) };
             mapping[..data.len()].copy_from_slice(data);
