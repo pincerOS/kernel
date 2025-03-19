@@ -64,6 +64,7 @@ dependencies = [
  "bytemuck",
  "device-tree",
  "endian",
+ "initfs",
  "smallbox",
 ]
 

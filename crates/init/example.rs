@@ -87,6 +87,35 @@ fn readline(reader: &mut LineReader) -> Result<&[u8], isize> {
 fn main(chan: ChannelDesc) {
     println!("Starting 🐚");
 
+    let root = 3;
+    let path = "src/lib.rs";
+    let fd = unsafe { ulib::sys::openat(root, path.len(), path.as_bytes().as_ptr(), 0, 0) };
+
+    println!("File: {}", fd);
+
+    let mut data = [0; 4096];
+
+    let mut read = 0;
+    while read < data.len() {
+        match unsafe {
+            ulib::sys::pread(
+                fd as usize,
+                data[read..].as_mut_ptr(),
+                data[read..].len(),
+                read as u64,
+            )
+        } {
+            (..=-1) => break,
+            i @ (1..) => read += i as usize,
+            0 => break,
+        }
+    }
+
+    println!(
+        "File content: ======\n{}\n====================",
+        core::str::from_utf8(&data[..read]).unwrap()
+    );
+
     let stdout = 1;
     let buf = b"Stdout write test\n";
     unsafe { ulib::sys::pwrite_all(stdout, buf, 0) };

@@ -70,7 +70,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     });
 
     // Create a user process
-    let process = crate::process::Process::new();
+    let mut process = crate::process::Process::new();
     // Assume fixed mapped range in user process (0x20_0000 in virtual memory)
     // TODO: mmap instead
     let user_region = 0x20_0000 as *mut u8;
@@ -118,12 +118,19 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     // "Done copying user data, took 868749µs"
     println!("Done copying user data, took {:4}µs", end - start);
 
+    static ARCHIVE: &[u8] = initfs::include_bytes_align!(u32, "../../init/fs.arc");
+    let fs = fs::initfs::InitFs::new(&ARCHIVE).unwrap();
+    let root = fs.root();
+
+    process.root = Some(root.clone());
+
     {
         let mut fds = process.file_descriptors.lock();
         let uart_fd = Arc::new(process::fd::UartFd(device::uart::UART.get())) as Arc<_>;
         let _ = fds.set(0, Arc::clone(&uart_fd));
         let _ = fds.set(1, Arc::clone(&uart_fd));
         let _ = fds.set(2, uart_fd);
+        let _ = fds.set(3, root);
     }
 
     let user_sp = 0x100_0000;

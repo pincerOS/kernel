@@ -6,6 +6,7 @@ extern crate std;
 
 use core::error::Error;
 
+use alloc::borrow::Cow;
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::collections::BinaryHeap;
@@ -15,7 +16,7 @@ use alloc::vec::Vec;
 
 use std::io::{Read, Seek};
 use std::os::unix::fs::MetadataExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{eprintln, println};
 
 use initfs::ArchiveHeader;
@@ -48,6 +49,9 @@ struct CommandParser {
 
 enum Command {
     None,
+    List {
+        files: Vec<PathBuf>,
+    },
     Create {
         files: Vec<PathBuf>,
         root: Option<PathBuf>,
@@ -104,6 +108,9 @@ impl CommandParser {
                         follow_links: None,
                     };
                 }
+                "l" | "list" => {
+                    self.command = Command::List { files: Vec::new() };
+                }
                 _ => return Err(format!("Unknown subcommand {:?}", arg).into()),
             }
             return Ok(Some(()));
@@ -111,6 +118,9 @@ impl CommandParser {
         match self.command {
             Command::None => return Err("Subcommand takes no positional args".into()),
             Command::Create { ref mut files, .. } => {
+                files.push(arg.into());
+            }
+            Command::List { ref mut files, .. } => {
                 files.push(arg.into());
             }
         }
@@ -164,6 +174,19 @@ fn main() {
             if let Err(e) = res {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
+            }
+        }
+        Command::List { files } => {
+            let multiple = files.len() > 1;
+            for file in files {
+                if multiple {
+                    println!("File {}:", file.display());
+                }
+                let res = list_files(&file);
+                if let Err(e) = res {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
             }
         }
         Command::None => {
@@ -232,6 +255,34 @@ fn create_archive(
     let mut data: Vec<u8> = Vec::new();
 
     let mut i = 0;
+
+    if !queue
+        .peek()
+        .map(|q| match q {
+            QueueEntry::File(l) => l.as_os_str().is_empty(),
+            QueueEntry::EndDir(l, _) => l.as_os_str().is_empty(),
+        })
+        .unwrap_or(false)
+    {
+        i += 1;
+        files.push(initfs::FileHeader {
+            inode: i,
+            mode: 0x4000 | 0o777,
+            uid: 0,
+            gid: 0,
+            name_len: 0,
+            name_inline: [0; 32],
+            compress_mode: 0,
+            reserved: [0; 3],
+            offset: 0,
+            size: 0,
+            compressed_size: 0,
+        });
+    }
+
+    queue.push(QueueEntry::EndDir("".into(), 0));
+
+    // TODO: push ancestors of each specified dir
 
     while let Some(file) = queue.pop() {
         let file = match file {
@@ -408,6 +459,24 @@ fn create_archive(
     assert_eq!(total_size, output.len());
 
     std::fs::write(out, output)?;
+
+    Ok(())
+}
+
+fn list_files(file: &Path) -> Result<(), std::io::Error> {
+    let file = std::fs::read(file)?;
+    let archive = initfs::Archive::load(&file).unwrap();
+
+    let width = (archive.header.file_count.max(1)).ilog10() as usize + 1;
+
+    for file in archive.iter_files() {
+        let name = archive
+            .get_file_name(file)
+            .map(|s| Cow::Borrowed(core::str::from_utf8(s).expect("TODO")))
+            .unwrap_or_else(|| format!("<missing>: {:?}", file.file_name_trunc()).into());
+
+        println!("| {:width$} {}", file.inode, name)
+    }
 
     Ok(())
 }

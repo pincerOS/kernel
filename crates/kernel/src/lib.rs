@@ -14,6 +14,7 @@ pub mod test;
 
 pub mod arch;
 pub mod event;
+pub mod fs;
 pub mod heap;
 pub mod memory;
 pub mod process;

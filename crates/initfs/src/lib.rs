@@ -26,6 +26,7 @@ pub struct ArchiveHeader {
 }
 
 #[repr(C)]
+#[derive(Clone)]
 pub struct FileHeader {
     // must be the 1-indexed location of this file within the archive's
     // file list.  (TODO: indices in concatenated archives?)
@@ -71,7 +72,7 @@ pub struct FileHeader {
 // (optional concatenated archives?)
 
 pub struct Archive<'a> {
-    _header: &'a ArchiveHeader,
+    pub header: &'a ArchiveHeader,
 
     strings: &'a [u8],
     data: &'a [u8],
@@ -148,7 +149,7 @@ impl<'a> Archive<'a> {
             .ok_or(ArchiveError::Truncated)?;
 
         Ok(Archive {
-            _header: header,
+            header,
             strings,
             data,
             files_start,
@@ -157,11 +158,11 @@ impl<'a> Archive<'a> {
         })
     }
 
-    pub fn get_file(&self, idx: usize) -> Option<&'a FileHeader> {
-        if idx >= self.files_count {
+    pub fn get_file(&self, inode: usize) -> Option<&'a FileHeader> {
+        if inode == 0 || inode > self.files_count {
             return None;
         }
-        let base = self.files_start + idx * self.files_stride;
+        let base = self.files_start + (inode - 1) * self.files_stride;
         file_header_from_slice(&self.data[base..])
     }
 
@@ -177,11 +178,15 @@ impl<'a> Archive<'a> {
         }
     }
 
+    pub fn iter_files(&self) -> impl Iterator<Item = &FileHeader> {
+        (1..=self.files_count).filter_map(|i| self.get_file(i))
+    }
+
     pub fn find_file(&self, name: &[u8]) -> Option<(usize, &FileHeader)> {
         // TODO: a binary search may be better, but this approach is simple
         let target = name;
-        let mut i = 0;
-        while i < self.files_count {
+        let mut i = 1;
+        while i <= self.files_count {
             let file = self.get_file(i).unwrap();
             let trunc = file.file_name_trunc();
             let (file_name_trunc, is_trunc) = match trunc {
@@ -191,6 +196,8 @@ impl<'a> Archive<'a> {
 
             if target.starts_with(file_name_trunc) {
                 if !is_trunc && target.len() == file_name_trunc.len() {
+                    return Some((i, file));
+                } else {
                     let file_name = self.get_file_name(file).unwrap();
                     if target == file_name {
                         return Some((i, file));
@@ -219,7 +226,7 @@ impl<'a> Archive<'a> {
         let mut i = idx + 1;
         let end = self.files_count.min(idx + dir.offset as usize);
         Ok(core::iter::from_fn(move || {
-            if i >= end {
+            if i > end {
                 return None;
             }
             let file = self.get_file(i)?;
@@ -360,31 +367,3 @@ pub mod macros {
 
 #[doc(inline)]
 pub use crate::__include_bytes_align as include_bytes_align;
-
-// #[test]
-// fn test_1() {
-//     extern crate std;
-//     use std::println;
-
-//     let file = include_bytes_align!(u32, "../out.arc");
-
-//     let archive = Archive::load(file).unwrap();
-
-//     let file = archive.find_file(b"kernel/bcm2709");
-//     println!("{:?}", file.is_some());
-
-//     let file = archive.find_file(b"kernel");
-//     println!("{:?}", file.is_some());
-
-//     let entries = archive.list_dir(file.unwrap().0).unwrap();
-//     for (i, file) in entries {
-//         let name = core::str::from_utf8(archive.get_file_name(file).unwrap()).unwrap();
-//         println!("| {:03} {:?}", i, name);
-//     }
-
-//     let file = archive.find_file(b"kernel/Cargo.toml").unwrap().1;
-//     let mut buf = std::vec![0; file.size as usize];
-//     let data = archive.read_file(file, &mut buf).unwrap();
-
-//     println!("{}", core::str::from_utf8(data).unwrap());
-// }
