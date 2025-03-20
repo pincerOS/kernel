@@ -450,7 +450,7 @@ impl INodeWrapper {
         let header_blocks_slice_end: usize = size_of::<ext4_extent_header>() / size_of::<u32>();
 
         let mut current_extent_header_slice: &[u8] =
-            bytemuck::cast_slice(&self.inode.i_block[0..header_blocks_slice_end]);
+            bytemuck::cast_slice(&self.inode.i_block[0..]);
         let mut block_to_read: Option<usize> = None;
         let mut found_data_block: bool = false;
         let mut block_buffer: Vec<u8> = vec![0u8; ext2.superblock.get_block_size()];
@@ -461,19 +461,24 @@ impl INodeWrapper {
                 unsafe { current_extent_header_slice.align_to::<ext4_extent_header>().1[0] };
             let is_leaf_node = current_extent_header.eh_depth == 0;
 
+            if current_extent_header.eh_magic != EXT4_EXTENT_HEADER_MAGIC {
+                return Err(Ext2Error::InvalidExtentTree);
+            }
+
             while (current_extent_header.eh_entries as usize) > current_entry_index {
-                if current_extent_header.eh_magic != EXT4_EXTENT_HEADER_MAGIC {
-                    return Err(Ext2Error::InvalidExtentTree);
-                }
+                let ext4_header_size = size_of::<ext4_extent_header>();
 
                 if is_leaf_node {
+                    let ext4_extent_size = size_of::<ext4_extent>();
+                    let current_extent_slice_start: usize =
+                        ext4_header_size + (current_entry_index * ext4_extent_size);
                     let current_extent_leaf_node_slice: &[u8] =
-                        &current_extent_header_slice[header_blocks_slice_end..(header_blocks_slice_end + size_of::<ext4_extent>())];
+                        &current_extent_header_slice[current_extent_slice_start..(current_extent_slice_start + ext4_extent_size)];
                     let current_extent_leaf_node =
                         unsafe { current_extent_leaf_node_slice.align_to::<ext4_extent>().1[0] };
                     let leaf_block = current_extent_leaf_node.ee_block as usize;
                     
-                    if number > leaf_block {
+                    if number >= leaf_block {
                         let leaf_node_length = 
                             if current_extent_leaf_node.ee_len > EXT4_EXTENT_UNINIT {
                                 (current_extent_leaf_node.ee_len - EXT4_EXTENT_UNINIT) as usize
@@ -489,8 +494,12 @@ impl INodeWrapper {
                         }
                     }
                 } else {
+                    let ext4_extent_idx_size: usize = size_of::<ext4_extent_idx>();
+
+                    let current_extent_slice_start: usize =
+                        ext4_header_size + (current_entry_index * ext4_extent_idx_size);
                     let current_extent_interior_node_slice: &[u8] =
-                        &current_extent_header_slice[header_blocks_slice_end..(header_blocks_slice_end + size_of::<ext4_extent_idx>())];
+                        &current_extent_header_slice[current_extent_slice_start..(current_extent_slice_start + ext4_extent_idx_size)];
                     let current_extent_interior_node =
                         unsafe { current_extent_interior_node_slice.align_to::<ext4_extent_idx>().1[0] };
 
