@@ -6,7 +6,7 @@ use core::ptr::copy_nonoverlapping;
 
 use crate::event::context::{deschedule_thread, Context, DescheduleAction, CORES};
 use crate::event::process::Process;
-use crate::sync::BlockingLock;
+use crate::sync::SpinLock;
 use crate::{event, event::thread, shutdown};
 
 pub unsafe fn sys_shutdown(_ctx: &mut Context) -> *mut Context {
@@ -71,7 +71,7 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
     }
 
     println!("Creating new process with page dir {:#010}", page_dir);
-    let new_proc: Arc<BlockingLock<Process>> = Arc::new(BlockingLock::new(Process::new(page_dir)));
+    let new_proc: Arc<SpinLock<Process>> = Arc::new(SpinLock::new(Process::new(page_dir)));
     //TODO: fix this to not be hard coded
     new_proc
         .lock()
@@ -92,8 +92,10 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
     let req_size: usize = ctx.regs[1];
     //TODO: update this to be flags later
     let fill_pages: bool = ctx.regs[2] == 1;
+    
+    println!("Requested start addr: {} Requested size: {}", req_start_addr, req_size);
 
-    let curr_proc: Arc<BlockingLock<Process>> = CORES.with_current(|core| {
+    let curr_proc: Arc<SpinLock<Process>> = CORES.with_current(|core| {
         let thread = core.thread.take().unwrap();
         let pcb = thread.process.as_ref().unwrap().clone();
         core.thread.set(Some(thread));
@@ -114,13 +116,14 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
             }
         };
     ctx.regs[0] = range_start;
+    println!("Exiting sys mmap");
     ctx
 }
 
 pub unsafe fn sys_munmap(ctx: &mut Context) -> *mut Context {
     let req_addr: usize = ctx.regs[0];
 
-    let curr_proc: Arc<BlockingLock<Process>> = CORES.with_current(|core| {
+    let curr_proc: Arc<SpinLock<Process>> = CORES.with_current(|core| {
         let thread = core.thread.take().unwrap();
         let pcb = thread.process.as_ref().unwrap().clone();
         core.thread.set(Some(thread));

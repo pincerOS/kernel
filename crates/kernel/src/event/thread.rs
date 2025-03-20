@@ -1,7 +1,7 @@
 use super::context::{context_switch, Context, SwitchAction, CORES};
 use super::process::Process;
 use super::{Event, SCHEDULER};
-use crate::sync::BlockingLock;
+use crate::sync::SpinLock;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use core::ptr::NonNull;
@@ -17,7 +17,7 @@ pub struct Thread {
 
     pub context: Option<Context>,
     pub user_regs: Option<UserRegs>,
-    pub process: Option<Arc<BlockingLock<Process>>>,
+    pub process: Option<Arc<SpinLock<Process>>>,
 }
 
 pub struct UserRegs {
@@ -61,7 +61,7 @@ impl Thread {
         sp: usize,
         entry: usize,
         ttbr0: usize,
-        proc: Arc<BlockingLock<Process>>,
+        proc: Arc<SpinLock<Process>>,
     ) -> Box<Self> {
         let data = Context {
             regs: [0; 31],

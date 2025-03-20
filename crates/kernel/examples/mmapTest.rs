@@ -10,7 +10,7 @@ use event::{context, process::Process, task, thread};
 use kernel::sync::SpinLock;
 use kernel::*;
 
-static INIT_CODE: &[u8] = kernel::util::include_bytes_align!(u32, "../../init/init.bin");
+static INIT_CODE: &[u8] = kernel::util::include_bytes_align!(u32, "../../mmapTest/mmapTest.bin");
 
 #[no_mangle]
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {

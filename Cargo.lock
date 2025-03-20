@@ -67,5 +67,14 @@ name = "lz4"
 version = "0.1.0"
 
 [[package]]
+name = "mmapTest"
+version = "0.1.0"
+dependencies = [
+ "elf",
+ "initfs",
+ "ulib",
+]
+
+[[package]]
 name = "ulib"
 version = "0.1.0"

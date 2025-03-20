@@ -1,0 +1,12 @@
+[package]
+name = "mmapTest"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+elf = { path = "../elf" }
+initfs = { path = "../initfs" }
+ulib = { path = "../ulib", default-features = false }
+
+[dev-dependencies]
+ulib = { path = "../ulib", default-features = false, features = ["test"] }

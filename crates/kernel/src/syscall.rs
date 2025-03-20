@@ -16,6 +16,6 @@ pub unsafe fn register_syscalls() {
         register_syscall_handler(8, channel::sys_send);
         register_syscall_handler(9, channel::sys_recv);
         register_syscall_handler(10, proc::sys_mmap);
-        register_syscall_handler(10, proc::sys_munmap);
+        register_syscall_handler(11, proc::sys_munmap);
     }
 }
