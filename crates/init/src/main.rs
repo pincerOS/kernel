@@ -6,75 +6,68 @@ extern crate ulib;
 
 mod runtime;
 
-use ulib::sys;
+// use ulib::sys;
 
-static ARCHIVE: &[u8] = include_bytes_align!(u32, "../fs.arc");
+fn spawn_elf(fd: usize) {
+    let mut stack_value = 0u32;
+    let current_stack = &mut stack_value as *mut u32 as usize;
+    let target_pc = exec_child as usize;
+    let arg = fd;
 
-fn spawn_elf(elf: elf::Elf<'_>) -> sys::ChannelDesc {
-    let phdrs = elf.program_headers().unwrap();
+    unsafe { ulib::sys::spawn(target_pc, current_stack, arg, 0) };
+}
 
-    for phdr in phdrs {
-        let phdr = phdr.unwrap();
-        if matches!(phdr.p_type, elf::program_header::Type::Load) {
-            let data = elf.segment_data(&phdr).unwrap();
-            let memsize = (phdr.p_memsz as usize).next_multiple_of(4096).max(4096);
+extern "C" fn exec_child(fd: usize) {
+    let argc = 0;
+    let flags = 0;
+    let argv = core::ptr::null();
+    let envc = 0;
+    let envp = core::ptr::null();
 
-            // TODO: mmap
-            let addr = (phdr.p_vaddr as usize) as *mut u8;
-            let mapping: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(addr, memsize) };
-            mapping[..data.len()].copy_from_slice(data);
-            mapping[data.len()..].fill(0);
-        }
-    }
-
-    let (local, remote) = sys::channel();
-
-    let entry = elf.elf_header().e_entry();
-    let new_sp = 0x100_0000;
-    let x0 = remote.0 as usize;
-    unsafe { sys::spawn(entry as usize, new_sp, x0, 0) };
-
-    local
+    let res = unsafe { ulib::sys::execve_fd(fd, flags, argc, argv, envc, envp) };
+    println!("Execve failed: {}", res);
+    unsafe { ulib::sys::exit() };
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
-    let archive = initfs::Archive::load(ARCHIVE).unwrap();
-
-    let mut buf = [0; 0x18000];
-    let (_, file) = archive.find_file(b"example.elf").unwrap();
-    let file = archive.read_file(file, &mut buf).unwrap();
-
     println!("Running in usermode! (parent)");
 
-    let elf = elf::Elf::new(file).unwrap();
-    let child = spawn_elf(elf);
+    let root_fd = 3;
+    let path = b"example.elf";
+    let file = unsafe { ulib::sys::openat(root_fd, path.len(), path.as_ptr(), 0, 0) };
+    assert!(file >= 0);
+    let file = file as usize;
 
-    let msg = sys::Message {
-        tag: 0xAABBCCDD,
-        objects: [0; 4],
-    };
-    sys::send_block(child, &msg, b"Hello child!");
+    // TODO: channels
+    let _child = spawn_elf(file);
+    loop {}
 
-    let mut buf = [0; 1024];
+    // let msg = sys::Message {
+    //     tag: 0xAABBCCDD,
+    //     objects: [0; 4],
+    // };
+    // sys::send_block(child, &msg, b"Hello child!");
 
-    loop {
-        let (len, msg) = sys::recv_block(child, &mut buf).unwrap();
-        let data = &buf[..len];
+    // let mut buf = [0; 1024];
 
-        println!(
-            "Received message from child; tag {:#x}, data {:?}",
-            msg.tag,
-            core::str::from_utf8(data).unwrap()
-        );
+    // loop {
+    //     let (len, msg) = sys::recv_block(child, &mut buf).unwrap();
+    //     let data = &buf[..len];
 
-        if data == b"shutdown" {
-            break;
-        }
-    }
+    //     println!(
+    //         "Received message from child; tag {:#x}, data {:?}",
+    //         msg.tag,
+    //         core::str::from_utf8(data).unwrap()
+    //     );
 
-    unsafe { sys::shutdown() };
-    unreachable!();
+    //     if data == b"shutdown" {
+    //         break;
+    //     }
+    // }
+
+    // unsafe { sys::shutdown() };
+    // unreachable!();
 }
 
 #[macro_use]

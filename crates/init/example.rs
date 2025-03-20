@@ -28,14 +28,9 @@ exit # -->"##]
 #[macro_use]
 extern crate ulib;
 
-use ulib::sys::{recv_block, send_block, ChannelDesc, Message};
-
 fn try_read_stdin(buf: &mut [u8]) -> isize {
-    let chan = ChannelDesc(1);
-    match recv_block(chan, buf) {
-        Ok((i, _)) => i as isize,
-        Err(i) => i,
-    }
+    let stdin_fd = 0;
+    unsafe { ulib::sys::pread(stdin_fd, buf.as_mut_ptr(), buf.len(), 0) }
 }
 
 struct LineReader {
@@ -84,7 +79,7 @@ fn readline(reader: &mut LineReader) -> Result<&[u8], isize> {
 }
 
 #[no_mangle]
-fn main(chan: ChannelDesc) {
+fn main(_chan: ulib::sys::ChannelDesc) {
     println!("Starting 🐚");
 
     let root = 3;
@@ -119,16 +114,6 @@ fn main(chan: ChannelDesc) {
     let stdout = 1;
     let buf = b"Stdout write test\n";
     unsafe { ulib::sys::pwrite_all(stdout, buf, 0) };
-
-    let stdin = 0;
-    loop {
-        let mut buf = 0u8;
-        let res = unsafe { ulib::sys::pread(stdin, &mut buf, 1, 0) };
-        if res <= 0 {
-            break;
-        }
-        println!("Got char: {}", buf);
-    }
 
     println!("Dir: {}", root);
 
@@ -184,15 +169,15 @@ fn main(chan: ChannelDesc) {
         }
     }
 
-    let mut buf = [0; 1024];
-    let (len, msg) = recv_block(chan, &mut buf).unwrap();
-    let data = &buf[..len];
+    // let mut buf = [0; 1024];
+    // let (len, msg) = recv_block(chan, &mut buf).unwrap();
+    // let data = &buf[..len];
 
-    println!(
-        "Received message from parent; tag {:#x}, data {:?}",
-        msg.tag,
-        core::str::from_utf8(data).unwrap()
-    );
+    // println!(
+    //     "Received message from parent; tag {:#x}, data {:?}",
+    //     msg.tag,
+    //     core::str::from_utf8(data).unwrap()
+    // );
 
     let mut reader = LineReader {
         buf: [0; 4096],
@@ -217,11 +202,13 @@ fn main(chan: ChannelDesc) {
             continue;
         }
 
-        let msg = Message {
-            tag: 0xAAAAAAAA,
-            objects: [0; 4],
-        };
-        send_block(chan, &msg, line.as_bytes());
+        println!("Got line: {}", line);
+
+        // let msg = Message {
+        //     tag: 0xAAAAAAAA,
+        //     objects: [0; 4],
+        // };
+        // send_block(chan, &msg, line.as_bytes());
 
         for _ in 0..100 {
             // TODO: this is a hack to prevent concurrent access to stdout...
