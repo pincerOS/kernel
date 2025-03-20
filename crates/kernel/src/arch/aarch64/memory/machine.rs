@@ -393,6 +393,10 @@ impl LeafDescriptor {
         self.set(Self::VALID, valid);
     }
 
+    pub fn set_user_permissions(&mut self, val: bool) -> () {
+        self.set(Self::UNPRIVILEGED_ACCESS, val);
+    }
+
     pub const fn set_mair(self, mair: u8) -> Self {
         assert!(mair < (1 << 3), "field size mismatch");
 

@@ -318,7 +318,8 @@ pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result
 
     let aligned_pa = (pa / PG_SZ) * PG_SZ;
 
-    let new_desc = LeafDescriptor::new(aligned_pa).set_global();
+    let mut new_desc = LeafDescriptor::new(aligned_pa).set_global();
+    new_desc.set_user_permissions(true);
     unsafe { entry.write(new_desc) };
 
     unsafe {
@@ -377,6 +378,17 @@ pub unsafe fn unmap_va_user(va: usize, ttbr0: usize) -> Result<usize, MappingErr
     let page_pa: usize = unsafe { entry.read() }.get_pa() << 12;
     unsafe {
         (*entry).set_valid(false);
+    }
+
+    //Invalidate the TLB entry for this address
+    //TODO: double check that these are the best instructions to use for this
+    unsafe {
+        asm! {
+            "dsb ISH",
+            "tlbi vaae1, {0}",
+            in(reg) (va >> 12)
+            //options(readonly, nostack, preserves_flags)
+        }
     }
 
     //It will be up to the caller to free this page

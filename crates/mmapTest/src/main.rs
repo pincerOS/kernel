@@ -20,13 +20,14 @@ pub extern "C" fn main() {
     println!("Done with mmap, writing bytes");    
     let mut virt_ptr: *mut u8 = VIRTUAL_ADDR as *mut u8;
     unsafe { write_bytes(virt_ptr, 'a' as u8, 4096); }
-    println!("Bytes written!");
+    println!("Bytes written! Value of virt_ptr: {:x}", virt_ptr as usize);
+    //println!("Value of virt_ptr: {}", virt_ptr as usize);
     for _i in 0..4096 {
-        virt_ptr = virt_ptr.wrapping_add(1);
         if unsafe { *virt_ptr } != ('a' as u8){
             println!("Error: incorrect value found at address {:p}", virt_ptr);
             unsafe { sys::shutdown(); }
         }
+        virt_ptr = virt_ptr.wrapping_add(1);
     }
     println!("Bytes verified, unmapping range");
     unsafe { sys::munmap(VIRTUAL_ADDR); }
@@ -37,10 +38,10 @@ pub extern "C" fn main() {
     unsafe { sys::mmap(VIRTUAL_ADDR, 4096, true); }
     println!("Range mapped again");
     for _i in 0..4096 {
-        virt_ptr = virt_ptr.wrapping_add(1);
         if unsafe { *virt_ptr } == ('a' as u8) {
             a_counter += 1;
         }
+        virt_ptr = virt_ptr.wrapping_add(1);
     }
     println!("Done counting, unmapping again");
     unsafe { sys::munmap(VIRTUAL_ADDR); }
