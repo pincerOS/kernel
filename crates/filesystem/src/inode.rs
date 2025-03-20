@@ -14,6 +14,7 @@ use std::ops::ControlFlow;
 use std::prelude::rust_2015::Vec;
 use std::{print, slice, vec};
 use bytemuck::{Pod, Zeroable};
+use crate::inode::i_flags::{EXT4_EXTENTS_FL, EXT4_INLINE_DATA_FL};
 
 pub mod i_mode {
     pub const EXT2_S_IFSOCK: u16 = 0xC000;
@@ -54,7 +55,20 @@ pub mod i_flags {
     pub const EXT2_INDEX_FL: u32 = 0x00001000;
     pub const EXT2_IMAGIC_FL: u32 = 0x00002000;
     pub const EXT3_JOURNAL_DATA_FL: u32 = 0x00004000;
-    pub const EXT2_RESERVED_FL: u32 = 0x80000000;
+
+    pub const EXT4_NOTAIL_FL: u32 = 0x00008000;
+    pub const EXT4_DIRSYNC_FL: u32 = 0x00010000;
+    pub const EXT4_TOPDIR_FL: u32 = 0x00020000;
+    pub const EXT4_HUGE_FILE_FL: u32 = 0x00040000;
+    pub const EXT4_EXTENTS_FL: u32 = 0x00080000;
+    pub const EXT4_EA_INODE_FL: u32 = 0x00200000;
+    pub const EXT4_EOFBLOCKS_FL: u32 = 0x00400000;
+    pub const EXT4_SNAPFILE_FL: u32 = 0x01000000;
+    pub const EXT4_SNAPFILE_DELETED_FL: u32 = 0x04000000;
+    pub const EXT4_SNAPFILE_SHRUNK_FL: u32 = 0x08000000;
+    pub const EXT4_INLINE_DATA_FL: u32 = 0x10000000;
+    pub const EXT4_PROJINHERIT_FL: u32 = 0x20000000;
+    pub const EXT4_RESERVED_FL: u32 = 0x80000000;
 }
 
 #[repr(C)]
@@ -323,25 +337,23 @@ impl INodeWrapper {
     pub const DOUBLE_LINK_BLOCK_PTR_INDEX: usize = 13;
     pub const SINGLE_LINK_BLOCK_PTR_INDEX: usize = 12;
 
-    pub fn get_inode_block_num<D: BlockDevice>(
+    pub fn get_inode_block_num_addressing_mode<D: BlockDevice>(
         &self,
         number: usize,
         ext2: &mut Ext<D>,
-        deferred_writes: Option<&DeferredWriteMap>,
-    ) -> Result<u32, Ext2Error> {
+        deferred_writes: Option<&DeferredWriteMap>
+    ) -> Result<u64, Ext2Error> {
         let block_size: usize = ext2.superblock.get_block_size();
         let block_inode_list_size: usize = block_size / size_of::<u32>();
         let block_inode_list_size_squared: usize = block_inode_list_size * block_inode_list_size;
-        let block_inode_list_size_cubed: usize =
-            block_inode_list_size_squared * block_inode_list_size;
 
         let mut logical_block_number: u32 = 0;
         let mut block_buffer = vec![0; block_size];
 
         if number
             >= (Self::SINGLE_LINK_BLOCK_PTR_INDEX
-                + block_inode_list_size
-                + block_inode_list_size_squared)
+            + block_inode_list_size
+            + block_inode_list_size_squared)
         {
             // hard mode: go through link to list of link of list of links to list of direct
             // block ptrs
@@ -421,7 +433,105 @@ impl INodeWrapper {
             logical_block_number = self.inode.i_block[number];
         }
 
-        Ok(logical_block_number)
+        Ok(logical_block_number as u64)
+    }
+
+    pub fn get_inode_block_extents<D: BlockDevice>(
+        &self,
+        number: usize,
+        ext2: &mut Ext<D>,
+        deferred_writes: Option<&DeferredWriteMap>
+    ) -> Result<u64, Ext2Error> {
+        const EXT4_EXTENT_HEADER_MAGIC: u16 = 0xF30A;
+        const EXT4_EXTENT_UNINIT: u16 = 32768;
+
+        assert_eq!(size_of::<ext4_extent_header>() % size_of::<u32>(), 0);
+
+        let header_blocks_slice_end: usize = size_of::<ext4_extent_header>() / size_of::<u32>();
+
+        let mut current_extent_header_slice: &[u8] =
+            bytemuck::cast_slice(&self.inode.i_block[0..header_blocks_slice_end]);
+        let mut block_to_read: Option<usize> = None;
+        let mut found_data_block: bool = false;
+        let mut block_buffer: Vec<u8> = vec![0u8; ext2.superblock.get_block_size()];
+
+        while !found_data_block {
+            let mut current_entry_index: usize = 0;
+            let mut current_extent_header =
+                unsafe { current_extent_header_slice.align_to::<ext4_extent_header>().1[0] };
+            let is_leaf_node = current_extent_header.eh_depth == 0;
+
+            while (current_extent_header.eh_entries as usize) > current_entry_index {
+                if current_extent_header.eh_magic != EXT4_EXTENT_HEADER_MAGIC {
+                    return Err(Ext2Error::InvalidExtentTree);
+                }
+
+                if is_leaf_node {
+                    let current_extent_leaf_node_slice: &[u8] =
+                        &current_extent_header_slice[header_blocks_slice_end..(header_blocks_slice_end + size_of::<ext4_extent>())];
+                    let current_extent_leaf_node =
+                        unsafe { current_extent_leaf_node_slice.align_to::<ext4_extent>().1[0] };
+                    let leaf_block = current_extent_leaf_node.ee_block as usize;
+                    
+                    if number > leaf_block {
+                        let leaf_node_length = 
+                            if current_extent_leaf_node.ee_len > EXT4_EXTENT_UNINIT {
+                                (current_extent_leaf_node.ee_len - EXT4_EXTENT_UNINIT) as usize
+                            } else {
+                                current_extent_leaf_node.ee_len as usize
+                            };
+
+                        if leaf_block + leaf_node_length > number {
+                            block_to_read = Some(((current_extent_leaf_node.ee_start_hi as usize) << 32) |
+                                            current_extent_leaf_node.ee_start_lo as usize);
+                            found_data_block = true;
+                            break;
+                        }
+                    }
+                } else {
+                    let current_extent_interior_node_slice: &[u8] =
+                        &current_extent_header_slice[header_blocks_slice_end..(header_blocks_slice_end + size_of::<ext4_extent_idx>())];
+                    let current_extent_interior_node =
+                        unsafe { current_extent_interior_node_slice.align_to::<ext4_extent_idx>().1[0] };
+
+                    // we assume that the entries of interior nodes are in increasing order
+                    // otherwise this doesn't work
+                    if number > (current_extent_interior_node.ei_block as usize) {
+                        block_to_read =
+                            Some(((current_extent_interior_node.ei_leaf_hi as usize) << 32) |
+                                 (current_extent_interior_node.ei_leaf_lo as usize));
+                    } else {
+                        break;
+                    }
+                }
+
+                current_entry_index += 1;
+            }
+
+            if block_to_read.is_some() {
+                ext2.read_logical_block(block_to_read.unwrap(), &mut block_buffer, deferred_writes)?;
+                current_extent_header_slice = &block_buffer[0..header_blocks_slice_end];
+            } else {
+                // we were unable to find a block extent, which means this block doesn't exist
+                // in extents
+                return Err(Ext2Error::ExtentNotFound);
+            }
+        }
+
+        Ok(block_to_read.unwrap() as u64)
+    }
+
+    pub fn get_inode_block_num<D: BlockDevice>(
+        &self,
+        number: usize,
+        ext2: &mut Ext<D>,
+        deferred_writes: Option<&DeferredWriteMap>,
+    ) -> Result<u64, Ext2Error> {
+        if (self.inode.i_flags & EXT4_EXTENTS_FL) != 0 {
+            self.get_inode_block_extents(number, ext2, deferred_writes)
+        } else {
+            self.get_inode_block_num_addressing_mode(number, ext2, deferred_writes)
+        }
     }
 
     pub fn read_block<D: BlockDevice>(
@@ -436,7 +546,7 @@ impl INodeWrapper {
         let file_size: usize = self.size() as usize;
         assert_eq!(buffer.len() % block_size, 0);
 
-        if file_size <= 60 {
+        if (self.inode.i_flags & EXT4_INLINE_DATA_FL) != 0 && file_size <= 60 {
             // ext4's inline data feature in i_blocks
             // TODO(Bobby): implement inline data in ext attributes
 
@@ -1384,8 +1494,8 @@ impl INodeWrapper {
                 let logical_block_num =
                     self.get_inode_block_num(i, ext2, Some(&deferred_writes))?;
                 // update block bitmap
-                let block_group_num = logical_block_num / ext2.superblock.s_blocks_per_group;
-                let index = logical_block_num % ext2.superblock.s_blocks_per_group;
+                let block_group_num = logical_block_num / (ext2.superblock.s_blocks_per_group as u64);
+                let index = logical_block_num % (ext2.superblock.s_blocks_per_group as u64);
 
                 let mut block_buffer = vec![0; block_size];
 

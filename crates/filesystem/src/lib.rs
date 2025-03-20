@@ -56,6 +56,8 @@ pub enum Ext2Error {
     NotADirectory,
     UnsupportedDirHashVersion,
     NotYetImplemented,
+    InvalidExtentTree,
+    ExtentNotFound
 }
 
 impl From<BlockDeviceError> for Ext2Error {
