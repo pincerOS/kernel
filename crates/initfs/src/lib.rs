@@ -218,25 +218,33 @@ impl<'a> Archive<'a> {
         &self,
         idx: usize,
     ) -> Result<impl Iterator<Item = (usize, &FileHeader)>, ReadError> {
-        let dir = self.get_file(idx).unwrap();
+        self.list_dir_partial(idx, idx + 1)
+            .map(|r| r.map(|(hdr, _next)| (hdr.inode as usize, hdr)))
+    }
+
+    pub fn list_dir_partial(
+        &self,
+        idx: usize,
+        start: usize,
+    ) -> Result<impl Iterator<Item = (&FileHeader, usize)>, ReadError> {
+        let dir = self.get_file(idx).unwrap(); // TODO: don't unwrap
         if !dir.is_dir() {
             return Err(ReadError::NotADirectory);
         }
 
-        let mut i = idx + 1;
-        let end = self.files_count.min(idx + dir.offset as usize);
+        let mut i = start;
+        let end = (self.files_count + 1).min(idx + dir.offset as usize);
         Ok(core::iter::from_fn(move || {
-            if i > end {
+            if i >= end {
                 return None;
             }
             let file = self.get_file(i)?;
-            let idx = i;
             if file.is_dir() {
                 i += file.offset as usize;
             } else {
                 i += 1;
             }
-            Some((idx, file))
+            Some((file, i))
         }))
     }
 

@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use initfs::{Archive, ArchiveError};
 
 use crate::process::fd::{
-    boxed_future, ArcFd, FileDescResult, FileDescriptor, FileKind, SmallFuture,
+    boxed_future, ArcFd, DirEntry, FileDescResult, FileDescriptor, FileKind, SmallFuture,
 };
 use crate::sync::SpinLock;
 
@@ -108,26 +108,89 @@ impl FileDescriptor for InitFsFile {
         }
     }
     fn read<'a>(&'a self, offset: u64, buf: &'a mut [u8]) -> SmallFuture<'a, FileDescResult> {
-        let mut guard = self.data.lock();
-        if guard.is_none() {
-            let mut data = alloc::vec![0; self.header.size as usize];
-            let res = self
+        if self.header.is_dir() {
+            // TODO: max filename length?
+            const MAX_FILENAME: usize = 4096;
+            const MAX_ENTRY_SIZE: u64 = (size_of::<DirEntry>() + MAX_FILENAME) as u64;
+
+            let cookie = offset;
+            let index = cookie / MAX_ENTRY_SIZE;
+            let index = if index == 0 {
+                self.inode.0 as u64 + 1
+            } else {
+                index
+            };
+
+            let list = self
                 .fs
                 .inner
-                .read_file(&self.header, &mut data)
-                .expect("TODO");
-            assert_eq!(res.len(), self.header.size as usize);
-            *guard = Some(data);
+                .list_dir_partial(self.inode.0 as usize, index as usize);
+
+            match list {
+                Err(_e) => boxed_future(async move { Err(1).into() }),
+                Ok(list) => {
+                    let mut cur_idx = 0;
+                    let mut failed = false;
+                    let mut list = list.peekable();
+                    while let Some((file, next)) = list.next() {
+                        let name_len: u16 = file.name_len.try_into().unwrap(); // TODO
+                        let rec_len =
+                            (size_of::<DirEntry>() as u16 - 3 + name_len).next_multiple_of(8);
+                        if buf.len() - cur_idx < rec_len as usize {
+                            // TODO: what if the buffer is too small for a single entry?
+                            failed = true;
+                            break;
+                        }
+                        let next = if list.peek().is_some() { next } else { 0 };
+                        let record_start = DirEntry {
+                            inode: file.inode as u64,
+                            next_entry_cookie: MAX_ENTRY_SIZE * next as u64,
+                            rec_len,
+                            name_len,
+                            file_type: (file.mode >> 12) as u8,
+                            name: [0; 3],
+                        };
+                        let name = self.fs.inner.get_file_name(file).unwrap(); // TODO
+                        assert_eq!(name.len(), name_len as usize); // TODO
+
+                        let slice = &mut buf[cur_idx..][..rec_len as usize];
+                        slice[..size_of::<DirEntry>()]
+                            .copy_from_slice(bytemuck::bytes_of(&record_start));
+                        slice[core::mem::offset_of!(DirEntry, name)..][..name_len as usize]
+                            .copy_from_slice(name);
+                        slice[core::mem::offset_of!(DirEntry, name) + name_len as usize..].fill(0);
+
+                        cur_idx += rec_len as usize;
+                    }
+                    if cur_idx == 0 && failed {
+                        boxed_future(async move { Err(1).into() })
+                    } else {
+                        boxed_future(async move { Ok(cur_idx as u64).into() })
+                    }
+                }
+            }
+        } else {
+            let mut guard = self.data.lock();
+            if guard.is_none() {
+                let mut data = alloc::vec![0; self.header.size as usize];
+                let res = self
+                    .fs
+                    .inner
+                    .read_file(&self.header, &mut data)
+                    .expect("TODO");
+                assert_eq!(res.len(), self.header.size as usize);
+                *guard = Some(data);
+            }
+            let data = guard.as_deref().unwrap();
+            let data_start = offset as usize;
+            let data_end = (offset as usize + buf.len()).min(data.len());
+            let buf_end = data_end.saturating_sub(data_start);
+            if data_end > data_start {
+                buf[..buf_end].copy_from_slice(&data[data_start..data_end]);
+            }
+            drop(guard);
+            boxed_future(async move { Ok(buf_end as u64).into() })
         }
-        let data = guard.as_deref().unwrap();
-        let data_start = offset as usize;
-        let data_end = (offset as usize + buf.len()).min(data.len());
-        let buf_end = data_end.saturating_sub(data_start);
-        if data_end > data_start {
-            buf[..buf_end].copy_from_slice(&data[data_start..data_end]);
-        }
-        drop(guard);
-        boxed_future(async move { Ok(buf_end as u64).into() })
     }
     fn write<'a>(&'a self, _offset: u64, _buf: &'a [u8]) -> SmallFuture<'a, FileDescResult> {
         boxed_future(async move { Err(1u64).into() })

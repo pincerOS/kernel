@@ -88,7 +88,7 @@ fn main(chan: ChannelDesc) {
     println!("Starting 🐚");
 
     let root = 3;
-    let path = "src/lib.rs";
+    let path = "test.txt";
     let fd = unsafe { ulib::sys::openat(root, path.len(), path.as_bytes().as_ptr(), 0, 0) };
 
     println!("File: {}", fd);
@@ -128,6 +128,60 @@ fn main(chan: ChannelDesc) {
             break;
         }
         println!("Got char: {}", buf);
+    }
+
+    println!("Dir: {}", root);
+
+    let mut cookie = 0;
+    let mut data_backing = [0u64; 8192 / 8];
+    let data = cast_slice(&mut data_backing);
+
+    fn cast_slice<'a>(s: &'a mut [u64]) -> &'a mut [u8] {
+        unsafe {
+            core::slice::from_raw_parts_mut(s.as_mut_ptr().cast::<u8>(), s.len() * size_of::<u64>())
+        }
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone, Debug)]
+    pub struct DirEntry {
+        pub inode: u64,
+        pub next_entry_cookie: u64,
+        pub rec_len: u16,
+        pub name_len: u16,
+        pub file_type: u8,
+        pub name: [u8; 3],
+        // Name is an arbitrary size array; the record is always padded with
+        // 0 bytes such that rec_len is a multiple of 8 bytes.
+    }
+
+    loop {
+        println!("reading dir with cookie {}", cookie);
+        match unsafe { ulib::sys::pread(root, data.as_mut_ptr(), data.len(), cookie) } {
+            (..=-1) => break,
+            len @ (1..) => {
+                println!("read {} bytes", len);
+                let mut i = 0;
+                while i < len as usize {
+                    let slice = &data[i..];
+                    assert!(slice.len() >= size_of::<DirEntry>());
+                    let entry = unsafe { *slice.as_ptr().cast::<DirEntry>() };
+                    println!("Entry: {:#?}", entry);
+                    let name =
+                        &slice[core::mem::offset_of!(DirEntry, name)..][..entry.name_len as usize];
+                    println!("Name: {}", core::str::from_utf8(name).unwrap());
+                    i += entry.rec_len as usize;
+                    cookie = entry.next_entry_cookie;
+                }
+                if cookie == 0 {
+                    break;
+                }
+            }
+            0 => {
+                println!("read 0 bytes, exiting");
+                break;
+            }
+        }
     }
 
     let mut buf = [0; 1024];

@@ -75,6 +75,22 @@ pub enum FileKind {
     Other,
 }
 
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct DirEntry {
+    pub inode: u64,
+    pub next_entry_cookie: u64,
+    pub rec_len: u16,
+    pub name_len: u16,
+    pub file_type: u8,
+    pub name: [u8; 3],
+    // Name is an arbitrary size array; the record is always padded with
+    // 0 bytes such that rec_len is a multiple of 8 bytes.
+}
+
+unsafe impl bytemuck::Zeroable for DirEntry {}
+unsafe impl bytemuck::Pod for DirEntry {}
+
 pub struct DummyFd;
 
 impl FileDescriptor for DummyFd {
