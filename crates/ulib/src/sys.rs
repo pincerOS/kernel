@@ -43,8 +43,8 @@ const FLAG_NO_BLOCK: usize = 1 << 0;
 syscall!(8 => pub fn _send(desc: ChannelDesc, msg: *const Message, buf: *const u8, buf_len: usize, flags: usize) -> isize);
 syscall!(9 => pub fn _recv(desc: ChannelDesc, msg: *mut Message, buf: *mut u8, buf_cap: usize, flags: usize) -> isize);
 
-syscall!(10 => pub fn mmap(req_addr: usize, size: usize, fill_pages: bool));
-syscall!(11 => pub fn munmap(req_addr: usize));
+syscall!(10 => pub fn mmap(req_addr: usize, size: usize, fill_pages: bool) -> usize);
+syscall!(11 => pub fn munmap(req_addr: usize) -> usize);
 
 pub fn send(desc: ChannelDesc, msg: &Message, buf: &[u8]) -> isize {
     unsafe { _send(desc, msg, buf.as_ptr(), buf.len(), FLAG_NO_BLOCK) }

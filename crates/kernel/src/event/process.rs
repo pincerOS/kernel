@@ -142,8 +142,6 @@ impl Process {
             //TODO: make another version of alloc frame which uses the physical base to give pages
             //instead of using the page table allocator
             let (_page_va, page_pa) = PAGE_ALLOCATOR.get().alloc_frame();
-            println!("Mapping pa {} to va {}", page_pa, virt_addr);
-            println!("ttbr0 value: {:x}", self.ttbr0_el1);
             unsafe {
                 map_pa_to_va_user(page_pa, virt_addr, self.ttbr0_el1).unwrap();
             }

@@ -93,8 +93,6 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
     //TODO: update this to be flags later
     let fill_pages: bool = ctx.regs[2] == 1;
     
-    println!("Requested start addr: {} Requested size: {}", req_start_addr, req_size);
-
     let curr_proc: Arc<SpinLock<Process>> = CORES.with_current(|core| {
         let thread = core.thread.take().unwrap();
         let pcb = thread.process.as_ref().unwrap().clone();
@@ -116,7 +114,6 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
             }
         };
     ctx.regs[0] = range_start;
-    println!("Exiting sys mmap");
     ctx
 }
 
