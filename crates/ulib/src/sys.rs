@@ -29,8 +29,8 @@ struct Channels(usize, usize);
 
 syscall!(1 => pub fn shutdown());
 syscall!(3 => pub fn yield_());
-syscall!(5 => pub fn spawn(pc: usize, sp: usize, x0: usize, flags: usize));
-syscall!(6 => pub fn exit());
+syscall!(5 => pub fn spawn(pc: usize, sp: usize, x0: usize, flags: usize) -> usize);
+syscall!(6 => pub fn exit(status: usize));
 
 syscall!(7 => fn _channel() -> Channels);
 pub fn channel() -> (ChannelDesc, ChannelDesc) {
@@ -123,3 +123,5 @@ syscall!(16 => pub fn execve_fd(
     envc: usize,
     envp: *const ArgStr,
 ) -> isize);
+
+syscall!(17 => pub fn wait(fd: usize) -> isize);

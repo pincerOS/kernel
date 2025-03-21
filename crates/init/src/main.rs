@@ -6,18 +6,22 @@ extern crate ulib;
 
 mod runtime;
 
-// use ulib::sys;
-
-fn spawn_elf(fd: usize) {
-    let mut stack_value = 0u32;
-    let current_stack = &mut stack_value as *mut u32 as usize;
+fn spawn_elf(fd: usize) -> usize {
+    let current_stack = current_sp();
     let target_pc = exec_child as usize;
     let arg = fd;
 
-    unsafe { ulib::sys::spawn(target_pc, current_stack, arg, 0) };
+    let wait_fd = unsafe { ulib::sys::spawn(target_pc, current_stack, arg, 0) };
+    wait_fd as usize
 }
 
-extern "C" fn exec_child(fd: usize) {
+fn current_sp() -> usize {
+    let sp: usize;
+    unsafe { core::arch::asm!("mov {0}, sp", out(reg) sp) };
+    sp
+}
+
+extern "C" fn exec_child(fd: usize) -> ! {
     let argc = 0;
     let flags = 0;
     let argv = core::ptr::null();
@@ -26,7 +30,8 @@ extern "C" fn exec_child(fd: usize) {
 
     let res = unsafe { ulib::sys::execve_fd(fd, flags, argc, argv, envc, envp) };
     println!("Execve failed: {}", res);
-    unsafe { ulib::sys::exit() };
+    unsafe { ulib::sys::exit(1) };
+    unsafe { core::arch::asm!("udf #2", options(noreturn)) }
 }
 
 #[unsafe(no_mangle)]
@@ -40,8 +45,11 @@ pub extern "C" fn main() {
     let file = file as usize;
 
     // TODO: channels
-    let _child = spawn_elf(file);
-    loop {}
+    let child = spawn_elf(file);
+
+    let status = unsafe { ulib::sys::wait(child) };
+
+    println!("Child exited with status {}", status);
 
     // let msg = sys::Message {
     //     tag: 0xAABBCCDD,
@@ -66,8 +74,8 @@ pub extern "C" fn main() {
     //     }
     // }
 
-    // unsafe { sys::shutdown() };
-    // unreachable!();
+    unsafe { ulib::sys::shutdown() };
+    unreachable!();
 }
 
 #[macro_use]

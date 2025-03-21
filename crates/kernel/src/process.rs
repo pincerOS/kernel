@@ -2,6 +2,7 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use crate::sync::once_cell::BlockingOnceCell;
 use crate::sync::SpinLock;
 
 pub mod fd;
@@ -17,10 +18,15 @@ pub struct FileDescriptorList {
     pub desc: Vec<Option<fd::ArcFd>>,
 }
 
+pub struct ExitStatus {
+    pub status: u32,
+}
+
 pub struct Process {
     pub page_table: UserPageTable,
     pub root: Option<fd::ArcFd>,
     pub file_descriptors: SpinLock<FileDescriptorList>,
+    pub exit_code: Arc<BlockingOnceCell<ExitStatus>>,
 }
 
 impl Process {
@@ -38,6 +44,7 @@ impl Process {
             page_table,
             root: None,
             file_descriptors: SpinLock::new(FileDescriptorList { desc: Vec::new() }),
+            exit_code: Arc::new(BlockingOnceCell::new()),
         }
     }
 

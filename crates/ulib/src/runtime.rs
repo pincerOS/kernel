@@ -5,7 +5,7 @@ unsafe extern "Rust" {
 #[unsafe(no_mangle)]
 extern "C" fn _start(x0: usize) -> ! {
     unsafe { main(crate::sys::ChannelDesc(x0 as u32)) };
-    unsafe { crate::sys::exit() };
+    unsafe { crate::sys::exit(0) };
     unsafe { core::arch::asm!("udf #2", options(noreturn)) }
 }
 
