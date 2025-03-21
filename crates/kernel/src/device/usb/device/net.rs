@@ -21,6 +21,11 @@ use crate::shutdown;
 
 use super::rndis::*;
 
+pub static mut NET_DEVICE: NetDevice = NetDevice {
+    receive_callback: None,
+    device: None,
+};
+
 pub fn NetLoad(bus: &mut UsbBus) {
     bus.interface_class_attach[InterfaceClass::InterfaceClassCommunications as usize] = Some(NetAttach);
 }
@@ -48,26 +53,29 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 
     let mut endpoint_device = unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut UsbEndpointDevice) };
     endpoint_device.endpoints[0] = Some(NetAnalyze);
+    endpoint_device.endpoints[1] = Some(NetSend);
+    endpoint_device.endpoints[2] = Some(NetReceive);
 
 
     // println!("Device interface number: {:?}", device.interface_number);
     println!("Device interface number: {:?}", device.endpoints[interface_number as usize][0 as usize].endpoint_address);
     println!("Device endpoint interval: {:?}", device.endpoints[interface_number as usize][0 as usize].interval);    
 
-    // register_interrupt_endpoint(
-    //     device,
-    //     device.endpoints[interface_number as usize][0 as usize].interval as u32, 
-    //     endpoint_address_to_num(device.endpoints[interface_number as usize][0 as usize].endpoint_address), 
-    //     UsbDirection::In, 
-    //     size_from_number(device.endpoints[interface_number as usize][0 as usize].packet.MaxSize as u32),
-    //     0,
-    //     10
-    // );
+    register_interrupt_endpoint(
+        device,
+        2,
+        device.endpoints[interface_number as usize][0 as usize].interval as u32, 
+        endpoint_address_to_num(device.endpoints[interface_number as usize][0 as usize].endpoint_address), 
+        UsbDirection::In, 
+        size_from_number(device.endpoints[interface_number as usize][0 as usize].packet.MaxSize as u32),
+        0,
+        10
+    );
 
     let mut buffer = [0u8; 64];
     // Ethernet Frame
     let dest_mac = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]; // Broadcast
-    let src_mac = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55]; // Example MAC
+    let src_mac = [0x11, 0x11, 0x22, 0x33, 0x44, 0x55]; // Example MAC
     let ethertype = [0x08, 0x00]; // IPv4
 
     // Write Ethernet Header
@@ -94,32 +102,69 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 
     println!("Ethernet Frame: {:02X?}", &buffer[..46]);
 
-    // rndis_send_packet(device, buffer.as_mut_ptr(), 64);
-    micro_delay(1000000);
+    unsafe {
+        NET_DEVICE.device = Some(device);
+    }
+
+    rndis_send_packet(device, buffer.as_mut_ptr(), 64);
     rndis_receive_packet(device, buffer.as_mut_ptr(), 64);
-    shutdown();
+    // micro_delay(1000000);
+    // shutdown();
     return ResultCode::OK;
 }
 
-pub fn NetAnalyze(buffer: *mut u8) {
-    println!("| Net: Analyzing buffer");
+pub fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
     let buffer32 = unsafe { core::slice::from_raw_parts(buffer, 32) };
-    println!("Buffer 0 {:?}", buffer32[0]);
-    println!("Buffer 1 {:?}", buffer32[1]);
-
-    let buffer_ptr32 = buffer as *mut u32;
-    println!("buffer_ptr32 {:?}", unsafe { *buffer_ptr32 });
-    println!("buffer_ptr32 {:?}", unsafe { *buffer_ptr32.offset(1) });
 
     if buffer32[0] != 0 {
         println!("| Net: Buffer1: {:?}", buffer32[0]);
         shutdown();
     }
+}
 
-    if unsafe { *buffer_ptr32 } != 0 {
-        println!("| Net: Buffer2: {:?}", unsafe { *buffer_ptr32 });
-        shutdown();
+pub fn NetSend(buffer: *mut u8, buffer_length: u32) {
+    println!("| Net: Send should not be called");
+    shutdown();
+}
+
+pub fn NetReceive(buffer: *mut u8, buffer_length: u32) {
+    println!("| Net: Receive");
+    //print out the buffer
+    // for i in 0..buffer_length {
+    //     print!("{:02X} ", unsafe { *buffer.offset(i as isize) });
+    // }
+    // println!();
+
+    unsafe {
+        if let Some(callback) = NET_DEVICE.receive_callback {
+            callback(buffer, buffer_length);
+        } else {
+            println!("| Net: No callback for receive.");
+        }
     }
+}
+
+pub fn RegisterNetReceiveCallback(callback: fn(*mut u8, u32)) {
+    unsafe {
+        NET_DEVICE.receive_callback = Some(callback);
+    }
+}
+
+pub fn NetSendPacket(buffer: *mut u8, buffer_length: u32) {
+    unsafe {
+        if let Some(device) = NET_DEVICE.device {
+            let usb_dev = &mut *device;
+            rndis_send_packet(usb_dev, buffer, buffer_length);
+        } else {
+            println!("| Net: No device found.");
+            shutdown();
+        }
+    }
+}
+
+pub struct NetDevice {
+    pub receive_callback: Option<fn(*mut u8, u32)>,
+    pub device: Option<*mut UsbDevice>,
 }
 
 

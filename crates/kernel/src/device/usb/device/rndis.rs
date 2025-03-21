@@ -335,6 +335,7 @@ pub fn rndis_send_packet(device: &mut UsbDevice, buffer: *mut u8, buffer_length:
         complete_buffer.as_mut_ptr(), 
         size as u32, 
         PacketId::Data0, 
+        1,
         10
     );
 
@@ -347,8 +348,6 @@ pub fn rndis_send_packet(device: &mut UsbDevice, buffer: *mut u8, buffer_length:
 }
 
 pub fn rndis_receive_packet(device: &mut UsbDevice, buffer: *mut u8, buffer_length: u32) -> ResultCode {
-
-
     let result = UsbBulkMessage(
         device, 
         3, 
@@ -364,6 +363,7 @@ pub fn rndis_receive_packet(device: &mut UsbDevice, buffer: *mut u8, buffer_leng
         buffer, 
         buffer_length, 
         PacketId::Data0, 
+        2,
         10
     );
 

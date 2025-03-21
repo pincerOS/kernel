@@ -42,10 +42,14 @@ qemu-system-aarch64 \
     -display "${QEMU_DISPLAY}" \
     "${QEMU_DEBUG_PFX}" "${QEMU_DEBUG}" \
     -usb \
+    -device usb-kbd \
     -device usb-net,netdev=net0 \
     -netdev user,id=net0,hostfwd=tcp::2222-:22 \
     -object filter-dump,id=f1,netdev=net0,file=net0.pcap \
-    -trace enable=net*\
     ${DEBUG_ARGS}
 
 # -device usb-kbd \
+# -device usb-net,netdev=net0 \
+# -netdev user,id=net0,hostfwd=tcp::2222-:22 \
+# -object filter-dump,id=f1,netdev=net0,file=net0.pcap \
+# -trace enable=net*\

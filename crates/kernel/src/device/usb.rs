@@ -5,6 +5,8 @@ pub mod usbd;
 pub mod device;
 
 use crate::device::usb::device::hid::keyboard::Key;
+use crate::device::usb::device::net::RegisterNetReceiveCallback;
+use crate::device::usb::device::net::NetSendPacket;
 use alloc::vec::Vec;
 
 use alloc::boxed::Box;
@@ -31,4 +33,12 @@ pub fn usb_check_for_change(bus: &mut UsbBus) {
 
 pub fn usb_retrieve_keys() -> Vec<Key> {
     return unsafe { device::hid::keyboard::KeyboardBuffer.clone() };
+}
+
+pub fn usb_register_net_callback(callback: fn(*mut u8, u32)) {
+    RegisterNetReceiveCallback(callback);
+}
+
+pub fn usb_send_packet(buffer: *mut u8, buffer_length: u32) {
+    NetSendPacket(buffer, buffer_length);
 }

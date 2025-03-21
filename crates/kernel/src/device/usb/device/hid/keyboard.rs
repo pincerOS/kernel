@@ -14,7 +14,7 @@ use crate::device::usb::usbd::request::*;
 
 pub static mut KeyboardBuffer: Vec<Key> = vec![];
 
-pub fn KeyboardAnalyze(buffer: *mut u8) {
+pub fn KeyboardAnalyze(buffer: *mut u8, buffer_length: u32) {
     let mut keys = ModifierToKeys(unsafe { *buffer });
 
     //the second byte is alwasy 0
@@ -24,7 +24,7 @@ pub fn KeyboardAnalyze(buffer: *mut u8) {
             keys.push(key);
         }
     }
-    // println!("{:?}", keys);
+
     unsafe { KeyboardBuffer = keys };
     // println!("hi");
 }

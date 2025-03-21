@@ -27,13 +27,70 @@ use crate::device::usb::usbd::usbd::*;
 use crate::device::mailbox;
 use crate::device::mailbox::PropSetPowerState;
 use crate::device::system_timer::micro_delay;
+use crate::event::context::Context;
 use crate::memory;
 use core::ptr;
 use crate::shutdown;
+use crate::SpinLock;
+use crate::device::gic;
+use crate::device::usb::usbd::endpoint::endpoint_descriptor;
 
 pub const ChannelCount: usize = 16;
-
 pub static mut dwc_otg_driver: DWC_OTG = DWC_OTG { base_addr: 0 };
+pub static DWC_CHANNEL_ACTIVE: SpinLock<DwcChannelActive> = SpinLock::new(DwcChannelActive::new());
+pub static DWC_LOCK: SpinLock<DwcLock> = SpinLock::new(DwcLock::new());
+pub static mut DWC_CHANNEL_CALLBACK : DwcChannelCallback = DwcChannelCallback::new();
+
+pub fn dwc_otg_register_interrupt_handler() {
+    gic::GIC.get().register_isr(105, dwc_otg_interrupt_handler);
+}
+
+pub fn dwc_otg_interrupt_handler(_ctx: &mut Context) {
+
+    let mut hcint_channels = [0u32; ChannelCount];
+    {
+
+        let _lock = DWC_LOCK.lock();
+        //read interrupt status
+        let status = read_volatile(DOTG_GINTSTS);
+        //clear interrupt status
+        write_volatile(DOTG_GINTSTS, status);
+        
+        if status & GINTSTS_HCHINT != 0 {
+            let channels = read_volatile(DOTG_HAINT);
+            for i in 0..ChannelCount {
+                if channels & (1 << i) != 0 {
+                    let hcint = read_volatile(DOTG_HCINT(i));
+                    write_volatile(DOTG_HCINT(i), hcint);
+                    hcint_channels[i] = hcint;
+                    // shutdown();
+                }
+            }
+            // println!("GINTSTS status {:#x}", status);
+        }
+    }
+
+    {
+        for i in 0..ChannelCount {
+            if hcint_channels[i] != 0 {
+                unsafe {
+                    if let Some(endpoint_descriptor) = DWC_CHANNEL_CALLBACK.endpoint_descriptors[i] {
+                        if let Some(callback) = DWC_CHANNEL_CALLBACK.callback[i] {
+                            
+                            callback( endpoint_descriptor, hcint_channels[i]);
+                        } else {
+                            println!("| DWC: No callback for channel {}.\n", i);
+                            shutdown();
+                        }
+                    } else {
+                        println!("| DWC: No endpoint descriptor for channel {}.\n", i);
+                        shutdown();
+                    }
+                }
+            }
+        }
+    }
+}
 
 /**
     \brief Prepares a channel to communicated with a device.
@@ -583,6 +640,115 @@ fn HcdChannelSendWait(
     }
 }
 
+pub fn HcdUpdateTransferSize(device: &UsbDevice, channel: u8) -> u32 {
+    unsafe {
+        let dwc_sc: &mut dwc_hub = &mut *(device.soft_sc as *mut dwc_hub);
+        let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
+        convert_into_host_transfer_size(
+            hctsiz,
+            &mut dwc_sc.channel[channel as usize].transfer_size,
+        );
+        return dwc_sc.channel[channel as usize].transfer_size.TransferSize;
+    }
+}
+
+fn HcdTransmitChannelNoWait(device: &UsbDevice, channel: u8, buffer: *mut u8) {
+    unsafe {
+        let dwc_sc: &mut dwc_hub = &mut *(device.soft_sc as *mut dwc_hub);
+        let hcsplt = read_volatile(DOTG_HCSPLT(channel as usize));
+        convert_into_host_split_control(hcsplt, &mut dwc_sc.channel[channel as usize].split_control);
+        dwc_sc.channel[channel as usize].split_control.CompleteSplit = false;
+        write_volatile(DOTG_HCSPLT(channel as usize), convert_host_split_control(dwc_sc.channel[channel as usize].split_control));
+
+        if ((buffer as u32) & 3) != 0 {
+            println!(
+                "HCD: Transfer buffer {:#x} is not DWORD aligned. Ignored, but dangerous.\n",
+                buffer as u32,
+            );
+        }
+
+        dwc_sc.channel[channel as usize].dma_address = buffer;
+        write_volatile(DOTG_HCDMA(channel as usize), buffer as u32);
+
+        let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+        convert_into_host_characteristics(hcchar, &mut dwc_sc.channel[channel as usize].characteristics);
+
+        dwc_sc.channel[channel as usize].characteristics.Enable = true;
+        dwc_sc.channel[channel as usize].characteristics.Disable = false;
+        dwc_sc.channel[channel as usize]
+            .characteristics
+            .PacketsPerFrame = 1;
+
+        write_volatile(DOTG_HCCHAR(channel as usize), convert_host_characteristics(dwc_sc.channel[channel as usize].characteristics));
+    
+    }
+}
+
+fn HcdChannelSendOne(
+    device: &mut UsbDevice,
+    pipe: &mut UsbPipeAddress,
+    channel: u8,
+    buffer: *mut u8,
+    bufferOffset: u32
+) -> ResultCode {
+    let dwc_sc: &mut dwc_hub = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
+    write_volatile(DOTG_HCINT(channel as usize), 0x3fff);
+
+    let haintmsk = read_volatile(DOTG_HAINTMSK);
+    write_volatile(DOTG_HAINTMSK, haintmsk | (1 << channel));
+
+    if pipe.transfer_type == UsbTransfer::Bulk && pipe.direction == UsbDirection::In {
+        write_volatile(DOTG_HCINTMSK(channel as usize), HCINTMSK_XFERCOMPLMSK | HCINTMSK_CHHLTDMSK | HCINTMSK_AHBERRMSK | HCINTMSK_STALLMSK | HCINTMSK_ACKMSK | HCINTMSK_NYETMSK | HCINTMSK_XACTERRMSK | HCINTMSK_BBLERRMSK | HCINTMSK_FRMOVRUNMSK | HCINTMSK_DATATGLERRMSK)
+    } else {
+        write_volatile(DOTG_HCINTMSK(channel as usize), HCINTMSK_XFERCOMPLMSK | HCINTMSK_CHHLTDMSK | HCINTMSK_AHBERRMSK | HCINTMSK_STALLMSK | HCINTMSK_NAKMSK | HCINTMSK_ACKMSK | HCINTMSK_NYETMSK | HCINTMSK_XACTERRMSK | HCINTMSK_BBLERRMSK | HCINTMSK_FRMOVRUNMSK | HCINTMSK_DATATGLERRMSK);
+    }
+
+    let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
+    convert_into_host_transfer_size(
+        hctsiz,
+        &mut dwc_sc.channel[channel as usize].transfer_size,
+    );
+
+    let mut hcsplt = read_volatile(DOTG_HCSPLT(channel as usize));
+    convert_into_host_split_control(
+        hcsplt,
+        &mut dwc_sc.channel[channel as usize].split_control,
+    );
+
+    HcdTransmitChannelNoWait(device, channel, buffer.wrapping_add(bufferOffset as usize));
+
+    return ResultCode::OK;
+}
+
+fn HcdChannelSend(
+    device: &mut UsbDevice,
+    pipe: &mut UsbPipeAddress,
+    channel: u8,
+    buffer: *mut u8,
+    buffer_length: u32,
+    packet_id: PacketId
+) -> ResultCode {
+
+    // Prepare the channel.
+    let result = HcdPrepareChannel(device, channel, buffer_length, packet_id, pipe);
+    if result != ResultCode::OK {
+        device.error = UsbTransferError::ConnectionError;
+        println!("HCD: Could not prepare data channel to packet.\n");
+        return result;
+    }
+
+    let result = HcdChannelSendOne(device, pipe, channel, buffer, 0);
+    if result != ResultCode::OK {
+        device.error = UsbTransferError::ConnectionError;
+        println!("HCD: Could not send data to packet.\n");
+        return result;
+    }
+
+     // Wait for the transfer to complete.
+
+    return ResultCode::OK;
+}
+
 pub fn ReadHPRT() -> u32 {
     read_volatile(DOTG_HPRT)
 }
@@ -611,13 +777,24 @@ pub fn HcdSubmitBulkMessage(
         _reserved: 0,
     };
     // let data_buffer = dwc_sc.databuffer.as_mut_ptr();
-    let result = HcdChannelSendWait(
+
+    if pipe.direction == UsbDirection::Out {
+        // let data_buffer = dwc_sc.dma_loc as *const u8;
+        let data_buffer = dwc_sc.dma_addr[channel as usize] as *mut u8;
+        memory_copy(
+            data_buffer,
+            buffer,
+            buffer_length as usize,
+        );
+    }
+    
+    let result = HcdChannelSend(
         device,
         &mut tempPipe,
         channel,
-        buffer,
+        dwc_sc.dma_phys[channel as usize] as *mut u8,
         buffer_length,
-        request,
+        // request,
         packet_id,
     );
 
@@ -683,14 +860,15 @@ pub fn HcdSubmitInterruptMessage(
         direction: UsbDirection::In,
         _reserved: 0,
     };
-    let data_buffer = dwc_sc.databuffer.as_mut_ptr();
-    let result = HcdChannelSendWait(
+    // let data_buffer = dwc_sc.databuffer.as_mut_ptr();
+    let data_buffer = dwc_sc.dma_phys[channel as usize] as *mut u8;
+    let result = HcdChannelSend(
         device,
         &mut tempPipe,
         channel,
         data_buffer,
         buffer_length,
-        request,
+        // request,
         packet_id,
     );
 
@@ -722,15 +900,15 @@ pub fn HcdSubmitInterruptMessage(
             device.last_transfer = buffer_length;
         }
 
-        memory_copy(
-            dwc_sc.databuffer.as_mut_ptr(),
-            dwc_sc.dma_loc as *const u8,
-            device.last_transfer as usize,
-        );
+        // memory_copy(
+        //     dwc_sc.databuffer.as_mut_ptr(),
+        //     dwc_sc.dma_loc as *const u8,
+        //     device.last_transfer as usize,
+        // );
 
         memory_copy(
             buffer,
-            dwc_sc.databuffer.as_ptr(),
+            dwc_sc.dma_addr[channel as usize] as *mut u8,
             device.last_transfer as usize,
         );
 
@@ -1015,8 +1193,13 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     unsafe { 
         let dma_address = 0x2FF0000;
         use crate::memory::map_physical_noncacheable;
-        let dma_loc = map_physical_noncacheable(dma_address, 0x1000).as_ptr() as usize; 
+        let dma_loc = map_physical_noncacheable(dma_address, 0x1000 * ChannelCount).as_ptr() as usize; 
         dwc_sc.dma_loc = dma_loc; //TODO: Temporay, move to somwhere elses
+
+        for i in 0..ChannelCount {
+            dwc_sc.dma_addr[i as usize] = dma_loc + (i * 0x1000);
+            dwc_sc.dma_phys[i as usize] = dma_address + (i * 0x1000);
+        }
     }
 
     println!("| HCD: Starting");
@@ -1167,7 +1350,13 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
         write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x1000));
     }
 
+    write_volatile(DOTG_GINTSTS, 0xFFFFFFFF);
+    dwc_otg_register_interrupt_handler();
+    write_volatile(DOTG_GINTMSK, GINTMSK_HCHINTMSK);
 
+
+    write_volatile(DOTG_GINTSTS, 1);
+    write_volatile(DOTG_GAHBCFG, GAHBCFG_GLBLINTRMSK);
     // hport = read_volatile(DOTG_HPRT);
     // hport |= HPRT_PRTRST;
     // write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x100));
@@ -1253,7 +1442,70 @@ pub fn dwc_otg_initialize_controller(base_addr: *mut ()) {
     }
 }
 
-struct DWC_OTG {
+#[derive(Default)]
+pub struct DwcChannelActive {
+    pub channel: [u8; ChannelCount]
+}
+
+impl DwcChannelActive {
+    pub const fn new() -> Self {
+        Self {
+            channel: [0; ChannelCount]
+        }
+    }
+}
+
+pub fn dwc_otg_get_active_channel() -> u32 {
+    let mut dwc_channels = DWC_CHANNEL_ACTIVE.lock();
+    for i in 1..ChannelCount {
+        if dwc_channels.channel[i] == 0 {
+            dwc_channels.channel[i] = 1;
+            return i as u32;
+        }
+    }
+    return ChannelCount as u32;
+}
+
+//TODO: Make this a mutex
+pub fn dwc_otg_get_control_channel() -> u32 {
+    let mut dwc_channels = DWC_CHANNEL_ACTIVE.lock();
+    if dwc_channels.channel[0] == 0 {
+        dwc_channels.channel[0] = 1;
+        return 0 as u32;
+    }
+    return ChannelCount as u32;
+}
+
+pub fn dwc_otg_free_channel(channel: u32) {
+    let mut dwc_channels = DWC_CHANNEL_ACTIVE.lock();
+    dwc_channels.channel[channel as usize] = 0;
+}
+
+pub struct DwcChannelCallback {
+    pub callback: [Option<fn(endpoint_descriptor, u32)>; ChannelCount],
+    pub endpoint_descriptors: [Option<endpoint_descriptor>; ChannelCount],
+}
+
+impl DwcChannelCallback {
+    pub const fn new() -> Self {
+        Self {
+            callback: [None; ChannelCount],
+            endpoint_descriptors: [None; ChannelCount],
+        }
+    }
+}
+
+pub struct DwcLock{
+
+}
+
+impl DwcLock {
+    pub const fn new() -> Self {
+        Self {}
+    }
+}
+
+pub struct DWC_OTG {
     base_addr: usize,
 }
 
@@ -1269,10 +1521,12 @@ pub struct dwc_hub {
     pub databuffer: [u8; 1024],
     pub phy_initialised: bool,
     pub dma_loc: usize,
+    pub dma_phys: [usize; ChannelCount],
+    pub dma_addr: [usize; ChannelCount],
     pub channel: [host_channel; ChannelCount],
 }
 
-//default
+//default 
 #[derive(Copy, Clone)]
 pub struct host_channel {
     characteristics: host_characteristics,
@@ -1382,6 +1636,8 @@ impl dwc_hub {
             databuffer: [0; 1024],
             phy_initialised: false,
             dma_loc: 0,
+            dma_phys: [0; ChannelCount],
+            dma_addr: [0; ChannelCount],
             channel: [host_channel::default(); ChannelCount],
         }
     }

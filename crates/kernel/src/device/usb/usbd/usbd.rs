@@ -27,6 +27,7 @@ use super::descriptors::*;
 use super::device::*;
 use super::pipe::*;
 use super::request::*;
+use crate::device::usb::usbd::endpoint::*;
 
 use core::ptr;
 use core::time;
@@ -80,8 +81,31 @@ pub fn UsbBulkMessage(
     buffer: *mut u8,
     buffer_length: u32,
     packet_id: PacketId,
+    device_endpoint_number: u8,
     timeout_: u32,
 ) -> ResultCode {
+
+    unsafe {
+        DWC_CHANNEL_CALLBACK.endpoint_descriptors[channel as usize] = Some(endpoint_descriptor {
+            endpoint_address: pipe.end_point,
+            endpoint_direction: pipe.direction,
+            endpoint_type: pipe.transfer_type,
+            max_packet_size: pipe.max_size,
+            device_endpoint_number: device_endpoint_number,
+            device: device,
+            device_number: device.number,
+            device_speed: device.speed,
+            buffer_length: buffer_length,
+            buffer: buffer,
+            channel: channel,
+            timeout: timeout_,
+        });
+        if pipe.direction == UsbDirection::Out {
+            DWC_CHANNEL_CALLBACK.callback[channel as usize] = Some(finish_bulk_endpoint_callback_out);
+        } else {
+            DWC_CHANNEL_CALLBACK.callback[channel as usize] = Some(finish_bulk_endpoint_callback_in);
+        }
+    }
 
     let result = HcdSubmitBulkMessage(device, channel, pipe, buffer, buffer_length, &mut UsbDeviceRequest {
         request_type: 0,

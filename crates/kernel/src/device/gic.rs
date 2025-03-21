@@ -36,6 +36,7 @@
 use core::arch::asm;
 
 use crate::event::context::Context;
+use crate::shutdown;
 use crate::sync::{HandlerTableInner, SpinLockInner, UnsafeInit};
 
 const SPI_COUNT: usize = 192;
@@ -144,13 +145,15 @@ pub unsafe extern "C" fn gic_irq_handler(
         if irq >= IRQ_COUNT as u32 {
             panic!("Invalid IRQ number");
         }
-
+        
+        //TODO: This may cause a few issues on the USB handling side, may need to push back
         unsafe { gic.reg_write_cpui(GICC_EOIR, iar) };
+        
         //acknowledge the interrupt
         //fence
         //TODO: Switch to dsb?
         isb();
-
+        
         //May run into issuse of group 0, group1
         //GICC_EOIR is used for processing Group 0 interrupts
         //GICC_AEOIR is used for processing Group 1 interrupts.
