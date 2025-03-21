@@ -11,7 +11,7 @@ use std::fs::File;
 use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::prelude::v1::{String, ToString, Vec};
+use std::prelude::v1::{String, ToOwned, ToString, Vec};
 use std::process::Command;
 use std::{env, io, println, vec};
 use std::{format, fs};
@@ -723,7 +723,7 @@ fn ext4_ro_hash_dir_find_test() {
 
     for i in 0..NUM_OF_FILES {
         //let mut test_file_path: PathBuf = test_folder_path.clone();
-        let file_name: String = i.to_string() + ".txt";
+        let file_name: String = "test/".to_owned() + &*i.to_string() + ".txt";
 
         //test_file_path.push(file_name.clone());
 
@@ -765,7 +765,7 @@ fn ext4_ro_hash_dir_find_test() {
         create_ext4_fs(base_test_folder_path.to_str().unwrap(), 1024, image_path,
                128, true, "128m");*/
 
-    let image_path = "ext4_sanity_read.img";
+    let image_path = "ext4_ro_hash_dir_find.img";
 
     let mut ext4 = create_fs_from_image(image_path, true);
 

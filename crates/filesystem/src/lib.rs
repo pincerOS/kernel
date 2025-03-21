@@ -57,7 +57,7 @@ pub enum Ext2Error {
     UnsupportedDirHashVersion,
     NotYetImplemented,
     InvalidExtentTree,
-    ExtentNotFound
+    ExtentNotFound,
 }
 
 impl From<BlockDeviceError> for Ext2Error {

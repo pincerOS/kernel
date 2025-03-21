@@ -2,7 +2,9 @@ use crate::bgd::BGD;
 use crate::block_device::{BlockDevice, SECTOR_SIZE};
 use crate::dir::{DirectoryEntryConstants, DirectoryEntryData, DirectoryEntryWrapper};
 use crate::inode::i_mode::{EXT2_S_IFDIR, EXT2_S_IFREG};
-use crate::inode::{ext4_xattr_entry_data, i_flags, i_mode, INode, INodeBlockInfo, INodeWrapper, REV_0_INODE_SIZE};
+use crate::inode::{
+    ext4_xattr_entry_data, i_flags, i_mode, INode, INodeBlockInfo, INodeWrapper, REV_0_INODE_SIZE,
+};
 use crate::superblock::Superblock;
 use crate::{get_epoch_time, BlockDeviceError, DeferredWriteMap, Ext2Error};
 use alloc::rc::{Rc, Weak};
@@ -191,6 +193,8 @@ where
         block_group_descriptor_tables: &Vec<BGD>,
         inode_num: usize,
     ) -> INodeBlockInfo {
+        //add flex_bg support!
+
         let inode_size = superblock.s_inode_size as usize;
 
         let block_group_number = (inode_num - 1) / superblock.s_inodes_per_group as usize;
@@ -255,7 +259,7 @@ where
         let mut i: usize = inode_xattr_data_start;
 
         while inode_xattr_data_end > i {
-            let mut xattr = crate::inode::ext4_xattr_entry_data{
+            let mut xattr = crate::inode::ext4_xattr_entry_data {
                 e_name_len: 0,
                 e_name_index: 0,
                 e_value_offs: 0,
@@ -264,7 +268,7 @@ where
                 e_hash: 0,
                 e_name: [],
             };
-            let xattr_slice_end = i+size_of::<ext4_xattr_entry_data>();
+            let xattr_slice_end = i + size_of::<ext4_xattr_entry_data>();
             let xattr_name_end = xattr_slice_end + (xattr.e_name_len as usize);
             let mut xattr_bytes = bytemuck::bytes_of_mut(&mut xattr);
 
@@ -272,21 +276,20 @@ where
 
             inode_xattrs_data.push(xattr);
 
-            inode_xattr_name_data.extend_from_slice(
-                &block_buffer[xattr_slice_end..xattr_name_end]);
+            inode_xattr_name_data.extend_from_slice(&block_buffer[xattr_slice_end..xattr_name_end]);
 
             i = xattr_name_end;
         }
 
-        let inode_wrapper = Rc::new(RefCell::new(INodeWrapper{
+        let inode_wrapper = Rc::new(RefCell::new(INodeWrapper {
             inode,
             _inode_num: inode_num as u32,
             inode_xattrs_data,
             inode_xattr_name_data,
         }));
-        
+
         inode_map.insert(inode_num, Rc::downgrade(&inode_wrapper));
-        
+
         Ok(inode_wrapper)
     }
 

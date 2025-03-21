@@ -112,6 +112,17 @@ impl Superblock {
     pub fn get_block_size(&self) -> usize {
         1024 << self.s_log_block_size
     }
+
+    pub fn get_flexible_block_groups(&self) -> usize {
+        assert_eq!(
+            self.s_feature_incompat & s_feature_incompat::EXT4_FEATURE_INCOMPAT_FLEX_BG,
+            0
+        );
+
+        let base: usize = 2;
+
+        base.pow(self.s_log_groups_per_flex as u32)
+    }
 }
 
 pub mod s_state {
@@ -160,7 +171,7 @@ pub mod s_feature_incompat {
     const EXT4_FEATURE_INCOMPAT_EXTENTS: u32 = 0x0040;
     const EXT4_FEATURE_INCOMPAT_64BIT: u32 = 0x0080;
     const EXT4_FEATURE_INCOMPAT_MMP: u32 = 0x0100;
-    const EXT4_FEATURE_INCOMPAT_FLEX_BG: u32 = 0x0200;
+    pub(crate) const EXT4_FEATURE_INCOMPAT_FLEX_BG: u32 = 0x0200;
     const EXT4_FEATURE_INCOMPAT_EA_INODE: u32 = 0x0400;
     const EXT4_FEATURE_INCOMPAT_DIRDATA: u32 = 0x1000;
     const EXT4_FEATURE_INCOMPAT_CSUM_SEED: u32 = 0x2000;

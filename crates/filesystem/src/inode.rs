@@ -5,16 +5,16 @@ use crate::dir::{
     HTreeDirectoryEntryNode, HTreeDirectoryEntryRoot,
 };
 use crate::ext::Ext;
+use crate::inode::i_flags::{EXT4_EXTENTS_FL, EXT4_INLINE_DATA_FL};
 use crate::Ext2Error::{FileNotFound, NotEnoughDeviceSpace};
 use crate::{hash, DeferredWriteMap, Ext2Error, UNALLOCATED_BLOCK_SLOT};
 use alloc::rc::Rc;
+use bytemuck::{Pod, Zeroable};
 use std::cell::{Ref, RefCell};
 use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 use std::prelude::rust_2015::Vec;
 use std::{print, slice, vec};
-use bytemuck::{Pod, Zeroable};
-use crate::inode::i_flags::{EXT4_EXTENTS_FL, EXT4_INLINE_DATA_FL};
 
 pub mod i_mode {
     pub const EXT2_S_IFSOCK: u16 = 0xC000;
@@ -192,7 +192,7 @@ struct ext4_xattr_header {
     h_blocks: u32,
     h_hash: u32,
     h_checksum: u32,
-    h_reserved: [u32; 2]
+    h_reserved: [u32; 2],
 }
 
 #[repr(C)]
@@ -204,7 +204,7 @@ pub(crate) struct ext4_xattr_entry_data {
     pub(crate) e_value_inum: u32,
     pub(crate) e_value_size: u32,
     pub(crate) e_hash: u32,
-    pub(crate) e_name: [u8; 0]
+    pub(crate) e_name: [u8; 0],
 }
 
 struct ext4_xattr_entry<'a> {
@@ -214,7 +214,7 @@ struct ext4_xattr_entry<'a> {
     e_value_inum: u32,
     e_value_size: u32,
     e_hash: u32,
-    e_name: &'a [u8]
+    e_name: &'a [u8],
 }
 
 #[repr(C)]
@@ -224,8 +224,8 @@ pub struct INodeWrapper {
     pub(crate) _inode_num: u32,
 
     pub(crate) inode_xattrs_data: Vec<ext4_xattr_entry_data>,
-    pub(crate) inode_xattr_name_data: Vec<u8>
-}   
+    pub(crate) inode_xattr_name_data: Vec<u8>,
+}
 
 impl INodeWrapper {
     pub fn is_dir(&self) -> bool {
@@ -288,18 +288,18 @@ impl INodeWrapper {
 
         while x_attr_byte_size > i {
             let current_x_attr: &ext4_xattr_entry_data = &self.inode_xattrs_data[x_attr_index];
-            let current_x_attr_bytes: &[u8] =
-                bytemuck::bytes_of(current_x_attr);
+            let current_x_attr_bytes: &[u8] = bytemuck::bytes_of(current_x_attr);
 
-            x_attr_buffer[i..(i + current_x_attr_bytes.len())].copy_from_slice(current_x_attr_bytes);
+            x_attr_buffer[i..(i + current_x_attr_bytes.len())]
+                .copy_from_slice(current_x_attr_bytes);
 
             i += size_of::<ext4_xattr_entry>();
 
             let x_attr_slice_end = i + (current_x_attr.e_name_len as usize);
             let string_slice_end = name_index + (current_x_attr.e_name_len as usize);
-            
-            x_attr_buffer[i..x_attr_slice_end].copy_from_slice(
-                &self.inode_xattr_name_data[name_index..string_slice_end]);
+
+            x_attr_buffer[i..x_attr_slice_end]
+                .copy_from_slice(&self.inode_xattr_name_data[name_index..string_slice_end]);
 
             x_attr_index += 1;
             name_index += current_x_attr.e_name_len as usize;
@@ -341,7 +341,7 @@ impl INodeWrapper {
         &self,
         number: usize,
         ext2: &mut Ext<D>,
-        deferred_writes: Option<&DeferredWriteMap>
+        deferred_writes: Option<&DeferredWriteMap>,
     ) -> Result<u64, Ext2Error> {
         let block_size: usize = ext2.superblock.get_block_size();
         let block_inode_list_size: usize = block_size / size_of::<u32>();
@@ -352,8 +352,8 @@ impl INodeWrapper {
 
         if number
             >= (Self::SINGLE_LINK_BLOCK_PTR_INDEX
-            + block_inode_list_size
-            + block_inode_list_size_squared)
+                + block_inode_list_size
+                + block_inode_list_size_squared)
         {
             // hard mode: go through link to list of link of list of links to list of direct
             // block ptrs
@@ -440,7 +440,7 @@ impl INodeWrapper {
         &self,
         number: usize,
         ext2: &mut Ext<D>,
-        deferred_writes: Option<&DeferredWriteMap>
+        deferred_writes: Option<&DeferredWriteMap>,
     ) -> Result<u64, Ext2Error> {
         const EXT4_EXTENT_HEADER_MAGIC: u16 = 0xF30A;
         const EXT4_EXTENT_UNINIT: u16 = 32768;
@@ -449,16 +449,18 @@ impl INodeWrapper {
 
         let header_blocks_slice_end: usize = size_of::<ext4_extent_header>() / size_of::<u32>();
 
-        let mut current_extent_header_slice: &[u8] =
-            bytemuck::cast_slice(&self.inode.i_block[0..]);
+        let mut current_extent_header_slice: &[u8] = bytemuck::cast_slice(&self.inode.i_block[0..]);
         let mut block_to_read: Option<usize> = None;
         let mut found_data_block: bool = false;
         let mut block_buffer: Vec<u8> = vec![0u8; ext2.superblock.get_block_size()];
 
         while !found_data_block {
             let mut current_entry_index: usize = 0;
-            let mut current_extent_header =
-                unsafe { current_extent_header_slice.align_to::<ext4_extent_header>().1[0] };
+            let mut current_extent_header = unsafe {
+                current_extent_header_slice
+                    .align_to::<ext4_extent_header>()
+                    .1[0]
+            };
             let is_leaf_node = current_extent_header.eh_depth == 0;
 
             if current_extent_header.eh_magic != EXT4_EXTENT_HEADER_MAGIC {
@@ -472,14 +474,15 @@ impl INodeWrapper {
                     let ext4_extent_size = size_of::<ext4_extent>();
                     let current_extent_slice_start: usize =
                         ext4_header_size + (current_entry_index * ext4_extent_size);
-                    let current_extent_leaf_node_slice: &[u8] =
-                        &current_extent_header_slice[current_extent_slice_start..(current_extent_slice_start + ext4_extent_size)];
+                    let current_extent_leaf_node_slice: &[u8] = &current_extent_header_slice
+                        [current_extent_slice_start
+                            ..(current_extent_slice_start + ext4_extent_size)];
                     let current_extent_leaf_node =
                         unsafe { current_extent_leaf_node_slice.align_to::<ext4_extent>().1[0] };
                     let leaf_block = current_extent_leaf_node.ee_block as usize;
-                    
+
                     if number >= leaf_block {
-                        let leaf_node_length = 
+                        let leaf_node_length =
                             if current_extent_leaf_node.ee_len > EXT4_EXTENT_UNINIT {
                                 (current_extent_leaf_node.ee_len - EXT4_EXTENT_UNINIT) as usize
                             } else {
@@ -487,8 +490,10 @@ impl INodeWrapper {
                             };
 
                         if leaf_block + leaf_node_length > number {
-                            block_to_read = Some(((current_extent_leaf_node.ee_start_hi as usize) << 32) |
-                                            current_extent_leaf_node.ee_start_lo as usize);
+                            block_to_read = Some(
+                                ((current_extent_leaf_node.ee_start_hi as usize) << 32)
+                                    | current_extent_leaf_node.ee_start_lo as usize,
+                            );
                             found_data_block = true;
                             break;
                         }
@@ -498,17 +503,22 @@ impl INodeWrapper {
 
                     let current_extent_slice_start: usize =
                         ext4_header_size + (current_entry_index * ext4_extent_idx_size);
-                    let current_extent_interior_node_slice: &[u8] =
-                        &current_extent_header_slice[current_extent_slice_start..(current_extent_slice_start + ext4_extent_idx_size)];
-                    let current_extent_interior_node =
-                        unsafe { current_extent_interior_node_slice.align_to::<ext4_extent_idx>().1[0] };
+                    let current_extent_interior_node_slice: &[u8] = &current_extent_header_slice
+                        [current_extent_slice_start
+                            ..(current_extent_slice_start + ext4_extent_idx_size)];
+                    let current_extent_interior_node = unsafe {
+                        current_extent_interior_node_slice
+                            .align_to::<ext4_extent_idx>()
+                            .1[0]
+                    };
 
                     // we assume that the entries of interior nodes are in increasing order
                     // otherwise this doesn't work
                     if number > (current_extent_interior_node.ei_block as usize) {
-                        block_to_read =
-                            Some(((current_extent_interior_node.ei_leaf_hi as usize) << 32) |
-                                 (current_extent_interior_node.ei_leaf_lo as usize));
+                        block_to_read = Some(
+                            ((current_extent_interior_node.ei_leaf_hi as usize) << 32)
+                                | (current_extent_interior_node.ei_leaf_lo as usize),
+                        );
                     } else {
                         break;
                     }
@@ -518,7 +528,11 @@ impl INodeWrapper {
             }
 
             if block_to_read.is_some() {
-                ext2.read_logical_block(block_to_read.unwrap(), &mut block_buffer, deferred_writes)?;
+                ext2.read_logical_block(
+                    block_to_read.unwrap(),
+                    &mut block_buffer,
+                    deferred_writes,
+                )?;
                 current_extent_header_slice = &block_buffer[0..header_blocks_slice_end];
             } else {
                 // we were unable to find a block extent, which means this block doesn't exist
@@ -714,7 +728,8 @@ impl INodeWrapper {
         )?;
         let inode_num: u32 = inode_num.ok_or(Ext2Error::FileNotFound)?;
 
-        let return_value: Rc<RefCell<INodeWrapper>> = ext2.get_inode_wrapper(inode_num as usize, None)?;
+        let return_value: Rc<RefCell<INodeWrapper>> =
+            ext2.get_inode_wrapper(inode_num as usize, None)?;
 
         ext2.inode_map
             .insert(inode_num as usize, Rc::downgrade(&return_value));
@@ -842,7 +857,7 @@ impl INodeWrapper {
 
         let inode_num: u32 = inode_num.ok_or(Ext2Error::FileNotFound)?;
 
-        let return_value: Rc<RefCell<INodeWrapper>> = 
+        let return_value: Rc<RefCell<INodeWrapper>> =
             ext2.get_inode_wrapper(inode_num as usize, None)?;
 
         ext2.inode_map
@@ -1503,7 +1518,8 @@ impl INodeWrapper {
                 let logical_block_num =
                     self.get_inode_block_num(i, ext2, Some(&deferred_writes))?;
                 // update block bitmap
-                let block_group_num = logical_block_num / (ext2.superblock.s_blocks_per_group as u64);
+                let block_group_num =
+                    logical_block_num / (ext2.superblock.s_blocks_per_group as u64);
                 let index = logical_block_num % (ext2.superblock.s_blocks_per_group as u64);
 
                 let mut block_buffer = vec![0; block_size];
