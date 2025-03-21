@@ -892,14 +892,16 @@ impl INodeWrapper {
             let mut current_block_group: &BGD =
                 &ext2.block_group_descriptor_tables[current_block_group_index];
 
-            let mut free_block_count = current_block_group.bg_free_blocks_count as usize;
+            let mut free_block_count: usize =
+                current_block_group.get_free_block_count(&ext2.superblock) as usize;
 
             while free_block_count == 0 {
                 current_block_group_index = (current_block_group_index + 1) % num_of_block_groups;
                 current_block_group =
                     &ext2.block_group_descriptor_tables[current_block_group_index];
 
-                free_block_count = current_block_group.bg_free_blocks_count as usize;
+                free_block_count =
+                    current_block_group.get_free_block_count(&ext2.superblock) as usize;
 
                 if current_block_group_index == self.get_block_group_index(ext2) {
                     assert_eq!(free_block_count, 0);
@@ -913,8 +915,8 @@ impl INodeWrapper {
             let block_group_base_index: usize =
                 num_of_blocks_per_block_group * current_block_group_index;
             let mut blocks_allocated_from_block_group: usize = 0;
-            let mut current_block_bitmap_block: usize =
-                current_block_group.bg_block_bitmap as usize;
+            let mut current_block_bitmap_block =
+                current_block_group.get_block_bitmap(&ext2.superblock) as usize;
             let last_block_bitmap_block: usize =
                 current_block_bitmap_block + blocks_needed_for_block_bitmap;
             let needed_blocks: usize = std::cmp::min(num_of_blocks_left, free_block_count);
@@ -962,7 +964,10 @@ impl INodeWrapper {
                     );
 
                     ext2.block_group_descriptor_tables[current_block_group_index]
-                        .bg_free_blocks_count -= blocks_allocated_from_block_group as u16;
+                        .set_free_blocks_count(
+                            blocks_allocated_from_block_group as u64,
+                            &ext2.superblock,
+                        );
                     ext2.superblock.s_free_blocks_count -= blocks_allocated_from_block_group as u32;
 
                     ext2.add_super_block_deferred_write(deferred_writes)?;
@@ -1525,8 +1530,8 @@ impl INodeWrapper {
                 let mut block_buffer = vec![0; block_size];
 
                 ext2.read_logical_block(
-                    ext2.block_group_descriptor_tables[block_group_num as usize].bg_block_bitmap
-                        as usize,
+                    ext2.block_group_descriptor_tables[block_group_num as usize]
+                        .get_block_bitmap(&ext2.superblock) as usize,
                     block_buffer.as_mut_slice(),
                     Some(&deferred_writes),
                 )?;
@@ -1534,16 +1539,20 @@ impl INodeWrapper {
                 block_buffer_byte &= 0b11111111 - (1 << (index % 8));
                 ext2.add_write_to_deferred_writes_map(
                     &mut deferred_writes,
-                    ext2.block_group_descriptor_tables[block_group_num as usize].bg_block_bitmap
-                        as usize,
+                    ext2.block_group_descriptor_tables[block_group_num as usize]
+                        .get_block_bitmap(&ext2.superblock) as usize,
                     index as usize,
                     slice::from_ref(&block_buffer_byte),
                     Some(block_buffer),
                 )?;
 
                 // increment free blocks count
+                let free_blocks_count: u64 = ext2.block_group_descriptor_tables
+                    [block_group_num as usize]
+                    .get_free_block_count(&ext2.superblock);
+
                 ext2.block_group_descriptor_tables[block_group_num as usize]
-                    .bg_free_blocks_count += 1;
+                    .set_free_blocks_count(free_blocks_count + 1, &ext2.superblock);
                 ext2.superblock.s_free_blocks_count += 1;
 
                 ext2.add_block_group_deferred_write(
@@ -1646,7 +1655,8 @@ impl INodeWrapper {
         let mut deferred_writes: DeferredWriteMap = BTreeMap::new();
 
         ext2.read_logical_block(
-            ext2.block_group_descriptor_tables[block_group_num as usize].bg_inode_bitmap as usize,
+            ext2.block_group_descriptor_tables[block_group_num as usize]
+                .get_inode_bitmap(&ext2.superblock) as usize,
             block_buffer.as_mut_slice(),
             Some(&deferred_writes),
         )?;
@@ -1654,13 +1664,18 @@ impl INodeWrapper {
         block_buffer_byte &= 0b11111111 - (1 << (index % 8));
         ext2.add_write_to_deferred_writes_map(
             &mut deferred_writes,
-            ext2.block_group_descriptor_tables[block_group_num as usize].bg_inode_bitmap as usize,
+            ext2.block_group_descriptor_tables[block_group_num as usize]
+                .get_inode_bitmap(&ext2.superblock) as usize,
             index as usize,
             slice::from_ref(&block_buffer_byte),
             Some(block_buffer),
         )?;
 
-        ext2.block_group_descriptor_tables[block_group_num].bg_free_inodes_count -= 1;
+        let free_inodes_count: u64 = ext2.block_group_descriptor_tables[block_group_num]
+            .get_free_inodes_count(&ext2.superblock);
+
+        ext2.block_group_descriptor_tables[block_group_num]
+            .set_free_inodes_count(free_inodes_count + 1, &ext2.superblock);
         ext2.superblock.s_free_inodes_count += 1;
         //TODO: if this is the last inode in this block, should we deallocate the block?
         ext2.add_block_group_deferred_write(&mut deferred_writes, block_group_num as usize)?;

@@ -163,37 +163,37 @@ pub mod s_feature_compat {
 }
 
 pub mod s_feature_incompat {
-    const EXT2_FEATURE_INCOMPAT_COMPRESSION: u32 = 0x0001;
-    const EXT2_FEATURE_INCOMPAT_FILETYPE: u32 = 0x0002;
-    const EXT3_FEATURE_INCOMPAT_RECOVER: u32 = 0x0004;
-    const EXT3_FEATURE_INCOMPAT_JOURNAL_DEV: u32 = 0x0008;
-    const EXT2_FEATURE_INCOMPAT_META_BG: u32 = 0x0010;
-    const EXT4_FEATURE_INCOMPAT_EXTENTS: u32 = 0x0040;
-    const EXT4_FEATURE_INCOMPAT_64BIT: u32 = 0x0080;
-    const EXT4_FEATURE_INCOMPAT_MMP: u32 = 0x0100;
+    pub(crate) const EXT2_FEATURE_INCOMPAT_COMPRESSION: u32 = 0x0001;
+    pub(crate) const EXT2_FEATURE_INCOMPAT_FILETYPE: u32 = 0x0002;
+    pub(crate) const EXT3_FEATURE_INCOMPAT_RECOVER: u32 = 0x0004;
+    pub(crate) const EXT3_FEATURE_INCOMPAT_JOURNAL_DEV: u32 = 0x0008;
+    pub(crate) const EXT2_FEATURE_INCOMPAT_META_BG: u32 = 0x0010;
+    pub(crate) const EXT4_FEATURE_INCOMPAT_EXTENTS: u32 = 0x0040;
+    pub(crate) const EXT4_FEATURE_INCOMPAT_64BIT: u32 = 0x0080;
+    pub(crate) const EXT4_FEATURE_INCOMPAT_MMP: u32 = 0x0100;
     pub(crate) const EXT4_FEATURE_INCOMPAT_FLEX_BG: u32 = 0x0200;
-    const EXT4_FEATURE_INCOMPAT_EA_INODE: u32 = 0x0400;
-    const EXT4_FEATURE_INCOMPAT_DIRDATA: u32 = 0x1000;
-    const EXT4_FEATURE_INCOMPAT_CSUM_SEED: u32 = 0x2000;
-    const EXT4_FEATURE_INCOMPAT_LARGEDIR: u32 = 0x4000;
-    const EXT4_FEATURE_INCOMPAT_INLINE_DATA: u32 = 0x8000;
-    const EXT4_FEATURE_INCOMPAT_ENCRYPT: u32 = 0x10000;
+    pub(crate) const EXT4_FEATURE_INCOMPAT_EA_INODE: u32 = 0x0400;
+    pub(crate) const EXT4_FEATURE_INCOMPAT_DIRDATA: u32 = 0x1000;
+    pub(crate) const EXT4_FEATURE_INCOMPAT_CSUM_SEED: u32 = 0x2000;
+    pub(crate) const EXT4_FEATURE_INCOMPAT_LARGEDIR: u32 = 0x4000;
+    pub(crate) const EXT4_FEATURE_INCOMPAT_INLINE_DATA: u32 = 0x8000;
+    pub(crate) const EXT4_FEATURE_INCOMPAT_ENCRYPT: u32 = 0x10000;
 }
 
 pub mod s_feature_ro_compat {
-    const EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER: u32 = 0x0001;
-    const EXT2_FEATURE_RO_COMPAT_LARGE_FILE: u32 = 0x0002;
-    const EXT2_FEATURE_RO_COMPAT_BTREE_DIR: u32 = 0x0004;
-    const EXT4_RO_COMPAT_HUGE_FILE: u32 = 0x0008;
-    const EXT4_RO_COMPAT_GDT_CSUM: u32 = 0x0010;
-    const EXT4_RO_COMPAT_DIR_NLINK: u32 = 0x0020;
-    const EXT4_RO_COMPAT_EXTRA_ISIZE: u32 = 0x0040;
-    const EXT4_RO_COMPAT_HAS_SNAPSHOT: u32 = 0x0080;
-    const EXT4_RO_COMPAT_QUOTA: u32 = 0x0100;
-    const EXT4_RO_COMPAT_METADATA_CSUM: u32 = 0x0200;
-    const EXT4_RO_COMPAT_REPLICA: u32 = 0x0800;
-    const EXT4_RO_COMPAT_READONLY: u32 = 0x1000;
-    const EXT4_RO_COMPAT_PROJECT: u32 = 0x2000;
+    pub(crate) const EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER: u32 = 0x0001;
+    pub(crate) const EXT2_FEATURE_RO_COMPAT_LARGE_FILE: u32 = 0x0002;
+    pub(crate) const EXT2_FEATURE_RO_COMPAT_BTREE_DIR: u32 = 0x0004;
+    pub(crate) const EXT4_RO_COMPAT_HUGE_FILE: u32 = 0x0008;
+    pub(crate) const EXT4_RO_COMPAT_GDT_CSUM: u32 = 0x0010;
+    pub(crate) const EXT4_RO_COMPAT_DIR_NLINK: u32 = 0x0020;
+    pub(crate) const EXT4_RO_COMPAT_EXTRA_ISIZE: u32 = 0x0040;
+    pub(crate) const EXT4_RO_COMPAT_HAS_SNAPSHOT: u32 = 0x0080;
+    pub(crate) const EXT4_RO_COMPAT_QUOTA: u32 = 0x0100;
+    pub(crate) const EXT4_RO_COMPAT_METADATA_CSUM: u32 = 0x0200;
+    pub(crate) const EXT4_RO_COMPAT_REPLICA: u32 = 0x0800;
+    pub(crate) const EXT4_RO_COMPAT_READONLY: u32 = 0x1000;
+    pub(crate) const EXT4_RO_COMPAT_PROJECT: u32 = 0x2000;
 }
 
 pub mod s_algo_bitmap {

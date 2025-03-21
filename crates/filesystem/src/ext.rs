@@ -1,3 +1,4 @@
+use crate::bgd::bgd_misc_constants::INITIAL_BGD_SIZE;
 use crate::bgd::BGD;
 use crate::block_device::{BlockDevice, SECTOR_SIZE};
 use crate::dir::{DirectoryEntryConstants, DirectoryEntryData, DirectoryEntryWrapper};
@@ -5,7 +6,7 @@ use crate::inode::i_mode::{EXT2_S_IFDIR, EXT2_S_IFREG};
 use crate::inode::{
     ext4_xattr_entry_data, i_flags, i_mode, INode, INodeBlockInfo, INodeWrapper, REV_0_INODE_SIZE,
 };
-use crate::superblock::Superblock;
+use crate::superblock::{s_feature_incompat, Superblock};
 use crate::{get_epoch_time, BlockDeviceError, DeferredWriteMap, Ext2Error};
 use alloc::rc::{Rc, Weak};
 use bytemuck::bytes_of;
@@ -199,7 +200,7 @@ where
 
         let block_group_number = (inode_num - 1) / superblock.s_inodes_per_group as usize;
         let inode_table_block =
-            block_group_descriptor_tables[block_group_number].bg_inode_table as usize;
+            block_group_descriptor_tables[block_group_number].get_inode_table(superblock) as usize;
 
         let inode_table_index: usize = (inode_num - 1) % (superblock.s_inodes_per_group as usize);
         let inode_table_block_with_offset: usize =
@@ -365,6 +366,72 @@ where
         Ok(())
     }
 
+    fn get_block_group_descriptor_tables(
+        superblock: &Superblock,
+        device: &mut D,
+    ) -> Result<Vec<BGD>, Ext2Error> {
+        let block_size: usize = superblock.get_block_size();
+        let block_group_descriptor_block: usize = if block_size == 1024 { 2 } else { 1 };
+        let supports_64bit =
+            (superblock.s_feature_incompat & s_feature_incompat::EXT4_FEATURE_INCOMPAT_64BIT) == 0;
+        let bgd_size: usize = if supports_64bit && superblock.s_desc_size > 32 {
+            size_of::<BGD>()
+        } else {
+            INITIAL_BGD_SIZE
+        };
+
+        let descriptor_count = superblock.get_num_of_block_groups() as usize;
+        let block_group_descriptor_blocks: usize =
+            1 + (descriptor_count * bgd_size).div_ceil(block_size);
+        let max_block_group_descriptors: usize =
+            block_group_descriptor_blocks * (block_size / bgd_size);
+        let block_group_descriptor_blocks_bgd_vec: usize =
+            1 + (descriptor_count * bgd_size).div_ceil(size_of::<BGD>());
+
+        let mut block_group_descriptor_tables: Vec<BGD> = Vec::new();
+
+        block_group_descriptor_tables.resize(max_block_group_descriptors, BGD::new());
+
+        let mut block_group_descriptor_tables_bytes: Vec<u8> =
+            vec![0; max_block_group_descriptors * bgd_size];
+
+        Self::read_logical_blocks_inner(
+            device,
+            &superblock,
+            block_group_descriptor_block,
+            block_group_descriptor_tables_bytes.as_mut_slice(),
+            None,
+        )?;
+
+        let descriptor_table_bytes_ptr: *mut u8 =
+            block_group_descriptor_tables.as_mut_ptr() as *mut u8;
+        let bgd_vector_slice: &mut [u8] = unsafe {
+            core::slice::from_raw_parts_mut(
+                descriptor_table_bytes_ptr,
+                block_group_descriptor_blocks_bgd_vec * block_size,
+            )
+        };
+        let mut i: usize = 0;
+
+        // we need to do this because bgd_size doesn't need to equal size_of::<BGD>()
+        while max_block_group_descriptors > i {
+            let table_bytes_slice_start = i * bgd_size;
+            let table_bytes_slice_end = (i + 1) * bgd_size;
+
+            let bgd_vec_slice_start = i * size_of::<BGD>();
+            let bgd_vec_slice_end = (i + 1) * size_of::<BGD>();
+
+            bgd_vector_slice[bgd_vec_slice_start..bgd_vec_slice_end].copy_from_slice(
+                &block_group_descriptor_tables_bytes
+                    [table_bytes_slice_start..table_bytes_slice_end],
+            );
+
+            i += 1;
+        }
+
+        Ok(block_group_descriptor_tables)
+    }
+
     pub fn new(mut device: D) -> Result<Self, Ext2Error> {
         // TODO: avoid putting this buffer on the stack, and avoid storing
         // superblock padding in the Ext struct
@@ -374,50 +441,10 @@ where
 
         let superblock: Superblock =
             unsafe { core::mem::transmute::<[u8; 1024], Superblock>(buffer) };
-        let block_size = superblock.get_block_size();
-
-        let block_group_descriptor_block: usize = if block_size == 1024 { 2 } else { 1 };
-
-        let descriptor_count = superblock.get_num_of_block_groups() as usize;
-        let block_group_descriptor_blocks: usize =
-            1 + (descriptor_count * size_of::<BGD>()).div_ceil(block_size);
-        let max_block_group_descriptors: usize =
-            block_group_descriptor_blocks * (block_size / size_of::<BGD>());
-
-        let mut block_group_descriptor_tables: Vec<BGD> = Vec::new();
-
-        block_group_descriptor_tables.resize(
-            max_block_group_descriptors,
-            BGD {
-                bg_block_bitmap: 0,
-                bg_inode_bitmap: 0,
-                bg_inode_table: 0,
-                bg_free_blocks_count: 0,
-                bg_free_inodes_count: 0,
-                bg_used_dirs_count: 0,
-                bg_pad: 0,
-                bg_reserved: [0; 12],
-            },
-        );
-
-        let descriptor_table_bytes_ptr: *mut u8 =
-            block_group_descriptor_tables.as_mut_ptr() as *mut u8;
-        let descriptor_table_bytes_slice: &mut [u8] = unsafe {
-            core::slice::from_raw_parts_mut(
-                descriptor_table_bytes_ptr,
-                block_group_descriptor_blocks * block_size,
-            )
-        };
-
-        Self::read_logical_blocks_inner(
-            &mut device,
-            &superblock,
-            block_group_descriptor_block,
-            descriptor_table_bytes_slice,
-            None,
-        )?;
 
         let mut inode_map: BTreeMap<usize, Weak<RefCell<INodeWrapper>>> = BTreeMap::new();
+        let block_group_descriptor_tables =
+            Self::get_block_group_descriptor_tables(&superblock, &mut device)?;
 
         let root_inode_wrapper: Rc<RefCell<INodeWrapper>> = Self::get_inode_wrapper_inner(
             &mut device,
@@ -516,8 +543,12 @@ where
         for (block_group_index, mut block_group_table) in
             self.block_group_descriptor_tables.iter_mut().enumerate()
         {
-            if block_group_table.bg_free_inodes_count > 1 {
-                block_group_table.bg_free_inodes_count -= 1;
+            if block_group_table.get_free_inodes_count(&self.superblock) > 1 {
+                let free_inodes_count: u64 =
+                    block_group_table.get_free_inodes_count(&self.superblock);
+
+                block_group_table.set_free_inodes_count(free_inodes_count - 1, &self.superblock);
+
                 self.superblock.s_free_inodes_count -= 1;
                 found_block_group_index_option = Some(block_group_index);
                 break;
@@ -528,7 +559,7 @@ where
             let mut block_buffer = vec![0; block_size];
             let found_block_group_index: usize = found_block_group_index_option.unwrap();
             let inode_bitmap_num = self.block_group_descriptor_tables[found_block_group_index]
-                .bg_inode_bitmap as usize;
+                .get_inode_bitmap(&self.superblock) as usize;
             let mut byte_write: [u8; 1] = [0; 1];
             let mut byte_write_pos: usize = 0;
 
@@ -588,10 +619,10 @@ where
             new_inode_num += 1;
 
             let num_of_inodes_per_block: usize = block_size / size_of::<INode>();
-            let inode_block_index: usize = (self.block_group_descriptor_tables
-                [found_block_group_index]
-                .bg_inode_table as usize)
-                + ((new_inode_num - 1) / num_of_inodes_per_block);
+            let inode_block_index: usize =
+                (self.block_group_descriptor_tables[found_block_group_index]
+                    .get_inode_table(&self.superblock) as usize)
+                    + ((new_inode_num - 1) / num_of_inodes_per_block);
             let inode_block_offset: usize =
                 ((new_inode_num - 1) % num_of_inodes_per_block) * size_of::<INode>();
 
