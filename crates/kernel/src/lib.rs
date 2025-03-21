@@ -11,6 +11,7 @@ pub mod arch;
 pub mod event;
 pub mod heap;
 pub mod memory;
+pub mod process;
 pub mod ringbuffer;
 pub mod runtime;
 pub mod sync;

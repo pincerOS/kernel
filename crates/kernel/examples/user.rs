@@ -6,7 +6,8 @@ extern crate kernel;
 
 use alloc::sync::Arc;
 use core::arch::asm;
-use event::{context, process::Process, task, thread};
+use event::{context, task, thread};
+use kernel::process::Process;
 use kernel::sync::SpinLock;
 use kernel::*;
 

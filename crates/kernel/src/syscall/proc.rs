@@ -5,7 +5,7 @@ use core::mem::MaybeUninit;
 use core::ptr::copy_nonoverlapping;
 
 use crate::event::context::{deschedule_thread, Context, DescheduleAction, CORES};
-use crate::event::process::Process;
+use crate::process::Process;
 use crate::sync::SpinLock;
 use crate::{event, event::thread, shutdown};
 

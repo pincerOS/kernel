@@ -1,5 +1,5 @@
 use super::context::{context_switch, Context, SwitchAction, CORES};
-use super::process::Process;
+use crate::process::Process;
 use super::{Event, SCHEDULER};
 use crate::sync::SpinLock;
 use alloc::boxed::Box;
