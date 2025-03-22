@@ -9,8 +9,9 @@ pub struct Stdout;
 
 impl core::fmt::Write for Stdout {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        let _res = unsafe { sys::pwrite_all(1, s.as_bytes(), 0) };
-        Ok(())
+        sys::pwrite_all(1, s.as_bytes(), 0)
+            .map(|_| ())
+            .map_err(|_| core::fmt::Error)
     }
 }
 
