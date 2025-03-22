@@ -6,7 +6,6 @@ extern crate kernel;
 
 use kernel::device::system_timer::micro_delay;
 use kernel::device::usb::device::hid::keyboard::Key;
-use kernel::event::thread;
 use kernel::*;
 
 #[no_mangle]
@@ -21,7 +20,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         micro_delay(10000);
         for key in new_list.iter() {
             if !list.contains(key) {
-                if unsafe { *key } == Key::Return {
+                if *key == Key::Return {
                     println!();
                 } else {
                     print!("{:?} ", key);

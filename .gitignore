@@ -6,5 +6,5 @@ kernel.elf
 .idea
 .DS_Store
 *.tmp.*
-*.img
+net0.pcap*.img
 .llvmbox

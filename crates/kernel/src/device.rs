@@ -187,9 +187,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
             timer.intialize_timer();
         });
 
-        unsafe {
-            system_timer::TIMER_SCHEDULER.intialize_timer();
-        }
+        system_timer::TIMER_SCHEDULER.lock().intialize_timer();
         // gic::GIC.get().register_isr(30, system_timer::timer_scheduler_handler);
     }
 
