@@ -104,14 +104,7 @@ pub fn UsbBulkMessage(
         }
     }
 
-    let result = HcdSubmitBulkMessage(
-        device,
-        channel,
-        pipe,
-        buffer,
-        buffer_length,
-        packet_id,
-    );
+    let result = HcdSubmitBulkMessage(device, channel, pipe, buffer, buffer_length, packet_id);
 
     if result != ResultCode::OK {
         println!("| USBD: Failed to send bulk message: {:?}", result);
@@ -130,14 +123,7 @@ pub fn UsbInterruptMessage(
     packet_id: PacketId,
     _timeout_: u32,
 ) -> ResultCode {
-    let result = HcdSubmitInterruptMessage(
-        device,
-        channel,
-        pipe,
-        buffer,
-        buffer_length,
-        packet_id,
-    );
+    let result = HcdSubmitInterruptMessage(device, channel, pipe, buffer, buffer_length, packet_id);
 
     if result != ResultCode::OK {
         println!("| USBD: Failed to send interrupt message: {:?}", result);
@@ -388,7 +374,7 @@ fn UsbSetConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
 }
 
 fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
-    let configuration_val ;
+    let configuration_val;
     if device.status != UsbDeviceStatus::Addressed {
         println!("| USBD: Device not in addressed state");
         return ResultCode::ErrorDevice;

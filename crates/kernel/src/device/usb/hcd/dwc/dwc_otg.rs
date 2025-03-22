@@ -851,7 +851,7 @@ pub fn HcdSubmitBulkMessage(
             device.error = UsbTransferError::NoError;
             println!("HCD: No Acknowledge on interrupt transfer.\n");
             shutdown(); //TODO: This shouldn't run
-            // return ResultCode::OK;
+                        // return ResultCode::OK;
         }
         return result;
     }
@@ -1238,7 +1238,7 @@ fn HcdReceiveFifoFlush() -> ResultCode {
 }
 
 pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
-    let dwc_sc: &mut dwc_hub = &mut *bus.dwc_sc ;
+    let dwc_sc: &mut dwc_hub = &mut *bus.dwc_sc;
 
     unsafe {
         let dma_address = 0x2FF0000;

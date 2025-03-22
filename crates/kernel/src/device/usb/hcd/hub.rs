@@ -1,7 +1,7 @@
 /******************************************************************************
 *	device/hub.h
 *	 by Alex Chadwick
-* 
+*
 *   Converted to Rust by Aaron Lo
 *
 *

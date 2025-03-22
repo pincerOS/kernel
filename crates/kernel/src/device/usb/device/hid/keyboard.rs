@@ -1,10 +1,9 @@
 /**
- * 
- * device/hid/keyboard.rs 
+ *
+ * device/hid/keyboard.rs
  *  By Aaron Lo
  *   
  */
-
 use crate::SpinLock;
 use alloc::vec;
 use alloc::vec::Vec;

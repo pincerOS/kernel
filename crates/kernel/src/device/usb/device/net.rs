@@ -1,10 +1,9 @@
 /**
- * 
- * usb/device/net.rs 
+ *
+ * usb/device/net.rs
  *  By Aaron Lo
  *   
  */
-
 use super::super::usbd::descriptors::*;
 use super::super::usbd::device::*;
 

@@ -1,13 +1,11 @@
 /**
- * 
- * usb/device/rndis.rs 
+ *
+ * usb/device/rndis.rs
  *  By Aaron Lo
  *   
  */
-
 //RNDIS protocol implementation
 //Based off of https://learn.microsoft.com/en-us/windows-hardware/drivers/network/remote-ndis-communication
-
 use crate::device::usb::types::*;
 use crate::device::usb::usbd::device::*;
 use crate::device::usb::usbd::pipe::*;

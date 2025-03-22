@@ -1,14 +1,11 @@
 /**
- * 
- * usbd/endpoint.rs 
+ *
+ * usbd/endpoint.rs
  *  By Aaron Lo
  *   
  *   This file contains implemenation for USB endpoints
- * 
+ *
  */
-
-
-
 use super::super::types::*;
 use super::device::*;
 use super::pipe::*;

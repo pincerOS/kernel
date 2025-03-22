@@ -4,7 +4,7 @@
 *
 *	A light weight implementation of the USB protocol stack fit for a simple
 *	driver.
-* 
+*
 *   Converted to Rust by Aaron Lo
 *
 *	configuration.c contains code to load all components. In order to
