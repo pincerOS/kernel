@@ -7,6 +7,7 @@ pub mod gpio;
 pub mod mailbox;
 pub mod rng;
 pub mod system_timer;
+pub mod usb;
 pub mod watchdog;
 
 use alloc::boxed::Box;
@@ -181,6 +182,13 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         unsafe { system_timer::initialize_system_timer(timer_base) };
         let time = system_timer::get_time();
         println!("| timer initialized, time: {time}");
+
+        system_timer::ARM_GENERIC_TIMERS.with_current(|timer| {
+            timer.intialize_timer();
+        });
+
+        system_timer::TIMER_SCHEDULER.lock().intialize_timer();
+        // gic::GIC.get().register_isr(30, system_timer::timer_scheduler_handler);
     }
 
     {
@@ -197,11 +205,29 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         println!("| initialized GPIO");
     }
 
+    {
+        println!("| Initializing USB");
+        let usb = discover_compatible(tree, b"brcm,bcm2708-usb")
+            .unwrap()
+            .next()
+            .unwrap();
+
+        let (usb_addr, _) = find_device_addr(usb).unwrap().unwrap();
+        let usb_base = unsafe { map_device_block(usb_addr, 0x13000) }.as_ptr(); ////TODO: Get actual size
+
+        let _bus = usb::usb_init(usb_base);
+
+        // usb::usb_check_for_change(&mut bus);
+    }
+
     // Set up the interrupt controllers to preempt on the arm generic
     // timer interrupt.
     if gic::GIC.is_initialized() {
         init_fns.push(Box::new(|| {
-            gic::GIC.get().register_isr(30, timer_handler);
+            // gic::GIC.get().register_isr(30, timer_handler);
+            gic::GIC
+                .get()
+                .register_isr(30, system_timer::timer_scheduler_handler);
         }));
     } else {
         let irq = bcm2836_intc::LOCAL_INTC.get();
@@ -214,11 +240,12 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         }));
     }
 
+    //TODO: temporarily disable the preemption timer
     init_fns.push(Box::new(|| {
         // Run the generic timer at a 1ms interval for preemption
         system_timer::ARM_GENERIC_TIMERS.with_current(|timer| {
             timer.intialize_timer();
-            timer.set_timer_milliseconds(1);
+            // timer.set_timer_milliseconds(1);
         });
     }));
 
