@@ -22,9 +22,9 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     let (_stdio, mut stdin_tx, mut stdout_rx) = {
         let (stdin_tx, stdin_rx) = ringbuffer::channel();
         let (stdout_tx, stdout_rx) = ringbuffer::channel();
-        let stdio_chan = syscall::channel::alloc_obj(syscall::channel::Object::Channel {
-            send: stdout_tx,
-            recv: stdin_rx,
+        let stdio_chan = Arc::new(syscall::channel::Channel {
+            send: sync::SpinLock::new(stdout_tx),
+            recv: sync::SpinLock::new(stdin_rx),
         });
         (stdio_chan, stdin_tx, stdout_rx)
     };

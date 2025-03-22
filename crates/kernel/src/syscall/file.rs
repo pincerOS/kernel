@@ -47,7 +47,7 @@ pub unsafe fn sys_close(ctx: &mut Context) -> *mut Context {
     let proc = current_process().unwrap();
 
     let mut guard = proc.file_descriptors.lock();
-    if let Some(desc) = guard.close(fd) {
+    if let Some(desc) = guard.remove(fd) {
         // TODO: we should be careful about where/when fd destructors are run
         drop(desc);
 
