@@ -76,7 +76,11 @@ unsafe impl Sync for AllCores {}
 #[repr(C)]
 pub struct Context {
     pub regs: [usize; 31],
-    pub sp: usize,
+    /// Note: don't use this, use a helper method on HandlerContext
+    /// or an equivalent.  (This will always resolve to the kernel sp,
+    /// even for user threads.)
+    #[deprecated = "Don't use the context sp directly; use get_sp/set_sp"]
+    pub kernel_sp: usize,
     pub link_reg: usize,
     pub spsr: usize,
 }

@@ -69,7 +69,11 @@ where
     // TODO: ensure preemption/interrupts disabled before this point
     let thread = CORES.with_current(|core| core.thread.take());
     let mut thread = thread.expect("usermode syscall without active thread");
-    thread.last_context = ctx.into();
+    let mut ctx = core::ptr::NonNull::from(ctx);
+    thread.last_context = ctx;
+
+    // TODO: only save user regs if the handler accesses them?
+    unsafe { thread.save_user_regs() };
 
     // TODO: avoid allocating in the syscall handler?
     let mut future = new_handler_future(thread, handler);
@@ -86,8 +90,15 @@ where
             task::TASKS.remove_task(task_id);
 
             let thread = unsafe { &mut *future.data.thread.get() }.take().unwrap();
+
+            if future.data.user_regs_changed.get() {
+                if let Some(regs) = &thread.user_regs {
+                    unsafe { thread::Thread::restore_user_regs(regs, ctx.as_mut()) };
+                }
+            }
+
             CORES.with_current(|core| core.thread.set(Some(thread)));
-            ctx
+            ctx.as_ptr()
         }
         Poll::Pending => {
             future.data.in_handler.set(false);
@@ -97,12 +108,12 @@ where
                 CORES.with_current(|core| core.thread.set(Some(thread)));
 
                 // Return back to the user context
-                ctx
+                ctx.as_ptr()
             } else {
                 // The handler yielded; suspend the current thread, and set
                 // up the future to reschedule the thread when it finishes.
                 let thread = unsafe { &mut *future.data.thread.get() }.as_mut().unwrap();
-                unsafe { thread.save_context(ctx.into(), thread.is_kernel_thread()) };
+                unsafe { thread.save_context(ctx, thread.is_kernel_thread()) };
 
                 let woken = task::TASKS.return_task(task_id, task::Task::new(future));
                 if woken {
@@ -119,6 +130,7 @@ where
 struct OuterData {
     in_handler: core::cell::Cell<bool>,
     suspend_thread: core::cell::Cell<bool>,
+    user_regs_changed: core::cell::Cell<bool>,
     thread: core::cell::UnsafeCell<Option<Box<thread::Thread>>>,
 }
 
@@ -163,6 +175,21 @@ impl<'outer> HandlerContext<'outer> {
             inner: unsafe { thread.last_context.as_mut() },
             marker: core::marker::PhantomData,
         }
+    }
+
+    pub fn set_sp(&mut self, sp: usize) {
+        let thread = self.cur_thread_mut().as_mut().unwrap();
+        thread::Thread::set_sp(
+            &mut thread.user_regs,
+            unsafe { thread.last_context.as_mut() },
+            sp,
+        );
+        self.outer_data.user_regs_changed.set(true);
+    }
+
+    pub fn get_sp(&self) -> usize {
+        let thread = self.cur_thread();
+        thread::Thread::get_sp(&thread.user_regs, unsafe { thread.last_context.as_ref() })
     }
 
     fn enable_user_vmem(&self) {
@@ -265,6 +292,7 @@ where
             thread: core::cell::UnsafeCell::new(Some(thread)),
             in_handler: core::cell::Cell::new(true),
             suspend_thread: core::cell::Cell::new(true),
+            user_regs_changed: core::cell::Cell::new(false),
         },
     });
 

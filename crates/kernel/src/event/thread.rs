@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use core::arch::asm;
 use core::ptr::NonNull;
 
 use crate::process::ProcessRef;
@@ -58,9 +59,10 @@ impl Thread {
     /// Create a new user thread with the given stack pointer, initial
     /// program counter, and initial page table (`ttbr0`).
     pub unsafe fn new_user(process: ProcessRef, sp: usize, entry: usize) -> Box<Self> {
+        #[allow(deprecated)]
         let data = Context {
             regs: [0; 31],
-            sp: 0,
+            kernel_sp: 0,
             link_reg: entry,
             spsr: 0b0000, // Run in EL0
         };
@@ -98,9 +100,10 @@ impl Thread {
         let context = unsafe { end.cast::<Context>().sub(1) };
         assert!(context.is_aligned());
 
+        #[allow(deprecated)]
         let data = Context {
             regs: [0; 31],
-            sp: end.as_ptr() as usize,
+            kernel_sp: end.as_ptr() as usize,
             link_reg: init_thread as usize,
             spsr: 0b0101, // Stay in EL1, using the EL1 sp
         };
@@ -123,6 +126,21 @@ impl Thread {
         !self.is_kernel_thread()
     }
 
+    pub fn set_sp(user_regs: &mut Option<UserRegs>, ctx: &mut Context, sp: usize) {
+        #[allow(deprecated)]
+        match user_regs {
+            Some(user) if user.usermode => user.sp_el0 = sp,
+            Some(_) | None => ctx.kernel_sp = sp,
+        }
+    }
+    pub fn get_sp(user_regs: &Option<UserRegs>, ctx: &Context) -> usize {
+        #[allow(deprecated)]
+        match user_regs {
+            Some(user) if user.usermode => user.sp_el0,
+            Some(_) | None => ctx.kernel_sp,
+        }
+    }
+
     /// Save the given register context into the thread's state.
     ///
     /// `stable` indicates whether `context` points to a stable location
@@ -143,10 +161,7 @@ impl Thread {
     /// If this is a user thread, it saves the *current* values of
     /// `TTBR0_EL1` and `SP_EL0` into the user's stack.
     pub unsafe fn save_context(&mut self, context: NonNull<Context>, stable: bool) {
-        if let Some(user) = &mut self.user_regs {
-            unsafe { core::arch::asm!("mrs {}, TTBR0_EL1", out(reg) user.ttbr0_el1) };
-            unsafe { core::arch::asm!("mrs {}, SP_EL0", out(reg) user.sp_el0) };
-        }
+        unsafe { self.save_user_regs() };
 
         if stable {
             // context is on the allocated stack in the heap, not the per-core
@@ -172,26 +187,7 @@ impl Thread {
 
         if let Some(user) = &self.user_regs {
             let ctx = unsafe { &mut *next_ctx };
-
-            // TODO: proper tlb flush stuff for switching address spaces
-            unsafe {
-                core::arch::asm!(
-                    "msr TTBR0_EL1, {0}",
-                    "dsb sy",
-                    "tlbi vmalle1is",
-                    "dsb sy",
-                    in(reg) user.ttbr0_el1
-                )
-            };
-
-            // TODO: assert that we aren't running on SP_EL0 already...
-            // (kernel threads should probably run in EL1/SP_EL0 mode)
-            unsafe { core::arch::asm!("msr SP_EL0, {}", in(reg) user.sp_el0) };
-
-            if user.usermode {
-                let core_sp = CORES.with_current(|core| core.core_sp.get());
-                ctx.sp = core_sp;
-            }
+            unsafe { Self::restore_user_regs(user, ctx) };
         }
 
         let old = CORES.with_current(|core| core.thread.replace(Some(self)));
@@ -200,6 +196,45 @@ impl Thread {
         // switch into the thread
         unsafe { super::context::restore_context(next_ctx) };
         // unreachable
+    }
+
+    pub unsafe fn save_user_regs(&mut self) {
+        if let Some(user) = &mut self.user_regs {
+            unsafe { core::arch::asm!("mrs {}, TTBR0_EL1", out(reg) user.ttbr0_el1) };
+            unsafe { core::arch::asm!("mrs {}, SP_EL0", out(reg) user.sp_el0) };
+        }
+    }
+
+    pub unsafe fn restore_user_regs(user: &UserRegs, ctx: &mut Context) {
+        // TODO: proper tlb flush stuff for switching address spaces
+
+        let cur_ttbr0: usize;
+        unsafe { asm!("mrs {0}, TTBR0_EL1", out(reg) cur_ttbr0) };
+
+        // If the page table has changed, switch back to this thread's
+        // address space.
+        if cur_ttbr0 != user.ttbr0_el1 {
+            unsafe {
+                asm!(
+                    "msr TTBR0_EL1, {0}",
+                    "isb",
+                    "dsb sy",
+                    "tlbi vmalle1is",
+                    "dsb sy",
+                    in(reg) user.ttbr0_el1,
+                );
+            }
+        }
+
+        // TODO: assert that we aren't running on SP_EL0 already...
+        // (kernel threads should probably run in EL1/SP_EL0 mode)
+        unsafe { core::arch::asm!("msr SP_EL0, {}", in(reg) user.sp_el0) };
+
+        #[allow(deprecated)]
+        if user.usermode {
+            let core_sp = CORES.with_current(|core| core.core_sp.get());
+            ctx.kernel_sp = core_sp;
+        }
     }
 }
 

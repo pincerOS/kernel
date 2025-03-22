@@ -119,19 +119,13 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
         {
             let mut regs = context.regs();
             regs.regs = [0; 31];
-            regs.sp = 0;
             regs.link_reg = user_entry as usize;
             regs.spsr = 0b0000; // TODO: standardize initial SPSR values
         }
-        let thread = context.cur_thread_mut().as_mut().unwrap();
-        let user = thread.user_regs.as_mut().unwrap();
-        user.sp_el0 = user_sp;
+        context.set_sp(user_sp);
 
         // TODO: initial stack setup
         // (argc, argv, envp, auxv)
-
-        // TODO: debug why this causes a data abort if it never yields
-        crate::event::task::yield_future().await;
 
         context.resume_final()
     })

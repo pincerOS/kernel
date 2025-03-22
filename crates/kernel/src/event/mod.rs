@@ -84,12 +84,14 @@ pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
     if ctx.current_el() == context::ExceptionLevel::EL1 {
         let stacks = &raw const crate::arch::boot::STACKS;
         let ptr_range = stacks as usize..stacks.wrapping_add(1) as usize;
+        #[allow(deprecated)]
+        let kernel_sp = ctx.kernel_sp;
         assert!(
-            !ptr_range.contains(&ctx.sp),
+            !ptr_range.contains(&kernel_sp),
             "Attempted to preempt core on kernel stack; kernel-thread: {:?}, el: {:?}, sp: {:?}",
             thread.is_kernel_thread(),
             ctx.current_el(),
-            ctx.sp
+            kernel_sp
         );
     }
 
