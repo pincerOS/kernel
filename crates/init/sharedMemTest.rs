@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 #![doc = r##"<!-- Absolutely cursed hacks:
-SOURCE="$0" NAME=$(basename "$0" .rs) DIR=$(realpath $(dirname "$0"))
-exec "$(dirname "$0")/../ulib/compile.sh" "$0" <<END_MANIFEST
+NAME="$(basename "$0" .rs)"
+DIR=$(cd "$(dirname "$0")" && pwd -P)
+ULIB_DIR="$(git rev-parse --show-toplevel)/crates/ulib"
+exec "$ULIB_DIR/compile.sh" "$0" <<END_MANIFEST
 [package]
 name = "$NAME"
 version = "0.1.0"
@@ -12,7 +14,7 @@ name = "$NAME"
 path = "$DIR/$NAME.rs"
 
 [dependencies]
-ulib = { path = "$DIR/../ulib" }
+ulib = { path = "$ULIB_DIR" }
 
 [profile.standalone]
 inherits = "release"
