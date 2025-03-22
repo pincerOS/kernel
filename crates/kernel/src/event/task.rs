@@ -8,7 +8,7 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use super::SCHEDULER;
 use crate::sync::SpinLock;
 
-pub fn spawn_async(future: impl Future<Output = ()> + Send + Sync + 'static) {
+pub fn spawn_async(future: impl Future<Output = ()> + Send + 'static) {
     let task = TASKS.add_task(Task {
         future: Box::pin(future),
     });
@@ -18,11 +18,11 @@ pub fn spawn_async(future: impl Future<Output = ()> + Send + Sync + 'static) {
 pub static TASKS: TaskList = TaskList::new();
 
 pub struct Task {
-    future: Pin<Box<dyn Future<Output = ()> + Send + Sync>>,
+    future: Pin<Box<dyn Future<Output = ()> + Send>>,
 }
 
 impl Task {
-    pub fn new(future: Pin<Box<dyn Future<Output = ()> + Send + Sync>>) -> Self {
+    pub fn new(future: Pin<Box<dyn Future<Output = ()> + Send>>) -> Self {
         Task { future }
     }
     pub fn poll(&mut self, context: &mut Context) -> Poll<()> {

@@ -3,6 +3,9 @@ kernel.bin
 kernel.elf
 .gdb_history
 .vscode
+.idea
 .DS_Store
 *.tmp.*
 net0.pcap
+*.img
+.llvmbox

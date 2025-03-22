@@ -7,7 +7,7 @@ macro_rules! syscall {
             name = sym $ident,
             num = const $num,
         );
-        extern "C" {
+        unsafe extern "C" {
             $vis fn $ident( $($arg: $ty,)* ) $(-> $ret)?;
         }
     };
@@ -75,3 +75,51 @@ pub fn recv_block(desc: ChannelDesc, buf: &mut [u8]) -> Result<(usize, Message),
         Err(res)
     }
 }
+
+syscall!(10 => pub fn pread(fd: usize, buf: *mut u8, buf_len: usize, offset: u64) -> isize);
+syscall!(11 => pub fn pwrite(fd: usize, buf: *const u8, buf_len: usize, offset: u64) -> isize);
+syscall!(12 => pub fn close(fd: usize) -> isize);
+syscall!(13 => pub fn dup3(old_fd: usize, new_fd: usize, flags: usize) -> isize);
+syscall!(14 => pub fn pipe(flags: usize) -> PipeValues);
+
+#[repr(C)]
+pub struct PipeValues([isize; 2]);
+
+pub unsafe fn pwrite_all(fd: usize, buf: &[u8], offset: u64) -> isize {
+    let mut remaining = buf;
+    let mut written = 0;
+    while !remaining.is_empty() {
+        match unsafe { pwrite(fd, remaining.as_ptr(), remaining.len(), offset + written) } {
+            i @ (..=-1) => return i,
+            i @ (1..) => {
+                written += i as u64;
+                remaining = &remaining[i as usize..];
+            }
+            0 => return -1, // EOF
+        }
+    }
+    written as isize
+}
+
+syscall!(15 => pub fn openat(
+    dir_fd: usize,
+    path_len: usize,
+    path_ptr: *const u8,
+    flags: usize,
+    mode: usize,
+) -> isize);
+
+#[repr(C)]
+pub struct ArgStr {
+    len: usize,
+    ptr: *const u8,
+}
+
+syscall!(16 => pub fn execve_fd(
+    fd: usize,
+    flags: usize,
+    argc: usize,
+    argv: *const ArgStr,
+    envc: usize,
+    envp: *const ArgStr,
+) -> isize);

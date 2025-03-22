@@ -8,14 +8,16 @@ PROFILE=${PROFILE-"release"}
 
 # cargo clean
 cargo rustc --profile="${PROFILE}" --example="${EXAMPLE}" \
-    --target=${TARGET} -- \
+    --target="${TARGET}" -- \
     -C relocation-model=static
 
 if test "$PROFILE" = "dev" ; then
-    BINARY=../../target/${TARGET}/debug/examples/${EXAMPLE}
+    BINARY="../../target/${TARGET}/debug/examples/${EXAMPLE}"
 else
-    BINARY=../../target/${TARGET}/${PROFILE}/examples/${EXAMPLE}
+    BINARY="../../target/${TARGET}/${PROFILE}/examples/${EXAMPLE}"
 fi
 
 cp "${BINARY}" kernel.elf
-llvm-objcopy -O binary "${BINARY}" kernel.bin
+
+# equivalent to 'objcopy -I elf64-little -O binary "${BINARY}" init.bin'
+cargo dump-img "${BINARY}" kernel.bin

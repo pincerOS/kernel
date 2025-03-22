@@ -28,14 +28,9 @@ exit # -->"##]
 #[macro_use]
 extern crate ulib;
 
-use ulib::sys::{recv_block, send_block, ChannelDesc, Message};
-
 fn try_read_stdin(buf: &mut [u8]) -> isize {
-    let chan = ChannelDesc(1);
-    match recv_block(chan, buf) {
-        Ok((i, _)) => i as isize,
-        Err(i) => i,
-    }
+    let stdin_fd = 0;
+    unsafe { ulib::sys::pread(stdin_fd, buf.as_mut_ptr(), buf.len(), 0) }
 }
 
 struct LineReader {
@@ -84,18 +79,105 @@ fn readline(reader: &mut LineReader) -> Result<&[u8], isize> {
 }
 
 #[no_mangle]
-fn main(chan: ChannelDesc) {
+fn main(_chan: ulib::sys::ChannelDesc) {
     println!("Starting 🐚");
 
-    let mut buf = [0; 1024];
-    let (len, msg) = recv_block(chan, &mut buf).unwrap();
-    let data = &buf[..len];
+    let root = 3;
+    let path = "test.txt";
+    let fd = unsafe { ulib::sys::openat(root, path.len(), path.as_bytes().as_ptr(), 0, 0) };
+
+    println!("File: {}", fd);
+
+    let mut data = [0; 4096];
+
+    let mut read = 0;
+    while read < data.len() {
+        match unsafe {
+            ulib::sys::pread(
+                fd as usize,
+                data[read..].as_mut_ptr(),
+                data[read..].len(),
+                read as u64,
+            )
+        } {
+            (..=-1) => break,
+            i @ (1..) => read += i as usize,
+            0 => break,
+        }
+    }
 
     println!(
-        "Received message from parent; tag {:#x}, data {:?}",
-        msg.tag,
-        core::str::from_utf8(data).unwrap()
+        "File content: ======\n{}\n====================",
+        core::str::from_utf8(&data[..read]).unwrap()
     );
+
+    let stdout = 1;
+    let buf = b"Stdout write test\n";
+    unsafe { ulib::sys::pwrite_all(stdout, buf, 0) };
+
+    println!("Dir: {}", root);
+
+    let mut cookie = 0;
+    let mut data_backing = [0u64; 8192 / 8];
+    let data = cast_slice(&mut data_backing);
+
+    fn cast_slice<'a>(s: &'a mut [u64]) -> &'a mut [u8] {
+        unsafe {
+            core::slice::from_raw_parts_mut(s.as_mut_ptr().cast::<u8>(), s.len() * size_of::<u64>())
+        }
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone, Debug)]
+    pub struct DirEntry {
+        pub inode: u64,
+        pub next_entry_cookie: u64,
+        pub rec_len: u16,
+        pub name_len: u16,
+        pub file_type: u8,
+        pub name: [u8; 3],
+        // Name is an arbitrary size array; the record is always padded with
+        // 0 bytes such that rec_len is a multiple of 8 bytes.
+    }
+
+    loop {
+        println!("reading dir with cookie {}", cookie);
+        match unsafe { ulib::sys::pread(root, data.as_mut_ptr(), data.len(), cookie) } {
+            (..=-1) => break,
+            len @ (1..) => {
+                println!("read {} bytes", len);
+                let mut i = 0;
+                while i < len as usize {
+                    let slice = &data[i..];
+                    assert!(slice.len() >= size_of::<DirEntry>());
+                    let entry = unsafe { *slice.as_ptr().cast::<DirEntry>() };
+                    println!("Entry: {:#?}", entry);
+                    let name =
+                        &slice[core::mem::offset_of!(DirEntry, name)..][..entry.name_len as usize];
+                    println!("Name: {}", core::str::from_utf8(name).unwrap());
+                    i += entry.rec_len as usize;
+                    cookie = entry.next_entry_cookie;
+                }
+                if cookie == 0 {
+                    break;
+                }
+            }
+            0 => {
+                println!("read 0 bytes, exiting");
+                break;
+            }
+        }
+    }
+
+    // let mut buf = [0; 1024];
+    // let (len, msg) = recv_block(chan, &mut buf).unwrap();
+    // let data = &buf[..len];
+
+    // println!(
+    //     "Received message from parent; tag {:#x}, data {:?}",
+    //     msg.tag,
+    //     core::str::from_utf8(data).unwrap()
+    // );
 
     let mut reader = LineReader {
         buf: [0; 4096],
@@ -120,11 +202,13 @@ fn main(chan: ChannelDesc) {
             continue;
         }
 
-        let msg = Message {
-            tag: 0xAAAAAAAA,
-            objects: [0; 4],
-        };
-        send_block(chan, &msg, line.as_bytes());
+        println!("Got line: {}", line);
+
+        // let msg = Message {
+        //     tag: 0xAAAAAAAA,
+        //     objects: [0; 4],
+        // };
+        // send_block(chan, &msg, line.as_bytes());
 
         for _ in 0..100 {
             // TODO: this is a hack to prevent concurrent access to stdout...
