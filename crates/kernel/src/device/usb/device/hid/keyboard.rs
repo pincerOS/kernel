@@ -1,23 +1,20 @@
+/**
+ * 
+ * device/hid/keyboard.rs 
+ *  By Aaron Lo
+ *   
+ */
 
-use super::super::super::usbd::device::*;
-use super::super::super::usbd::descriptors::*;
-use super::super::super::usbd::usbd::*;
-
-use alloc::vec::Vec;
+use crate::SpinLock;
 use alloc::vec;
-use alloc::boxed::Box;
-use crate::device::system_timer::micro_delay;
-use crate::device::usb::types::*;
-use crate::device::usb::hcd::hub::*;
-use crate::device::usb::usbd::pipe::*;
-use crate::device::usb::usbd::request::*;
+use alloc::vec::Vec;
 
-pub static mut KeyboardBuffer: Vec<Key> = vec![];
+pub static KeyboardBuffer: SpinLock<Vec<Key>> = SpinLock::new(Vec::new());
 
-pub fn KeyboardAnalyze(buffer: *mut u8, buffer_length: u32) {
+pub fn KeyboardAnalyze(buffer: *mut u8, _buffer_length: u32) {
     let mut keys = ModifierToKeys(unsafe { *buffer });
 
-    //the second byte is alwasy 0
+    //the second byte is always 0
     for i in 2..8 {
         let key = ByteToKey(unsafe { *buffer.offset(i as isize) });
         if !matches!(key, Key::NotDefined) {
@@ -25,8 +22,8 @@ pub fn KeyboardAnalyze(buffer: *mut u8, buffer_length: u32) {
         }
     }
 
-    unsafe { KeyboardBuffer = keys };
-    // println!("hi");
+    *KeyboardBuffer.lock() = keys;
+    // unsafe { KeyboardBuffer = keys };
 }
 
 pub fn ModifierToKeys(byte: u8) -> Vec<Key> {
@@ -56,11 +53,10 @@ pub fn ModifierToKeys(byte: u8) -> Vec<Key> {
         keys.push(Key::RightGui);
     }
     return keys;
-    
 }
 
 //Table is here: https://github.com/tmk/tmk_keyboard/wiki/USB%3A-HID-Usage-Table
-pub fn ByteToKey(byte: u8) -> Key{
+pub fn ByteToKey(byte: u8) -> Key {
     match byte {
         0x04 => Key::A,
         0x05 => Key::B,

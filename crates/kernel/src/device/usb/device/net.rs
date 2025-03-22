@@ -1,23 +1,19 @@
+/**
+ * 
+ * usb/device/net.rs 
+ *  By Aaron Lo
+ *   
+ */
 
-use super::super::usbd::device::*;
 use super::super::usbd::descriptors::*;
-use super::super::usbd::usbd::*;
+use super::super::usbd::device::*;
 
-use alloc::vec;
-use alloc::boxed::Box;
-use crate::device::system_timer::micro_delay;
-use crate::device::usb::hcd::dwc::dwc_otg::read_volatile;
-use crate::device::usb::hcd::dwc::dwc_otgreg::*;
 use crate::device::usb::types::*;
-use crate::device::usb::hcd::hub::*;
-use crate::device::usb::device::hid::keyboard::*;
 use crate::device::usb::usbd::endpoint::register_interrupt_endpoint;
 use crate::device::usb::usbd::endpoint::*;
-use crate::device::usb::usbd::pipe::*;
 use crate::device::usb::usbd::request::*;
-use crate::device::usb::hcd::dwc::roothub::*;
-use crate::device::usb::*;
 use crate::shutdown;
+use alloc::boxed::Box;
 
 use super::rndis::*;
 
@@ -27,49 +23,77 @@ pub static mut NET_DEVICE: NetDevice = NetDevice {
 };
 
 pub fn NetLoad(bus: &mut UsbBus) {
-    bus.interface_class_attach[InterfaceClass::InterfaceClassCommunications as usize] = Some(NetAttach);
+    bus.interface_class_attach[InterfaceClass::InterfaceClassCommunications as usize] =
+        Some(NetAttach);
 }
 
-
 pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
+    println!(
+        "| Net: Subclass: {:x}, Protocol: {:x}",
+        device.interfaces[interface_number as usize].subclass,
+        device.interfaces[interface_number as usize].protocol
+    );
 
-    println!("| Net: Subclass: {:x}, Protocol: {:x}", device.interfaces[interface_number as usize].subclass, device.interfaces[interface_number as usize].protocol);
-    
     rndis_initialize_msg(device);
 
     let mut buffer = [0u8; 52];
-    rndis_query_msg(device, OID::OID_GEN_CURRENT_PACKET_FILTER, buffer.as_mut_ptr(), 30);
+    rndis_query_msg(
+        device,
+        OID::OID_GEN_CURRENT_PACKET_FILTER,
+        buffer.as_mut_ptr(),
+        30,
+    );
 
     rndis_set_msg(device, OID::OID_GEN_CURRENT_PACKET_FILTER, 0xB);
 
-    rndis_query_msg(device, OID::OID_GEN_CURRENT_PACKET_FILTER, buffer.as_mut_ptr(), 30);
+    rndis_query_msg(
+        device,
+        OID::OID_GEN_CURRENT_PACKET_FILTER,
+        buffer.as_mut_ptr(),
+        30,
+    );
     // shutdown();
     let boxed = Box::new(UsbEndpointDevice::new());
     let boxed_bytes = Box::into_raw(boxed);
-    let byte_slice = unsafe { core::slice::from_raw_parts_mut(boxed_bytes as *mut u8, size_of::<UsbEndpointDevice>()) };
+    let byte_slice = unsafe {
+        core::slice::from_raw_parts_mut(boxed_bytes as *mut u8, size_of::<UsbEndpointDevice>())
+    };
     let byte_bytes = unsafe { Box::from_raw(byte_slice as *mut [u8]) };
     //TODO: I have no clue what I'm doing
     device.driver_data = Some(byte_bytes);
 
-    let mut endpoint_device = unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut UsbEndpointDevice) };
+    let endpoint_device = unsafe {
+        &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut UsbEndpointDevice)
+    };
     endpoint_device.endpoints[0] = Some(NetAnalyze);
     endpoint_device.endpoints[1] = Some(NetSend);
     endpoint_device.endpoints[2] = Some(NetReceive);
 
-
     // println!("Device interface number: {:?}", device.interface_number);
-    println!("Device interface number: {:?}", device.endpoints[interface_number as usize][0 as usize].endpoint_address);
-    println!("Device endpoint interval: {:?}", device.endpoints[interface_number as usize][0 as usize].interval);    
+    println!(
+        "Device interface number: {:?}",
+        device.endpoints[interface_number as usize][0 as usize].endpoint_address
+    );
+    println!(
+        "Device endpoint interval: {:?}",
+        device.endpoints[interface_number as usize][0 as usize].interval
+    );
 
     register_interrupt_endpoint(
         device,
         2,
-        device.endpoints[interface_number as usize][0 as usize].interval as u32, 
-        endpoint_address_to_num(device.endpoints[interface_number as usize][0 as usize].endpoint_address), 
-        UsbDirection::In, 
-        size_from_number(device.endpoints[interface_number as usize][0 as usize].packet.MaxSize as u32),
+        device.endpoints[interface_number as usize][0 as usize].interval as u32,
+        endpoint_address_to_num(
+            device.endpoints[interface_number as usize][0 as usize].endpoint_address,
+        ),
+        UsbDirection::In,
+        size_from_number(
+            device.endpoints[interface_number as usize][0 as usize]
+                .packet
+                .MaxSize as u32,
+        ),
         0,
-        10
+        10,
     );
 
     let mut buffer = [0u8; 64];
@@ -87,9 +111,8 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     buffer[14..18].copy_from_slice(&[0x45, 0x00, 0x00, 0x28]); // IPv4 Header
     buffer[18..22].copy_from_slice(&[0x00, 0x00, 0x40, 0x00]); // Identification & Flags
     buffer[22..26].copy_from_slice(&[0x40, 0x11, 0xB7, 0xC8]); // TTL, Protocol (UDP), Checksum
-    buffer[26..30].copy_from_slice(&[192, 168, 1, 1]);          // Source IP: 192.168.1.1
-    buffer[30..34].copy_from_slice(&[192, 168, 1, 2]);          // Destination IP: 192.168.1.2
-
+    buffer[26..30].copy_from_slice(&[192, 168, 1, 1]); // Source IP: 192.168.1.1
+    buffer[30..34].copy_from_slice(&[192, 168, 1, 2]); // Destination IP: 192.168.1.2
 
     // UDP Header (Example)
     buffer[34..36].copy_from_slice(&[0x1F, 0x90]); // Source Port (8080)
@@ -113,7 +136,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     return ResultCode::OK;
 }
 
-pub fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
+pub fn NetAnalyze(buffer: *mut u8, _buffer_length: u32) {
     let buffer32 = unsafe { core::slice::from_raw_parts(buffer, 32) };
 
     if buffer32[0] != 0 {
@@ -122,7 +145,7 @@ pub fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
     }
 }
 
-pub fn NetSend(buffer: *mut u8, buffer_length: u32) {
+pub fn NetSend(_buffer: *mut u8, _buffer_length: u32) {
     println!("| Net: Send should not be called");
     shutdown();
 }
@@ -167,7 +190,6 @@ pub struct NetDevice {
     pub device: Option<*mut UsbDevice>,
 }
 
-
 #[repr(u32)]
 #[derive(Default, Debug, Clone, Copy)]
 pub enum UsbDeviceRequestCDC {
@@ -182,12 +204,14 @@ pub enum UsbDeviceRequestCDC {
     SendBreak = 0x23,
 }
 
-pub const fn convert_usb_device_request_cdc(request: UsbDeviceRequestCDC) -> UsbDeviceRequestRequest {
+pub const fn convert_usb_device_request_cdc(
+    request: UsbDeviceRequestCDC,
+) -> UsbDeviceRequestRequest {
     match request {
         UsbDeviceRequestCDC::SendEncapsulatedCommand => UsbDeviceRequestRequest::GetStatus,
         UsbDeviceRequestCDC::GetEncapsulatedResponse => UsbDeviceRequestRequest::ClearFeature,
         UsbDeviceRequestCDC::SetCommFeature => UsbDeviceRequestRequest::GetIdle,
-        UsbDeviceRequestCDC::GetCommFeature => UsbDeviceRequestRequest::SetFeature, 
+        UsbDeviceRequestCDC::GetCommFeature => UsbDeviceRequestRequest::SetFeature,
         UsbDeviceRequestCDC::SetLineCoding => UsbDeviceRequestRequest::SetLineCoding,
         UsbDeviceRequestCDC::GetLineCoding => UsbDeviceRequestRequest::GetLineCoding,
         UsbDeviceRequestCDC::SetControlLineState => UsbDeviceRequestRequest::SetControlLineState,

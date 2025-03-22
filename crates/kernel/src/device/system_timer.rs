@@ -7,15 +7,14 @@
 //!
 //! Arm Generic Timer is implemented for each core to handle the timer interrupts, as the system timer is not functional in QEMU
 //!
+use super::usb::usbd::device::UsbDevice;
+use super::usb::usbd::endpoint::endpoint_descriptor;
 use crate::event::context::Context;
+use crate::sync::spin_sleep;
 use crate::sync::{ConstInit, PerCore, UnsafeInit, Volatile};
 use alloc::vec::Vec;
 use core::arch::asm;
-use core::cell::UnsafeCell;
 use core::panic;
-use crate::SpinLock;
-use super::usb::usbd::device::UsbDevice;
-use super::usb::usbd::endpoint::endpoint_descriptor;
 
 pub static SYSTEM_TIMER: UnsafeInit<Bcm2835SysTmr> = unsafe { UnsafeInit::uninit() };
 
@@ -30,10 +29,11 @@ pub fn get_time() -> u64 {
 }
 
 pub fn micro_delay(delay: u32) {
-    let stop = get_time() + delay as u64;
-    while get_time() < stop {
-        unsafe { asm!("nop") };
-    }
+    // let stop = get_time() + delay as u64;
+    // while get_time() < stop {
+    //     unsafe { asm!("nop") };
+    // }
+    spin_sleep(delay as usize);
 }
 
 pub unsafe fn initialize_system_timer(base: *mut ()) {
@@ -220,13 +220,14 @@ impl Bcm2835SysTmr {
 
 pub fn timer_scheduler_handler(_ctx: &mut Context) {
     let time = ARM_GENERIC_TIMERS.with_current(|timer| timer.get_time());
-    unsafe { 
-        let mut events = &mut TIMER_SCHEDULER.timer_events;
+    unsafe {
+        let events = &mut TIMER_SCHEDULER.timer_events;
         for event in events.iter_mut() {
             if event.timer_timer <= time {
                 (event.callback)(event.endpoint);
                 // println!("Timer time: {} cur time {} repeat time {} new time {}", event.timer_timer, time, (event.repeat_time as u64) * TIMER_SCHEDULER.timer_freq / 1000, time + (event.repeat_time as u64) * TIMER_SCHEDULER.timer_freq / 1000);
-                event.timer_timer = time + (event.repeat_time as u64) * TIMER_SCHEDULER.timer_freq / 1000;
+                event.timer_timer =
+                    time + (event.repeat_time as u64) * TIMER_SCHEDULER.timer_freq / 1000;
             }
         }
         TIMER_SCHEDULER.min_time = u64::MAX;
@@ -243,16 +244,11 @@ pub fn timer_scheduler_handler(_ctx: &mut Context) {
     }
 }
 
-pub fn timer_scheduler_add_timer_event(time: u32, callback: fn(endpoint_descriptor), endpoint: endpoint_descriptor) {
-    // let system_timer = get_time();
-    // let generic_timer = ARM_GENERIC_TIMERS.with_current(|timer| timer.get_time());
-    // micro_delay(10000);
-    
-    // let system_timer_end = get_time();
-    // let generic_timer_end = ARM_GENERIC_TIMERS.with_current(|timer| timer.get_time());
-    // let generic_freq = ARM_GENERIC_TIMERS.with_current(|timer| timer.freq);
-    // println!("System Timer: {} Generic Timer: {} Freq: {}", system_timer_end - system_timer, generic_timer_end - generic_timer, generic_freq);
-    // micro_delay(5000000);
+pub fn timer_scheduler_add_timer_event(
+    time: u32,
+    callback: fn(endpoint_descriptor),
+    endpoint: endpoint_descriptor,
+) {
     unsafe { TIMER_SCHEDULER.add_timer_event(time, callback, endpoint) };
 }
 
@@ -271,7 +267,12 @@ impl TimerScheduler {
     }
 
     //the time is the interval in milliseconds, callback is the function to call, device is the device that the timer is associated with
-    pub fn add_timer_event(&mut self, time: u32, callback: fn(endpoint_descriptor), endpoint: endpoint_descriptor) {
+    pub fn add_timer_event(
+        &mut self,
+        time: u32,
+        callback: fn(endpoint_descriptor),
+        endpoint: endpoint_descriptor,
+    ) {
         let cur_timer = ARM_GENERIC_TIMERS.with_current(|timer| timer.get_time());
         self.timer_events.push(TimerEvent {
             timer_timer: cur_timer + (time as u64) * self.timer_freq / 1000,
