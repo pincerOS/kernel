@@ -68,6 +68,10 @@ impl bcm2711_gpio_driver {
             driver.set_function(14, GpioFunction::Alt0); // UART TX
             driver.set_function(15, GpioFunction::Alt0); // UART RX
 
+            // Set PWM audio pins
+            driver.set_function(40, GpioFunction::Alt0); //pwm1
+            driver.set_function(41, GpioFunction::Alt0);
+
             // Add more defaults
         }
 
