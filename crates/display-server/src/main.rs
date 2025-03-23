@@ -141,7 +141,7 @@ use glam::{I16Vec2, U16Vec2};
 struct Window {
     pos: U16Vec2,
     size: U16Vec2,
-    resizable: bool,
+    _resizable: bool,
     client: Index,
 }
 
@@ -183,21 +183,22 @@ impl WindowManager {
     ) -> (Index, U16Vec2) {
         let size = pref_size.min(self.screen_dims).max(min_size);
 
-        if self
+        let overflow = self
             .default_pos
             .saturating_add(size)
-            .cmpgt(self.screen_dims)
-            .any()
-        {
-            self.default_pos = U16Vec2::ZERO;
+            .cmpgt(self.screen_dims);
+        if overflow.any() {
+            // self.default_pos = U16Vec2::ZERO;
+            let wrap = U16Vec2::new((!overflow.x) as u16, (!overflow.y) as u16);
+            self.default_pos = self.default_pos * wrap;
         }
         let pos = self.default_pos;
-        self.default_pos += U16Vec2::new(16, 16);
+        self.default_pos += U16Vec2::new(128, 128);
 
         let idx = self.windows.insert(Window {
             pos,
             size,
-            resizable: false,
+            _resizable: false,
             client: Index::DANGLING, // TODO
         });
         self.layering.push(idx);
@@ -315,6 +316,8 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
     let mut intermediate_fb = alloc::vec![0u128; fb.data.len()];
     let mut cursor = U16Vec2::new(0, 0);
 
+    let mut any_updated = true;
+
     loop {
         let mut buf = [0u64; 32];
         while let Ok((len, msg)) = recv_nonblock(server_socket, bytemuck::bytes_of_mut(&mut buf)) {
@@ -395,8 +398,6 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                 }
             }
         }
-
-        let mut any_updated = false;
 
         for (i, client) in clients.iter_mut() {
             let mut ev_limit = 10;
@@ -487,6 +488,7 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
         if any_updated || cursor_moved {
             framebuffer::present(&mut fb, &intermediate_fb);
         }
+        any_updated = false;
 
         if !to_remove.is_empty() {
             to_remove.sort_by(|a, b| a.cmp(b).reverse());

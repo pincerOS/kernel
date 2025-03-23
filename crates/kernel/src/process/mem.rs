@@ -144,8 +144,12 @@ impl UserAddrSpace {
             }
         }
 
-        let node = MemoryRangeNode { start, size, kind };
-        self.memory_range_map.insert(start, node);
+        let node = MemoryRangeNode {
+            start: start_addr,
+            size: size_pages,
+            kind,
+        };
+        self.memory_range_map.insert(start_addr, node);
         Ok(start_addr)
     }
 
