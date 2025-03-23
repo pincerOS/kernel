@@ -118,7 +118,8 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                         .unwrap()
                         .page_table
                         .lock()
-                        .reserve_memory_range(phdr.p_vaddr as usize, memsize, false)
+                        //TODO: update this when adding support for file mmaping
+                        .reserve_memory_range(phdr.p_vaddr as usize, memsize, u32::MAX, false)
                         .unwrap();
                     let addr = (phdr.p_vaddr as usize) as *mut u8;
                     let mapping: &mut [u8] =

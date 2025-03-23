@@ -11,11 +11,12 @@ pub mod fd;
 
 pub type ProcessRef = Arc<Process>;
 
+#[derive(Clone)]
 struct MemoryRangeNode {
     start: usize,
     size: usize, //Size of range
+    file_descriptor_index: Option<u32>,
     is_physical: bool, //used if mapping a specific paddr to a specific vaddr
-                 //TODO: add file descriptor here for lazy loading files
 }
 
 pub struct UserPageTable {
@@ -45,24 +46,25 @@ impl Process {
         let user_table_vaddr = (&*table as *const _ as *const ()).addr();
         let user_table_phys = crate::memory::physical_addr(user_table_vaddr).unwrap() as usize;
 
-        let page_table = UserPageTable {
+        let mut page_table = UserPageTable {
             table,
             phys_addr: user_table_phys,
             memory_range_map: BTreeMap::new(),
         };
-
+        
         Process {
             page_table: SpinLock::new(page_table),
             root: None,
             file_descriptors: SpinLock::new(FileDescriptorList { desc: Vec::new() }),
             exit_code: Arc::new(BlockingOnceCell::new()),
         }
+
     }
 
     pub fn get_ttbr0(&self) -> usize {
         self.page_table.lock().phys_addr
     }
-
+    
     pub fn fork(&self) -> Process {
         use core::arch::asm;
         use core::mem::MaybeUninit;
@@ -74,11 +76,13 @@ impl Process {
         let buf_ptr: *mut u8 = buffer.as_mut_ptr().cast();
 
         let new_process = Process::new();
-
+        
+        /*
         let dst_data = 0x20_0000 as *mut u8;
         let src_data = 0x20_0000 as *const u8;
         let src_size = 0x20_0000 * 7;
-
+        */
+        
         let old_page_dir = self.get_ttbr0();
         let new_page_dir = new_process.get_ttbr0();
 
@@ -89,7 +93,8 @@ impl Process {
                 asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) old_page_dir);
             }
         }
-
+        
+        /*
         for i in 0..(src_size / buf_size) {
             unsafe {
                 copy_nonoverlapping(src_data.byte_add(i * buf_size), buf_ptr, buf_size);
@@ -98,6 +103,38 @@ impl Process {
                 asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) old_page_dir);
             }
         }
+        */
+
+        // /*
+        //bad: locks other threads in the process from using this
+        for (range_start, node) in &self.page_table.lock().memory_range_map {
+
+            //this is mildly sus and will need to be changed
+            new_process.page_table.lock().reserve_memory_range(*range_start, node.size, match node.file_descriptor_index {
+                None => u32::MAX,
+                Some(idx) => idx,
+            }, *range_start != 0x200_000);
+
+            let mut copy_idx: usize = 0;
+            let copy_size = core::cmp::min(node.size, buf_size);
+            
+            let dst_data = *range_start as *mut u8;
+            let src_data = *range_start as *const u8;
+            
+            while copy_idx < node.size {
+                
+                unsafe {
+                    copy_nonoverlapping(src_data.byte_add(copy_idx), buf_ptr, copy_size);
+                    asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) new_page_dir);
+                    copy_nonoverlapping(buf_ptr, dst_data.byte_add(copy_idx), copy_size);
+                    asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) old_page_dir);
+                }
+
+                copy_idx += copy_size;
+            }
+
+        }
+        // */
 
         {
             let old_fds = self.file_descriptors.lock();
@@ -111,7 +148,7 @@ impl Process {
                 let _ = new_fds.set(idx, desc.clone());
             }
         }
-
+        
         new_process
     }
 }
@@ -167,6 +204,7 @@ impl UserPageTable {
         &mut self,
         mut start_addr: usize,
         req_size: usize,
+        fd_index: u32,
         fill_pages: bool, //fill the mmapped range with pages
     ) -> Result<usize, MappingError> {
         //aligning start_addr and size to page size
@@ -243,6 +281,7 @@ impl UserPageTable {
             MemoryRangeNode {
                 start: start_addr,
                 size: size,
+                file_descriptor_index: if fd_index == u32::MAX { None } else { Some(fd_index) },
                 is_physical: false,
             },
         );
@@ -266,6 +305,7 @@ impl UserPageTable {
 
     //Fills a mapped range with pages
     //It currently doesn't do any error checking
+    //This is going to be used until the page fault handler is ready
     pub fn populate_range(&mut self, mut start_addr: usize, req_size: usize) -> () {
         //aligning start_addr and size to page size
         start_addr = (start_addr / USER_PG_SZ) * USER_PG_SZ;
@@ -284,6 +324,28 @@ impl UserPageTable {
                     .unwrap();
             }
         }
+    }
+    
+    ///Maps a range of phsical addresses to a previously reserved range of virtual addresses
+    pub fn map_to_physical_range(&mut self, mut start_va: usize, mut start_pa: usize) -> Result<(), MappingError> {
+        
+        start_va = (start_va / USER_PG_SZ) * USER_PG_SZ;
+        start_pa = (start_pa / USER_PG_SZ) * USER_PG_SZ;
+
+        let size: usize;
+        match self.memory_range_map.get_mut(&start_va) {
+            Some(node) => {
+                size = node.size;
+                node.is_physical = true;
+            },
+            None => return Err(MappingError::NotInMemoryRange),
+        }
+
+        for increment in (0..size).step_by(USER_PG_SZ) {
+            unsafe { crate::arch::memory::vmm::map_pa_to_va_user(start_pa + increment, start_va + increment, &mut self.table)?; }
+        }
+
+        return Ok(());
     }
 
     ///Removes a node from the memory range mapping and deallocates all pages in it
@@ -305,10 +367,10 @@ impl UserPageTable {
             unsafe {
                 match crate::arch::memory::vmm::unmap_va_user(addr, &mut self.table) {
                     Ok(val) => {
-                        if is_physical {
+                        if !is_physical {
                             //TODO: free the page here
                         }
-                        //TODO: invalidate TLB entry
+                        
                     }
                     //These two can do nothing, just means that page was never mapped/used
                     Err(MappingError::TableDescriptorNotValid) => {}
