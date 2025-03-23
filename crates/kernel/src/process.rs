@@ -1,11 +1,11 @@
 use alloc::boxed::Box;
+use alloc::collections::btree_map::BTreeMap;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use alloc::collections::btree_map::BTreeMap;
 
+use crate::arch::memory::vmm::{MappingError, PAGE_ALLOCATOR, USER_PG_SZ};
 use crate::sync::once_cell::BlockingOnceCell;
 use crate::sync::SpinLock;
-use crate::arch::memory::vmm::{MappingError, USER_PG_SZ, PAGE_ALLOCATOR};
 
 pub mod fd;
 
@@ -15,14 +15,13 @@ struct MemoryRangeNode {
     start: usize,
     size: usize, //Size of range
     is_physical: bool, //used if mapping a specific paddr to a specific vaddr
-    //TODO: add file descriptor here for lazy loading files
+                 //TODO: add file descriptor here for lazy loading files
 }
 
 pub struct UserPageTable {
     pub table: Box<crate::arch::memory::vmm::UserTranslationTable>,
     pub phys_addr: usize,
     memory_range_map: BTreeMap<usize, MemoryRangeNode>, //key: start addr
-    
 }
 
 pub struct FileDescriptorList {
@@ -119,7 +118,9 @@ impl Process {
 
 impl Drop for Process {
     fn drop(&mut self) {
-        unsafe { crate::arch::memory::vmm::clear_user_vaddr_space(self.page_table.lock().phys_addr) };
+        unsafe {
+            crate::arch::memory::vmm::clear_user_vaddr_space(&mut self.page_table.lock().table)
+        };
     }
 }
 
@@ -265,7 +266,7 @@ impl UserPageTable {
 
     //Fills a mapped range with pages
     //It currently doesn't do any error checking
-    pub fn populate_range(&self, mut start_addr: usize, req_size: usize) -> () {
+    pub fn populate_range(&mut self, mut start_addr: usize, req_size: usize) -> () {
         //aligning start_addr and size to page size
         start_addr = (start_addr / USER_PG_SZ) * USER_PG_SZ;
         let mut size = (req_size / USER_PG_SZ) * USER_PG_SZ;
@@ -279,7 +280,8 @@ impl UserPageTable {
             //instead of using the page table allocator
             let (_page_va, page_pa) = PAGE_ALLOCATOR.get().alloc_frame();
             unsafe {
-                crate::arch::memory::vmm::map_pa_to_va_user(page_pa, virt_addr, self.phys_addr).unwrap();
+                crate::arch::memory::vmm::map_pa_to_va_user(page_pa, virt_addr, &mut self.table)
+                    .unwrap();
             }
         }
     }
@@ -288,15 +290,22 @@ impl UserPageTable {
     ///Freeing the page is the responsibility of this function in the case that a mapped range had
     ///specific physical addresses mapped to it
     pub fn unmap_memory_range(&mut self, req_addr: usize) -> Result<(), MappingError> {
-        let range_node: &MemoryRangeNode = self.get_memory_range_node(req_addr)?;
-        let range_start: usize = range_node.start;
-        let range_end: usize = range_start + range_node.size;
+        let range_start: usize;
+        let range_end: usize;
+        let is_physical: bool;
+
+        {
+            let range_node: &MemoryRangeNode = self.get_memory_range_node(req_addr)?;
+            range_start = range_node.start;
+            range_end = range_start + range_node.size;
+            is_physical = range_node.is_physical;
+        }
 
         for addr in (range_start..range_end).step_by(USER_PG_SZ) {
             unsafe {
-                match crate::arch::memory::vmm::unmap_va_user(addr, self.phys_addr) {
+                match crate::arch::memory::vmm::unmap_va_user(addr, &mut self.table) {
                     Ok(val) => {
-                        if !range_node.is_physical {
+                        if is_physical {
                             //TODO: free the page here
                         }
                         //TODO: invalidate TLB entry
@@ -349,5 +358,4 @@ impl UserPageTable {
 
         return Err(MappingError::NotInMemoryRange);
     }
-
 }

@@ -26,7 +26,10 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
 
     let process = crate::process::Process::new();
     // Assume fixed mapped range in user process (0x20_0000 in virtual memory)
-    process.page_table.lock().reserve_memory_range(0x20_000, 0x20_000 * 7, false);
+    process
+        .page_table
+        .lock()
+        .reserve_memory_range(0x20_000, 0x20_000 * 7, false);
     let user_region = 0x20_0000 as *mut u8;
     let ttbr0 = process.get_ttbr0();
 
@@ -78,7 +81,11 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         phys_addr, VIRTUAL_ADDR
     );
     unsafe {
-        match crate::arch::memory::map_pa_to_va_user(phys_addr, VIRTUAL_ADDR, ttbr0) {
+        match crate::arch::memory::map_pa_to_va_user(
+            phys_addr,
+            VIRTUAL_ADDR,
+            &mut process.page_table.lock().table,
+        ) {
             Ok(()) => println!("Done mapping!"),
             Err(e) => println!("Error: {}", e),
         }

@@ -272,12 +272,11 @@ pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> Result<(), MappingErr
 
 //TODO: add option to map huge page
 //TODO: add option to pass in flags
-//TODO: in the future, change this to take in a mutable reference to the user translation table
-//instead of just ttrb0
-pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result<(), MappingError> {
-    let translation_table: &mut UserTranslationTable =
-        unsafe { &mut *kernel_paddr_to_vaddr(ttbr0_pa).cast::<UserTranslationTable>() };
-
+pub unsafe fn map_pa_to_va_user(
+    pa: usize,
+    va: usize,
+    translation_table: &mut Box<UserTranslationTable>,
+) -> Result<(), MappingError> {
     //TODO: stop using these constants
     let mut index_bits = 25 - 21; //mildly redundant
     let mut mask = (1 << index_bits) - 1;
@@ -334,12 +333,10 @@ pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result
 //the page can be freed
 //TODO: add in a mechanism for freeing page tables
 //TODO: account for huge page case
-//TODO: in the future, change this to take in a mutable reference to the user translation table
-//instead of just ttrb0
-pub unsafe fn unmap_va_user(va: usize, ttbr0: usize) -> Result<usize, MappingError> {
-    let translation_table: &mut UserTranslationTable =
-        unsafe { &mut *kernel_paddr_to_vaddr(ttbr0).cast::<UserTranslationTable>() };
-
+pub unsafe fn unmap_va_user(
+    va: usize,
+    translation_table: &mut Box<UserTranslationTable>,
+) -> Result<usize, MappingError> {
     //TODO: stop using these constants
     let mut index_bits = 25 - 21; //mildly redundant
     let mut mask = (1 << index_bits) - 1;
@@ -394,10 +391,7 @@ pub unsafe fn unmap_va_user(va: usize, ttbr0: usize) -> Result<usize, MappingErr
 
 //This will probably assume that the user has removed all pages which cannot be returned to the
 //page allocator
-pub unsafe fn clear_user_vaddr_space(ttbr0: usize) {
-    let translation_table: &mut UserTranslationTable =
-        unsafe { &mut *kernel_paddr_to_vaddr(ttbr0).cast::<UserTranslationTable>() };
-
+pub unsafe fn clear_user_vaddr_space(translation_table: &mut Box<UserTranslationTable>) {
     //Index bits but -1 to get the number of entries at this level
     let num_lvl2_entries = 2 << ((25 - 21) - 1);
 

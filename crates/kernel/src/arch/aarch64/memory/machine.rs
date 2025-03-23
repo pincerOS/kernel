@@ -338,11 +338,11 @@ impl TableDescriptor {
     pub const fn is_valid(self) -> bool {
         self.contains(Self::VALID)
     }
-    
+
     pub fn set_valid(&mut self, valid: bool) -> () {
         self.set(Self::VALID, valid);
     }
-    
+
     // temporary, should be moved to more proper location
     pub const fn is_table_descriptor(self) -> bool {
         self.contains(Self::IS_TABLE_DESCRIPTOR)
@@ -387,7 +387,7 @@ impl LeafDescriptor {
     pub const fn is_valid(self) -> bool {
         self.contains(Self::VALID)
     }
-    
+
     pub fn set_valid(&mut self, valid: bool) -> () {
         self.set(Self::VALID, valid);
     }
@@ -395,7 +395,7 @@ impl LeafDescriptor {
     pub fn set_user_permissions(&mut self, val: bool) -> () {
         self.set(Self::UNPRIVILEGED_ACCESS, val);
     }
-    
+
     pub const fn set_mair(self, mair: u8) -> Self {
         assert!(mair < (1 << 3), "field size mismatch");
 

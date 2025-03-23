@@ -105,7 +105,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                 core.thread.set(Some(thread));
                 cur_process
             });
-            
+
             let phdrs = elf.program_headers().unwrap();
             for phdr in phdrs {
                 let phdr = phdr.unwrap();
@@ -113,7 +113,13 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                     let data = elf.segment_data(&phdr).unwrap();
                     let memsize = (phdr.p_memsz as usize).next_multiple_of(4096).max(4096);
 
-                    cur_process.as_ref().unwrap().page_table.lock().reserve_memory_range(phdr.p_vaddr as usize, memsize, false).unwrap();
+                    cur_process
+                        .as_ref()
+                        .unwrap()
+                        .page_table
+                        .lock()
+                        .reserve_memory_range(phdr.p_vaddr as usize, memsize, false)
+                        .unwrap();
                     let addr = (phdr.p_vaddr as usize) as *mut u8;
                     let mapping: &mut [u8] =
                         unsafe { core::slice::from_raw_parts_mut(addr, memsize) };

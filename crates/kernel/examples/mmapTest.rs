@@ -72,7 +72,10 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     // Create a user process
     let mut process = crate::process::Process::new();
     // Assume fixed mapped range in user process (0x20_0000 in virtual memory)
-    process.page_table.lock().reserve_memory_range(0x20_000, 0x20_000 * 7, false);
+    process
+        .page_table
+        .lock()
+        .reserve_memory_range(0x20_000, 0x20_000 * 7, false);
     let user_region = 0x20_0000 as *mut u8;
     let ttbr0 = process.get_ttbr0();
 
