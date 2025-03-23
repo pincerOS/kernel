@@ -30,6 +30,8 @@ pub unsafe fn register_syscalls() {
         register_syscall_handler(15, file::sys_openat);
         register_syscall_handler(16, exec::sys_execve_fd);
         register_syscall_handler(17, proc::sys_wait);
+        register_syscall_handler(18, proc::sys_mmap);
+        register_syscall_handler(19, proc::sys_munmap);
     }
 }
 

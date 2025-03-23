@@ -125,3 +125,6 @@ syscall!(16 => pub fn execve_fd(
 ) -> isize);
 
 syscall!(17 => pub fn wait(fd: usize) -> isize);
+
+syscall!(18 => pub fn mmap(req_addr: usize, size: usize, fill_pages: bool) -> usize);
+syscall!(19 => pub fn munmap(req_addr: usize) -> usize);

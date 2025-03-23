@@ -6,6 +6,7 @@ members = [
     "crates/endian",
     "crates/filesystem",
     "crates/init",
+    "crates/mmapTest",
     "crates/initfs",
     "crates/kernel",
     "crates/lz4",

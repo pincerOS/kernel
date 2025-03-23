@@ -98,6 +98,61 @@ pub unsafe fn sys_wait(ctx: &mut Context) -> *mut Context {
     })
 }
 
+pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
+    let req_start_addr: usize = ctx.regs[0];
+    let req_size: usize = ctx.regs[1];
+    //TODO: update this to be flags later
+    let fill_pages: bool = ctx.regs[2] == 1;
+    
+    let cur_process = CORES.with_current(|core| {
+        let thread = core.thread.take().unwrap();
+        // TODO: don't require cloning here
+        // TODO: how to make longer periods of access to the current thread sound?
+        // (ie. either internal mutability, or can't yield/preempt/check preempt status...)
+        let cur_process = thread.process.clone();
+        core.thread.set(Some(thread));
+        cur_process
+    });
+
+    let range_start: usize = match cur_process.unwrap().page_table.lock().reserve_memory_range(req_start_addr, req_size, fill_pages){
+            Ok(start_addr) => start_addr,
+            Err(e) => {
+                //For debug
+                println!("Error: {}", e);
+                //TODO: find a better way to tell the user what went wrong
+                usize::MAX
+            }
+        };
+    ctx.regs[0] = range_start;
+    ctx
+}
+
+pub unsafe fn sys_munmap(ctx: &mut Context) -> *mut Context {
+    let req_addr: usize = ctx.regs[0];
+    
+    let cur_process = CORES.with_current(|core| {
+        let thread = core.thread.take().unwrap();
+        // TODO: don't require cloning here
+        // TODO: how to make longer periods of access to the current thread sound?
+        // (ie. either internal mutability, or can't yield/preempt/check preempt status...)
+        let cur_process = thread.process.clone();
+        core.thread.set(Some(thread));
+        cur_process
+    });
+
+    let retval: usize = match cur_process.unwrap().page_table.lock().unmap_memory_range(req_addr){
+            Ok(()) => 0,
+            Err(e) => {
+                //For debug
+                println!("Error: {}", e);
+                //TODO: find a better way to tell the user what went wrong
+                usize::MAX
+            }
+        };
+    ctx.regs[0] = retval;
+    ctx
+}
+
 struct WaitFd(Arc<BlockingOnceCell<ExitStatus>>);
 
 impl FileDescriptor for WaitFd {
