@@ -78,7 +78,7 @@ fn schedule_next_transfer(channel: u8) {
     }
 }
 
-pub fn dwc_otg_interrupt_handler(_ctx: &mut Context) {
+pub fn dwc_otg_interrupt_handler(_ctx: &mut Context, _irq: usize) {
     let mut hcint_channels = [0u32; ChannelCount];
     {
         //read interrupt status

@@ -112,12 +112,13 @@ fn isb() {
     unsafe { asm!("isb", options(nostack, nomem, preserves_flags)) }
 }
 
-pub fn irq_not_handled(_ctx: &mut Context) {
-    panic!("IRQ not handled");
+pub fn irq_not_handled(_ctx: &mut Context, irq: usize) {
+    println!("spurious irq: {irq}");
 }
 
 /// Handles the interrupt and asks handler to handle it
 /// Level-triggered interrupts must be cleared by associaetd irq handler or else it will be called again
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn gic_irq_handler(
     ctx: &mut Context,
     _elr: u64,
@@ -168,7 +169,7 @@ pub unsafe extern "C" fn gic_irq_handler(
         // Level-triggered interrupts must be cleared by associated irq
         // handler or else it will be called again
         let irq_handler = gic.isr_table.get(irq as usize);
-        irq_handler(ctx);
+        irq_handler(ctx, irq as usize);
 
         //TODO: HAndle level-triggered interrupts?
         // GICC_DIR is not necessary, Security Extensions are not enabled
@@ -177,7 +178,7 @@ pub unsafe extern "C" fn gic_irq_handler(
     ctx
 }
 
-type Isr = fn(&mut Context);
+type Isr = fn(&mut Context, usize);
 
 pub struct IsrTable(HandlerTableInner<IRQ_COUNT>);
 
@@ -322,7 +323,7 @@ impl Gic400Driver {
         unsafe { self.reg_write_cpui(GICC_PMR, old_pmr) };
     }
 
-    pub fn register_isr(&self, irq: usize, isr: fn(&mut Context)) {
+    pub fn register_isr(&self, irq: usize, isr: Isr) {
         self.register_isr_detailed(irq, isr, 0xf, false, 0xa0);
     }
 
@@ -336,7 +337,7 @@ impl Gic400Driver {
     pub fn register_isr_detailed(
         &self,
         irq: usize,
-        isr: fn(&mut Context),
+        isr: Isr,
         target_cpus: u8,
         int_type: bool,
         priority: u8,

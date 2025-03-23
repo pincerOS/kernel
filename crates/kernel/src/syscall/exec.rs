@@ -122,6 +122,15 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                     mapping[..data.len()].copy_from_slice(data);
                     // TODO: make sure anonymous pages are zeroed
                     mapping[data.len()..].fill(0);
+
+                    // if phdr.p_flags.execute() {
+                    // TODO: figure out proper cache flush subset; this shouldn't
+                    // be needed (except maybe for the executable parts)
+                    let range = mapping.as_ptr_range();
+                    unsafe {
+                        crate::arch::memory::flush_range(range.start.addr(), range.end.addr())
+                    };
+                    // }
                 }
             }
         };
@@ -129,13 +138,16 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
 
         let stack_size = 0x20_0000;
         let stack_start = 0x100_0000;
-        new_mem
+        let base = new_mem
             .mmap(
                 Some(stack_start - stack_size),
                 stack_size,
                 MappingKind::Anon,
             )
             .unwrap();
+
+        let vme = new_mem.get_vme(base).unwrap();
+        new_mem.populate_range(vme, base, stack_size).await.unwrap();
 
         let old = core::mem::replace(&mut *proc.mem.lock(), new_mem);
         drop(old);

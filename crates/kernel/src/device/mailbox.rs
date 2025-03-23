@@ -104,8 +104,149 @@ unsafe impl PropertyRequest for PropSetPowerState {
     }
 }
 
+macro_rules! define_property {
+    ($tag:literal =>
+        struct $req_name:ident { $($req_field:ident : $req_field_ty:ty),* $(,)? }
+        -> struct $resp_name:ident { $($resp_field:ident : $resp_field_ty:ty),* $(,)? }) =>
+    {
+
+        #[repr(C, align(4))]
+        #[derive(Copy, Clone)]
+        pub struct $req_name {
+            $(pub $req_field : $req_field_ty,)*
+        }
+        unsafe impl bytemuck::Zeroable for $req_name {}
+        unsafe impl bytemuck::Pod for $req_name {}
+
+        #[repr(C, align(4))]
+        #[derive(Copy, Clone)]
+        pub struct $resp_name {
+            $(pub $resp_field : $resp_field_ty,)*
+        }
+        unsafe impl bytemuck::Zeroable for $resp_name {}
+        unsafe impl bytemuck::Pod for $resp_name {}
+
+        unsafe impl PropertyRequest for $req_name {
+            const TAG: u32 = $tag;
+            type Output = $resp_name;
+            unsafe fn parse_response(data: &[u8]) -> Self::Output {
+                *bytemuck::from_bytes(&data[..size_of::<Self::Output>()])
+            }
+        }
+    }
+}
+
+pub const CLOCK_EMMC: u32 = 0x000000001;
+pub const CLOCK_UART: u32 = 0x000000002;
+pub const CLOCK_ARM: u32 = 0x000000003;
+pub const CLOCK_CORE: u32 = 0x000000004;
+pub const CLOCK_V3D: u32 = 0x000000005;
+pub const CLOCK_H264: u32 = 0x000000006;
+pub const CLOCK_ISP: u32 = 0x000000007;
+pub const CLOCK_SDRAM: u32 = 0x000000008;
+pub const CLOCK_PIXEL: u32 = 0x000000009;
+pub const CLOCK_PWM: u32 = 0x00000000a;
+pub const CLOCK_HEVC: u32 = 0x00000000b;
+pub const CLOCK_EMMC2: u32 = 0x00000000c;
+pub const CLOCK_M2MC: u32 = 0x00000000d;
+pub const CLOCK_PIXEL_BVB: u32 = 0x00000000e;
+
+define_property!(0x00030041 => struct PropGetStatusLED {} -> struct PropGetStatusLEDResponse {
+    pin: u32,
+    state: u32,
+});
+
+define_property!(0x00038041 => struct PropSetStatusLED {
+    pin: u32,
+    state: u32,
+} -> struct PropSetStatusLEDResponse {
+    pin: u32,
+    state: u32,
+});
+
+define_property!(0x00030001 => struct PropGetClockState {
+    id: u32,
+} -> struct PropGetClockStateResponse {
+    id: u32,
+    state: u32,
+});
+
+define_property!(0x00030002 => struct PropGetClockRate {
+    id: u32,
+} -> struct PropGetClockRateResponse {
+    id: u32,
+    rate: u32,
+});
+
+define_property!(0x00030047 => struct PropGetClockRateMeasured {
+    id: u32,
+} -> struct PropGetClockRateMeasuredResponse {
+    id: u32,
+    rate: u32,
+});
+
+define_property!(0x00038002 => struct PropSetClockRate {
+    id: u32,
+    rate: u32,
+    skip_setting_turbo: u32,
+} -> struct PropSetClockRateResponse {
+    id: u32,
+    rate: u32,
+});
+
+define_property!(0x00030004 => struct PropGetMaxClockRate {
+    id: u32,
+} -> struct PropGetMaxClockRateResponse {
+    id: u32,
+    rate: u32,
+});
+
+define_property!(0x00030007 => struct PropGetMinClockRate {
+    id: u32,
+} -> struct PropGetMinClockRateResponse {
+    id: u32,
+    rate: u32,
+});
+
+define_property!(0x00030009 => struct PropGetTurbo {
+    id: u32,
+} -> struct PropGetTurboResponse {
+    id: u32,
+    level: u32,
+});
+
+define_property!(0x00038009 => struct PropSetTurbo {
+    id: u32,
+    level: u32,
+} -> struct PropSetTurboResponse {
+    id: u32,
+    level: u32,
+});
+
 #[derive(Debug)]
 pub struct MailboxError;
+
+struct HexDisplay<'a, T>(&'a [T]);
+
+impl<T: core::fmt::LowerHex> core::fmt::LowerHex for HexDisplay<'_, T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut list = f.debug_list();
+        for i in self.0 {
+            list.entry(&format_args!("{:#x}", i));
+        }
+        list.finish()
+    }
+}
+
+impl<T: core::fmt::UpperHex> core::fmt::UpperHex for HexDisplay<'_, T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut list = f.debug_list();
+        for i in self.0 {
+            list.entry(&format_args!("{:#X}", i));
+        }
+        list.finish()
+    }
+}
 
 impl VideoCoreMailbox {
     const MBOX_READ: usize = 0x00;
@@ -139,12 +280,14 @@ impl VideoCoreMailbox {
 
         unsafe {
             while (status_reg.read() & Self::STATUS_FULL) != 0 {
-                crate::arch::wfe();
+                core::hint::spin_loop();
             }
         }
+        unsafe { core::arch::asm!("dsb sy") }; // TODO
 
         let buffer_bytes = size_of_val(buffer);
         let buffer_ptr = buffer.as_mut_ptr();
+
         let addr = physical_addr(buffer_ptr.addr()).unwrap();
         assert!(addr <= u32::MAX as u64 && addr % 16 == 0);
         assert!(channel as u32 <= Self::CHANNEL_MASK);
@@ -164,22 +307,27 @@ impl VideoCoreMailbox {
         // TODO: translate buffer addresses for non-property calls
         // (GPU memory and CPU memory may have different virtual addresses)
 
+        println!(
+            "mailbox_call({channel}, {value:#x}, {:x})",
+            HexDisplay(bytemuck::cast_slice::<_, u32>(buffer))
+        );
+
         unsafe {
-            memory::clean_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
+            memory::invalidate_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
         }
         unsafe { write_reg.write(value) };
 
         loop {
             unsafe {
                 while (status_reg.read() & Self::STATUS_EMPTY) != 0 {
-                    crate::arch::wfe();
+                    core::hint::spin_loop();
                 }
             }
 
             let message = unsafe { read_reg.read() };
             if (message & Self::CHANNEL_MASK) == channel as u32 {
                 unsafe {
-                    memory::invalidate_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
+                    memory::clean_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
                 }
                 break;
             } else {
@@ -208,7 +356,7 @@ impl VideoCoreMailbox {
             0x00000000, // request
             tag,
             data_words * size_of::<u32>() as u32,
-            0,
+            request_data.len() as u32, // Documented as reserved, but must be data length
         ];
 
         assert!(
@@ -218,7 +366,7 @@ impl VideoCoreMailbox {
 
         words[..data.len()].copy_from_slice(&data);
         words[data.len()..][..request_data.len()].copy_from_slice(request_data);
-        words[data.len() - 1] = 0;
+        words[data.len() + data_words as usize] = 0; // end tag
 
         unsafe {
             self.mailbox_call(8, &mut *buffer).unwrap();
@@ -235,8 +383,8 @@ impl VideoCoreMailbox {
             return Err(MailboxError);
         }
 
-        if response_size == 0 && [PropGetPowerState::TAG, PropGetPowerWaitTime::TAG].contains(&tag)
-        {
+        // if response_size == 0 && [PropGetPowerState::TAG, PropGetPowerWaitTime::TAG].contains(&tag)
+        if response_size == 0 {
             // TODO: Unsupported in qemu
             response_size = 8;
         }
@@ -279,6 +427,7 @@ impl VideoCoreMailbox {
         const TAG_BLANK_SCREEN: u32 = 0x00040002;
         const TAG_SET_PHYS_DIMS: u32 = 0x00048003;
         const TAG_SET_VIRT_DIMS: u32 = 0x00048004;
+        const TAG_SET_VIRT_OFF: u32 = 0x00048009;
         const TAG_SET_DEPTH: u32 = 0x00048005;
         const TAG_SET_PIXEL_ORDER: u32 = 0x00048006;
         const TAG_GET_PITCH: u32 = 0x00040008;
@@ -304,6 +453,11 @@ impl VideoCoreMailbox {
             0,
             width as u32,
             height as u32,
+            TAG_SET_VIRT_OFF,
+            8,
+            0,
+            0,
+            0,
             TAG_SET_DEPTH,
             4,
             0,
@@ -334,9 +488,13 @@ impl VideoCoreMailbox {
 
         let response = words[1];
 
-        let buffer_ptr = words[23];
-        let buffer_size = words[24] as usize;
-        let pitch = words[28] as usize;
+        // TODO: parse the output to get these, rather than assuming their locations
+        let width = words[10] as usize;
+        let height = words[11] as usize;
+        let _pixel_order = words[24];
+        let buffer_ptr = words[28] & 0x3FFFFFFF;
+        let buffer_size = words[29] as usize;
+        let pitch = words[33] as usize;
         assert!(pitch == width * 4);
 
         // println!("{:?}", bytemuck::cast_slice_mut::<_, u32>(&mut buffer));

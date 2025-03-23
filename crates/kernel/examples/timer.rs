@@ -6,7 +6,7 @@ extern crate kernel;
 
 use kernel::*;
 
-fn test_irq_handler(_ctx: &mut event::context::Context) {
+fn test_irq_handler(_ctx: &mut event::context::Context, _irq: usize) {
     //Reset the timer to ping again
     device::system_timer::ARM_GENERIC_TIMERS.with_current(|timer| {
         timer.reset_timer();

@@ -10,8 +10,15 @@ use crate::sync::once_cell::BlockingOnceCell;
 use crate::{event, shutdown};
 
 pub unsafe fn sys_shutdown(ctx: &mut Context) -> *mut Context {
-    run_event_handler(ctx, move |_context: HandlerContext<'_>| {
-        shutdown();
+    run_event_handler(ctx, move |context: HandlerContext<'_>| {
+        println!("Not shutting down...");
+        if false {
+            shutdown();
+        }
+        let thread = context.detach_thread();
+        let exit_code = &thread.process.as_ref().unwrap().exit_code;
+        exit_code.set(crate::process::ExitStatus { status: 0 as u32 });
+        unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
     })
 }
 
@@ -76,7 +83,7 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
         }
 
         println!(
-            "Creating new process with page dir {:#010x}",
+            "Creating new process with page dir {:#010x}, initial sp {user_sp:#x}, entry {user_entry:#x}",
             process.get_ttbr0()
         );
         let mut user_thread = unsafe { Thread::new_user(process, user_sp, user_entry) };

@@ -83,14 +83,7 @@ kernel_entry_alt:
 
     b kernel_entry_rust_alt
 
-    // TODO: somehow this sometimes gets triggered twice on core 0?
-    // Taking exception 1 [Undefined Instruction] on CPU 0
-    // ...from EL1 to EL1
-    // ...with ESR 0x0/0x2000000
-    // ...with ELR 0x8005c
-    // ...to EL1 PC 0x80a00 PSTATE 0x3c5
 drop_to_el1:
-
     mov x5, #(1 << 31)
     // orr x5, x5, #0x38
     msr hcr_el2, x5
@@ -153,6 +146,7 @@ switch_kernel_vmem:
     mrs x3, TTBR1_EL1
     msr TTBR0_EL1, x3
 
+    isb
     dsb sy
     tlbi vmalle1is
     dsb sy
@@ -163,6 +157,7 @@ switch_kernel_vmem:
 
     msr TTBR0_EL1, x4
 
+    isb
     dsb sy
     tlbi vmalle1is
     dsb sy
@@ -177,6 +172,7 @@ switch_kernel_vmem_in_phys:
     msr TCR_EL1, x1
     msr TTBR1_EL1, x0
 
+    isb
     dsb sy
     tlbi vmalle1is
     dsb sy
@@ -188,6 +184,7 @@ switch_kernel_vmem_in_phys:
 switch_user_tcr_el1:
     msr TCR_EL1, x0
 
+    isb
     dsb sy
     tlbi vmalle1is
     dsb sy
@@ -198,7 +195,7 @@ switch_user_tcr_el1:
     TCR_EL1 = const INIT_TCR_EL1,
     TRANSLATION_ENTRY = const INIT_TRANSLATION,
     SCTLR_EL1 = const (
-        (1 << 11) | // enable instruction caching
+        (1 << 12) | // enable instruction caching
         (1 << 4) | // enable EL0 stack pointer alignment
         (1 << 3) | // enable EL1 stack pointer alignment
         (1 << 2) | // enable data caching

@@ -112,6 +112,11 @@ where
                 let thread = unsafe { &mut *future.data.thread.get() }.take().unwrap();
                 CORES.with_current(|core| core.thread.set(Some(thread)));
 
+                let woken = task::TASKS.return_task(task_id, task::Task::new(future, priority));
+                if woken {
+                    event::SCHEDULER.add_task(event::Event::async_task(task_id, priority));
+                }
+
                 // Return back to the user context
                 ctx.as_ptr()
             } else {
@@ -377,9 +382,13 @@ where
         let inner = unsafe { Pin::new_unchecked(this.inner.assume_init_mut()) };
 
         let _context = core::task::ready!(inner.poll(ctx));
+
+        // Finished running the task; if the thread wasn't detatched / resumed
+        // separately, schedule it now.
         if !this.data.in_handler.get() {
-            let thread = unsafe { &mut *this.data.thread.get() }.take().unwrap();
-            event::SCHEDULER.add_task(event::Event::schedule_thread(thread));
+            if let Some(thread) = unsafe { &mut *this.data.thread.get() }.take() {
+                event::SCHEDULER.add_task(event::Event::schedule_thread(thread));
+            }
         }
         ().into()
     }
