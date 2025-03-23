@@ -73,7 +73,7 @@ impl UserAddrSpace {
         unsafe {
             asm!("mrs {0}, TTBR0_EL1", out(reg) active_page_dir);
             if active_page_dir != old_page_dir {
-                asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) old_page_dir);
+                asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) old_page_dir);
             }
         }
 
@@ -99,16 +99,16 @@ impl UserAddrSpace {
                 let buf_ptr: *mut u8 = buffer.as_mut_ptr().cast();
                 unsafe {
                     copy_nonoverlapping(src_data.byte_add(offset), buf_ptr, chunk_size);
-                    asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) new_page_dir);
+                    asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) new_page_dir);
                     copy_nonoverlapping(buf_ptr, dst_data.byte_add(offset), chunk_size);
-                    asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) old_page_dir);
+                    asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) old_page_dir);
                 }
             }
         }
 
         if active_page_dir != old_page_dir {
             unsafe {
-                asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) active_page_dir);
+                asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) active_page_dir);
             }
         }
 

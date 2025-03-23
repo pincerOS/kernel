@@ -42,6 +42,8 @@ async fn main() {
     let user_region = user_region as *mut u8;
 
     let ttbr0 = process.get_ttbr0();
+    println!("init ttbr0={:#x}", ttbr0);
+
     let callback = || {
         println!("User ptr: {:p}", user_region);
         println!(
@@ -65,6 +67,13 @@ async fn main() {
         let end = sync::get_time();
 
         println!("Done copying user data, took {:4}µs", end - start);
+
+        unsafe {
+            crate::arch::memory::flush_range(
+                user_region.addr(),
+                user_region.addr() + INIT_CODE.len(),
+            )
+        };
     };
     unsafe { with_user_vmem(ttbr0, callback) };
 

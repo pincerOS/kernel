@@ -38,12 +38,13 @@ pub fn micro_delay(delay: u32) {
 }
 
 pub unsafe fn initialize_system_timer(base: *mut ()) {
-    unsafe { SYSTEM_TIMER.init(Bcm2835SysTmr::new(base)) };
     if super::gic::GIC.is_initialized() {
         // TODO: support local timer on rpi3b interrupt controller
         let gic = super::gic::GIC.get();
         register_system_timer_irqs(gic);
     }
+
+    unsafe { SYSTEM_TIMER.init(Bcm2835SysTmr::new(base)) };
 }
 
 fn register_system_timer_irqs(gic: &super::gic::Gic400Driver) {
@@ -54,8 +55,8 @@ fn register_system_timer_irqs(gic: &super::gic::Gic400Driver) {
     gic.register_isr(99, system_timer_irq_handler);
 }
 
-fn system_timer_irq_handler(_ctx: &mut Context) {
-    panic!("System timer IRQ handler not implemented");
+fn system_timer_irq_handler(_ctx: &mut Context, _irq: usize) {
+    // panic!("System timer IRQ handler not implemented");
 }
 
 #[derive(PartialEq)]
@@ -224,7 +225,7 @@ impl Bcm2835SysTmr {
     }
 }
 
-pub fn timer_scheduler_handler(ctx: &mut Context) {
+pub fn timer_scheduler_handler(ctx: &mut Context, _irq: usize) {
     let time = ARM_GENERIC_TIMERS.with_current(|timer| timer.get_time());
     let mut preemption_flag = false;
     TIMER_SCHEDULER.with_current(|timer_scheduler| {
