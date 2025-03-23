@@ -476,21 +476,61 @@ impl bcm2711_pcm_driver {
 
     // acceptable range is 8-39
     // channel 1 or channel 2
-    // fn get_channel_width(&mut self, kind: u32, num: u32) -> u32 {
-    //     self.read_bits(reg, start, len)
-    // }
+    fn get_channel_width(&mut self, kind: u32, num: u32) -> u32 {
+        let reg: Volatile<u32> = if kind == 0 { self.reg_rxc() } else { self.reg_txc() };
+        let start: usize = (2 - num) * 16;
+        let mut width: u32 = self.read_bits(reg, start, 4);
+        width |= if self.check_bit(reg, start + 15) { 1 << 4 } else { 0 };
+        width += 8;
+        width
+    }
 
-    // fn set_channel_width(&mut self, kind: u32, num: u32, width: u32) -> bool {
-    //     if self.pcm_is_enabled() || width < 8 || width > 39 || num < 1 || num > 2 {
-    //         false
-    //     }
-    //     else {
-    //         let true_width = width - 8;
-    //         let reg: usize = RXC_A + kind; // CHANNEL_RXC or CHANNEL_TXC
-    //         let start: usize = (2 - num) * 16;
-    //         self.write_bits(reg, start, 4, true_width & ((1 << 4) - 1));
-    //         self.set_bit_force(reg, start + 15, if (true_width & ((1 << 5) - 1)) >> 4 == 0 { false } else { true });
-    //         true
-    //     }
-    // }
+    fn set_channel_width(&mut self, kind: u32, num: u32, width: u32) -> bool {
+        if self.pcm_is_enabled() || width < 8 || width > 39 || num < 1 || num > 2 {
+            false
+        }
+        else {
+            let true_width = width - 8;
+            let reg: Volatile<u32> = if kind == 0 { self.reg_rxc() } else { self.reg_txc() };
+            let start: usize = (2 - num) * 16;
+            self.write_bits(reg, start, 4, true_width & ((1 << 4) - 1));
+            self.set_bit_force(reg, start + 15, if (true_width & ((1 << 5) - 1)) >> 4 == 0 { false } else { true });
+            true
+        }
+    }
+
+    fn get_channel_position(&mut self, kind: u32, num: u32) -> u32 {
+        let reg: Volatile<u32> = if kind == 0 { self.reg_rxc() } else { self.reg_txc() };
+        let start: usize = (2 - num) * 16 + 4;
+        self.read_bits(reg, start, 10)
+    }
+
+    fn set_channel_position(&mut self, kind: u32, num: u32, position: u32) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            let reg: Volatile<u32> = if kind == 0 { self.reg_rxc() } else { self.reg_txc() };
+            let start: usize = (2 - num) * 16 + 4;
+            self.write_bits(reg, start, 10, position & ((1 << 10) - 1));
+            true
+        }
+    }
+
+    fn channel_is_enabled(&mut self, kind: u32, num: u32) -> bool {
+        let reg: Volatile<u32> = if kind == 0 { self.reg_rxc() } else { self.reg_txc() };
+        let bit: usize = (2 - num) * 16 + 14;
+        self.check_bit(reg, bit)
+    }
+
+    fn toggle_channel(&mut self, kind: u32, num: u32, on: bool) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            let reg: Volatile<u32> = if kind == 0 { self.reg_rxc() } else { self.reg_txc() };
+            let bit: usize = (2 - num) * 16 + 14;
+            self.set_bit(reg, bit, on)
+        }
+    }
 }
