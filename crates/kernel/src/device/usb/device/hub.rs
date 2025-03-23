@@ -46,8 +46,7 @@ fn HubReadDescriptor(device: &mut UsbDevice) -> ResultCode {
         return result;
     }
 
-    let hub =
-        unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
+    let hub = device.driver_data.downcast::<HubDevice>().unwrap();
     if hub.Descriptor.is_none() {
         println!(
             "| HUB: allocating descriptor of size {} with HubDescriptor {}",
@@ -59,12 +58,14 @@ fn HubReadDescriptor(device: &mut UsbDevice) -> ResultCode {
         //TODO: Update this creation as well
     }
 
+    // TODO: this is still UB b/c descriptor aliases parts of device, but it's fine for now
+    let descriptor = hub.Descriptor.as_mut().unwrap().as_mut() as *mut HubDescriptor as *mut u8;
     result = UsbGetDescriptor(
         device,
         DescriptorType::Hub,
         0,
         0,
-        hub.Descriptor.as_mut().unwrap().as_mut() as *mut HubDescriptor as *mut u8,
+        descriptor,
         header.descriptor_length as u32,
         header.descriptor_length as u32,
         0x20,
@@ -78,8 +79,7 @@ fn HubReadDescriptor(device: &mut UsbDevice) -> ResultCode {
 }
 
 fn HubGetStatus(device: &mut UsbDevice) -> ResultCode {
-    let hub =
-        unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
+    let hub = device.driver_data.downcast::<HubDevice>().unwrap();
     let status = (&mut hub.Status as *mut HubFullStatus) as *mut u8;
     let result = UsbControlMessage(
         device,
@@ -154,11 +154,12 @@ fn HubChangePortFeature(
 }
 
 fn HubPowerOn(device: &mut UsbDevice) -> ResultCode {
-    let data =
-        unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
-    let hub_desc = data.Descriptor.as_mut().unwrap().as_mut(); //unsafe { &mut *(.as_mut_ptr() as *mut HubDescriptor) };
+    let hub = device.driver_data.downcast::<HubDevice>().unwrap();
+    let hub_desc = hub.Descriptor.as_mut().unwrap().as_mut(); //unsafe { &mut *(.as_mut_ptr() as *mut HubDescriptor) };
+    let max_children = hub.MaxChildren;
+    let delay = hub_desc.PowerGoodDelay as u32;
 
-    for i in 0..data.MaxChildren {
+    for i in 0..max_children {
         if HubChangePortFeature(device, HubPortFeature::FeaturePower, i as u8, true)
             != ResultCode::OK
         {
@@ -166,14 +167,13 @@ fn HubPowerOn(device: &mut UsbDevice) -> ResultCode {
         }
     }
 
-    micro_delay(hub_desc.PowerGoodDelay as u32);
+    micro_delay(delay);
 
     return ResultCode::OK;
 }
 
 fn HubPortGetStatus(device: &mut UsbDevice, port: u8) -> ResultCode {
-    let hub =
-        unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
+    let hub = device.driver_data.downcast::<HubDevice>().unwrap();
     let port_status = &mut hub.PortStatus[port as usize] as *mut HubPortFullStatus as *mut u8;
     let result = UsbControlMessage(
         device,
@@ -212,10 +212,6 @@ fn HubPortGetStatus(device: &mut UsbDevice, port: u8) -> ResultCode {
 }
 
 fn HubPortReset(device: &mut UsbDevice, port: u8) -> ResultCode {
-    let data =
-        unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
-    let portStatus = &mut data.PortStatus[port as usize];
-
     let mut result;
     let mut retry_max = 0;
     for retry in 0..3 {
@@ -238,8 +234,10 @@ fn HubPortReset(device: &mut UsbDevice, port: u8) -> ResultCode {
                 return result;
             }
 
-            let port_changed = portStatus.Change;
-            let port_status = portStatus.Status;
+            let data = device.driver_data.downcast::<HubDevice>().unwrap();
+            let status = &data.PortStatus[port as usize];
+            let port_changed = status.Change;
+            let port_status = status.Status;
             if port_changed.contains(HubPortStatusChange::ResetChanged)
                 || port_status.contains(HubPortStatus::Enabled)
             {
@@ -251,8 +249,10 @@ fn HubPortReset(device: &mut UsbDevice, port: u8) -> ResultCode {
             continue;
         }
 
-        let port_change = portStatus.Change;
-        let port_status = portStatus.Status;
+        let data = device.driver_data.downcast::<HubDevice>().unwrap();
+        let status = &data.PortStatus[port as usize];
+        let port_change = status.Change;
+        let port_status = status.Status;
         if port_change.contains(HubPortStatusChange::ConnectedChanged)
             || !port_status.contains(HubPortStatus::Connected)
         {
@@ -278,11 +278,9 @@ fn HubPortReset(device: &mut UsbDevice, port: u8) -> ResultCode {
 }
 
 fn HubChildReset(device: &mut UsbDevice, child: &mut UsbDevice) -> ResultCode {
-    let data =
-        unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
-    // println!("data {:#x} device {:#x}", data as *mut HubDevice as usize, device as *mut UsbDevice as usize);
-    // data.MaxChildren = 1;
-    if child.parent == Some(device)
+    let device_ptr = device as *mut _;
+    let data = device.driver_data.downcast::<HubDevice>().unwrap();
+    if child.parent == Some(device_ptr)
         && child.port_number < data.MaxChildren as u8
         && data.Children[child.port_number as usize] == child
     {
@@ -294,9 +292,6 @@ fn HubChildReset(device: &mut UsbDevice, child: &mut UsbDevice) -> ResultCode {
 }
 
 fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
-    let data =
-        unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
-    let portStatus = &mut data.PortStatus[port as usize];
     let mut result = HubPortGetStatus(device, port);
 
     if result != ResultCode::OK {
@@ -315,7 +310,8 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
         );
         return result;
     }
-    let port_status = portStatus.Status;
+    let data = device.driver_data.downcast::<HubDevice>().unwrap();
+    let port_status = data.PortStatus[port as usize].Status;
     if (!(port_status.contains(HubPortStatus::Connected))
         && !(port_status.contains(HubPortStatus::Enabled)))
         || !data.Children[port as usize].is_null()
@@ -332,6 +328,7 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
         return result;
     }
 
+    let data = device.driver_data.downcast::<HubDevice>().unwrap();
     let mut dev = Box::new(UsbDevice::new(device.bus, 0));
     data.Children[port as usize] = dev.as_mut() as *mut UsbDevice;
     result = UsbAllocateDevice(&mut dev);
@@ -346,9 +343,10 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
         return result;
     }
 
+    let data = device.driver_data.downcast::<HubDevice>().unwrap();
     let child_dev = unsafe { &mut *(data.Children[port as usize]) };
     println!("| HUB: allocated new device {}", child_dev.number);
-    let port_status = portStatus.Status;
+    let port_status = data.PortStatus[port as usize].Status;
     if port_status.contains(HubPortStatus::LowSpeedAttached) {
         child_dev.speed = UsbSpeed::Low;
     } else if port_status.contains(HubPortStatus::HighSpeedAttached) {
@@ -371,8 +369,7 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
 }
 
 fn HubCheckConnection(device: &mut UsbDevice, port: u8) -> ResultCode {
-    let data =
-        unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
+    let data = device.driver_data.downcast::<HubDevice>().unwrap();
     let prevHubStatus = data.PortStatus[port as usize].Status;
     let prevConnected = prevHubStatus.contains(HubPortStatus::Connected);
     let result = HubPortGetStatus(device, port);
@@ -387,6 +384,7 @@ fn HubCheckConnection(device: &mut UsbDevice, port: u8) -> ResultCode {
         return result;
     }
 
+    let data = device.driver_data.downcast::<HubDevice>().unwrap();
     let port_status = data.PortStatus[port as usize].Status;
     let mut port_change = data.PortStatus[port as usize].Change;
 
@@ -408,6 +406,7 @@ fn HubCheckConnection(device: &mut UsbDevice, port: u8) -> ResultCode {
             println!("| HUB: failed to clear enable change for port {}", port + 1);
         }
 
+        let data = device.driver_data.downcast::<HubDevice>().unwrap();
         //This may indicate EM interference
         if !port_status.contains(HubPortStatus::Enabled)
             && port_status.contains(HubPortStatus::Connected)
@@ -447,8 +446,11 @@ fn HubCheckConnection(device: &mut UsbDevice, port: u8) -> ResultCode {
 }
 
 fn HubCheckForChange(device: &mut UsbDevice) {
-    let data =
-        unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
+    let data = device.driver_data.downcast::<HubDevice>().unwrap();
+
+    // TODO: THIS IS UNSOUND, AND WILL CAUSE ISSUES
+    // (fixing this will likely require restructuring the UsbDevice struct and a lot of refactoring)
+    let data = unsafe { &mut *(data as *mut HubDevice) };
 
     println!(
         "| HUB: HubCheckForChange for device {} children {}",
@@ -469,10 +471,10 @@ fn HubCheckForChange(device: &mut UsbDevice) {
 }
 
 fn HubCheckConnectionDevice(device: &mut UsbDevice, child: &mut UsbDevice) -> ResultCode {
-    let data =
-        unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
+    let device_ptr = device as *mut UsbDevice;
+    let data = device.driver_data.downcast::<HubDevice>().unwrap();
 
-    if child.parent == Some(device)
+    if child.parent == Some(device_ptr)
         && child.port_number < data.MaxChildren as u8
         && data.Children[child.port_number as usize] == child
     {
@@ -481,6 +483,7 @@ fn HubCheckConnectionDevice(device: &mut UsbDevice, child: &mut UsbDevice) -> Re
             return result;
         }
 
+        let data = device.driver_data.downcast::<HubDevice>().unwrap();
         return if data.Children[child.port_number as usize] == child {
             ResultCode::OK
         } else {
@@ -537,15 +540,9 @@ fn HubAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     device.device_check_connection = Some(HubCheckConnectionDevice);
 
     let boxed = Box::new(HubDevice::new());
-    let boxed_bytes = Box::into_raw(boxed);
-    let byte_slice =
-        unsafe { core::slice::from_raw_parts_mut(boxed_bytes as *mut u8, size_of::<HubDevice>()) };
-    let byte_bytes = unsafe { Box::from_raw(byte_slice as *mut [u8]) };
-    //TODO: I have no clue what I'm doing
-    device.driver_data = Some(byte_bytes);
+    device.driver_data = DriverData::new(boxed);
 
-    let hub =
-        unsafe { &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut HubDevice) };
+    let hub = device.driver_data.downcast::<HubDevice>().unwrap();
     println!("| HUB: Driver Data instantiated");
 
     hub.Header.data_size = size_of::<HubDevice>() as u32;
@@ -561,6 +558,7 @@ fn HubAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         return result;
     }
 
+    let hub = device.driver_data.downcast::<HubDevice>().unwrap();
     let HubDescriptor = hub.Descriptor.as_mut().unwrap().as_mut();
 
     if HubDescriptor.PortCount > MAX_CHILDREN_PER_DEVICE as u8 {
@@ -591,6 +589,8 @@ fn HubAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         println!("| HUB: failed to get hub status");
         return result;
     }
+
+    let hub = device.driver_data.downcast::<HubDevice>().unwrap();
 
     for port in 0..hub.MaxChildren {
         HubCheckConnection(device, port as u8);

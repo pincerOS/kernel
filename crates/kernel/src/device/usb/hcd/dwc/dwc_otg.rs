@@ -655,9 +655,6 @@ fn HcdChannelSendWait(
             return ResultCode::ErrorDevice;
         }
 
-        // if tries > 1 {
-        //     LOGF("HCD: Transfer to {} succeeded on attempt {}/3.\n", UsbGetDescription(device), tries);
-        // }
         return ResultCode::OK;
     }
 }

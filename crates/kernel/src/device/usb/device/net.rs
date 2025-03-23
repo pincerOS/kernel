@@ -51,19 +51,11 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         buffer.as_mut_ptr(),
         30,
     );
-    // shutdown();
-    let boxed = Box::new(UsbEndpointDevice::new());
-    let boxed_bytes = Box::into_raw(boxed);
-    let byte_slice = unsafe {
-        core::slice::from_raw_parts_mut(boxed_bytes as *mut u8, size_of::<UsbEndpointDevice>())
-    };
-    let byte_bytes = unsafe { Box::from_raw(byte_slice as *mut [u8]) };
-    //TODO: I have no clue what I'm doing
-    device.driver_data = Some(byte_bytes);
 
-    let endpoint_device = unsafe {
-        &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut UsbEndpointDevice)
-    };
+    let driver_data = Box::new(UsbEndpointDevice::new());
+    device.driver_data = DriverData::new(driver_data);
+
+    let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
     endpoint_device.endpoints[0] = Some(NetAnalyze);
     endpoint_device.endpoints[1] = Some(NetSend);
     endpoint_device.endpoints[2] = Some(NetReceive);

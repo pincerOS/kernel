@@ -24,12 +24,10 @@ use alloc::boxed::Box;
 
 pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u32) {
     let device = unsafe { &mut *endpoint.device };
-    let endpoint_device = unsafe {
-        &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut UsbEndpointDevice)
-    };
 
     let transfer_size = HcdUpdateTransferSize(device, endpoint.channel);
     device.last_transfer = endpoint.buffer_length - transfer_size;
+    let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     if hcint & HCINT_CHHLTD == 0 {
         println!(
@@ -93,13 +91,9 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
 
 pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: u32) {
     let device = unsafe { &mut *endpoint.device };
-    let endpoint_device = unsafe {
-        &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut UsbEndpointDevice)
-    };
-
     let transfer_size = HcdUpdateTransferSize(device, endpoint.channel);
-
     device.last_transfer = endpoint.buffer_length - transfer_size;
+    let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     //TODO: Hardcoded for usb-kbd for now
     let mut buffer = Box::new([0u8; 8]);
@@ -181,9 +175,7 @@ pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
     //     print!("{:02X} ", buffer[i]);
     // }
     // print!("\n");
-    let _endpoint_device = unsafe {
-        &mut *(device.driver_data.as_mut().unwrap().as_mut_ptr() as *mut UsbEndpointDevice)
-    };
+    // let mut endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     // if let Some(callback) = endpoint_device.endpoints[endpoint.device_endpoint_number as usize] {
     //     callback(buffer.as_mut_ptr());

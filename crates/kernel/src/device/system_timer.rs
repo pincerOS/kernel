@@ -12,10 +12,10 @@ use super::usb::usbd::endpoint::endpoint_descriptor;
 use crate::event::context::Context;
 use crate::sync::spin_sleep;
 use crate::sync::{ConstInit, PerCore, UnsafeInit, Volatile};
+use crate::SpinLock;
 use alloc::vec::Vec;
 use core::arch::asm;
 use core::panic;
-use crate::SpinLock;
 
 pub static SYSTEM_TIMER: UnsafeInit<Bcm2835SysTmr> = unsafe { UnsafeInit::uninit() };
 
@@ -229,8 +229,7 @@ pub fn timer_scheduler_handler(_ctx: &mut Context) {
         if event.timer_timer <= time {
             (event.callback)(event.endpoint);
             // println!("Timer time: {} cur time {} repeat time {} new time {}", event.timer_timer, time, (event.repeat_time as u64) * TIMER_SCHEDULER.timer_freq / 1000, time + (event.repeat_time as u64) * TIMER_SCHEDULER.timer_freq / 1000);
-            event.timer_timer =
-                time + (event.repeat_time as u64) * timer_freq / 1000;
+            event.timer_timer = time + (event.repeat_time as u64) * timer_freq / 1000;
         }
     }
     for event in events.iter() {
@@ -251,7 +250,9 @@ pub fn timer_scheduler_add_timer_event(
     callback: fn(endpoint_descriptor),
     endpoint: endpoint_descriptor,
 ) {
-    TIMER_SCHEDULER.lock().add_timer_event(time, callback, endpoint);
+    TIMER_SCHEDULER
+        .lock()
+        .add_timer_event(time, callback, endpoint);
 }
 
 impl TimerScheduler {
