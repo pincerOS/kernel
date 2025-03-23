@@ -148,8 +148,7 @@ impl bcm2711_pcm_driver {
             false
         }
         else {
-            self.set_bit(CS_A, 3, true);
-            true
+            self.set_bit(CS_A, 3, true)
         }
     }
 
@@ -158,16 +157,15 @@ impl bcm2711_pcm_driver {
             false
         }
         else {
-            self.set_bit(CS_A, 4, true);
-            true
+            self.set_bit(CS_A, 4, true)
         }
     }
 
-    fn get_transmission_fifo_threshold(&self) {
+    fn get_transmission_fifo_threshold(&mut self) {
         self.read_bits(CS_A, 5, 2)
     }
 
-    fn set_transmission_fifo_threshold(&self, val: u32) -> bool {
+    fn set_transmission_fifo_threshold(&mut self, val: u32) -> bool {
         if self.pcm_is_enabled() {
             false
         }
@@ -177,11 +175,11 @@ impl bcm2711_pcm_driver {
         }
     }
 
-    fn get_reception_fifo_threshold(&self) {
+    fn get_reception_fifo_threshold(&mut self) {
         self.read_bits(CS_A, 7, 2)
     }
 
-    fn set_reception_fifo_threshold(&self, val: u32) -> bool {
+    fn set_reception_fifo_threshold(&mut self, val: u32) -> bool {
         if self.pcm_is_enabled() {
             false
         }
@@ -190,4 +188,111 @@ impl bcm2711_pcm_driver {
             true
         }
     }
+
+    fn dma_dreq_is_enabled(&mut self) -> bool {
+        self.check_bit(CS_A, 9)
+    }
+
+    fn toggle_dma_dreq(&mut self, on: bool) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.set_bit(CS_A, 9, on)
+        }
+    }
+
+    fn transmission_fifo_in_sync(&mut self) -> bool {
+        self.check_bit(CS_A, 13)
+    }
+
+    fn reception_fifo_in_sync(&mut self) -> bool {
+        self.check_bit(CS_A, 14)
+    }
+
+    fn transmission_fifo_errored(&mut self) -> bool {
+        self.check_bit(CS_A, 15)
+    }
+
+    fn reception_fifo_errored(&mut self) -> bool {
+        self.check_bit(CS_A, 16)
+    }
+
+    fn clear_transmission_fifo_error(&mut self) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.set_bit(CS_A, 15, true)
+        }
+    }
+
+    fn clear_reception_fifo_error(&mut self) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.set_bit(CS_A, 16, true)
+        }
+    }
+
+    fn transmission_fifo_needs_writing(&mut self) -> bool {
+        self.check_bit(CS_A, 17)
+    }
+
+    fn reception_fifo_needs_reading(&mut self) -> bool {
+        self.check_bit(CS_A, 18)
+    }
+    
+    fn transmission_fifo_available(&mut self) -> bool {
+        self.check_bit(CS_A, 19)
+    }
+
+    fn reception_fifo_available(&mut self) -> bool {
+        self.check_bit(CS_A, 20)
+    }
+
+    fn transmission_fifo_empty(&mut self) -> bool {
+        self.check_bit(CS_A, 21)
+    }
+    
+    fn reception_fifo_full(&mut self) -> bool {
+        self.check_bit(CS_A, 22)
+    }
+
+    fn reception_sex_enabled(&mut self) -> bool {
+        self.check_bit(CS_A, 23)
+    }
+
+    fn toggle_reception_sex(&mut self) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.set_bit(CS_A, 23, true)
+        }
+    }
+
+    // for checking the PCM clock cycle.
+    // value written here will be read back 2 cycles later
+    fn check_clock_sync(&mut self) -> bool {
+        self.check_bit(CS_A, 24)
+    }
+    fn toggle_clock_sync(&mut self, on: bool) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.set_bit(CS_A, 24, on)
+        }
+    }
+
+    fn fifo_read(&mut self) -> u32 {
+        self.read_bits(FIFO_A, 0, 32)
+    }
+
+    fn fifo_write(&mut self, data: u32) {
+        self.write_bits(FIFO_A, 0, 32, data)
+    }
+
 }
