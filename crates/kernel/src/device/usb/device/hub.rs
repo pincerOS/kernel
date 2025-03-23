@@ -309,7 +309,7 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
         return result;
     }
 
-    // println!("| HUB: port {} status: {:#x}", port + 1, 10);
+    println!("| HUB: port {} status: {:#x}", port + 1, 10);
 
     result = HubChangePortFeature(device, HubPortFeature::FeatureConnectionChange, port, false);
 
@@ -355,7 +355,7 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
 
     let data = device.driver_data.downcast::<HubDevice>().unwrap();
     let child_dev = unsafe { &mut *(data.Children[port as usize]) };
-    // println!("| HUB: allocated new device {}", child_dev.number);
+    println!("| HUB: allocated new device {}", child_dev.number);
     let port_status = data.PortStatus[port as usize].Status;
     if port_status.contains(HubPortStatus::LowSpeedAttached) {
         child_dev.speed = UsbSpeed::Low;
@@ -365,9 +365,12 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
         child_dev.speed = UsbSpeed::Full;
     }
 
+    println!("| HUB: new device speed {:?}", child_dev.speed);
+
     child_dev.parent = Some(device);
     child_dev.port_number = port;
 
+    println!("| HUB: attach device {}", child_dev.number);
     result = UsbAttachDevice(child_dev);
     if result != ResultCode::OK {
         println!("| HUB: Could not connect to new device");
@@ -384,10 +387,10 @@ fn HubCheckConnection(device: &mut UsbDevice, port: u8) -> ResultCode {
     let prevConnected = prevHubStatus.contains(HubPortStatus::Connected);
     let result = HubPortGetStatus(device, port);
 
-    // println!(
-    //     "| HUB: HubCheckConnection for device {} port {}",
-    //     device.number, port
-    // );
+    println!(
+        "| HUB: HubCheckConnection for device {} port {}",
+        device.number, port
+    );
 
     if result != ResultCode::OK {
         println!("| HUB: failed to get status (1) for port {}", port + 1);
@@ -405,7 +408,7 @@ fn HubCheckConnection(device: &mut UsbDevice, port: u8) -> ResultCode {
     }
 
     if port_change.contains(HubPortStatusChange::ConnectedChanged) {
-        // println!("| HUB: Port {} connected changed", port + 1);
+        println!("| HUB: Port {} connected changed", port + 1);
         HubPortConnectionChanged(device, port);
     }
 
@@ -562,8 +565,9 @@ fn HubAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     for i in 0..MAX_CHILDREN_PER_DEVICE {
         hub.Children[i] = core::ptr::null_mut();
     }
-    // println!("| Hub Read Descriptor");
+    println!("| Hub Read Descriptor");
     let mut result = HubReadDescriptor(device);
+    println!("| Hub Read Descriptor done: {:?}", result);
     if result != ResultCode::OK {
         return result;
     }

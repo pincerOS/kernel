@@ -256,6 +256,8 @@ pub unsafe fn HcdTransmitChannel(device: &UsbDevice, channel: u8, buffer: *mut u
         //copy from buffer to dma_loc for 32 bytes
         memory_copy(dma_loc as *mut u8, buffer, 100);
 
+        crate::arch::memory::invalidate_physical_buffer_for_device(dma_loc as *mut (), 128);
+
         //print out the first 8 bytes stored in buffer
         // unsafe {
         //     println!("Buffer: {:#x} {:#x} {:#x} {:#x} {:#x} {:#x} {:#x} {:#x}", *(buffer), *((buffer as *const u8).offset(1)), *((buffer as *const u8).offset(2)), *((buffer as *const u8).offset(3)), *((buffer as *const u8).offset(4)), *((buffer as *const u8).offset(5)), *((buffer as *const u8).offset(6)), *((buffer as *const u8).offset(7)));
@@ -365,7 +367,7 @@ fn HcdChannelInterruptToError(device: &mut UsbDevice, hcint: u32, isComplete: bo
     return result;
 }
 
-pub const RequestTimeout: u32 = 5000;
+pub const RequestTimeout: u32 = 50000;
 
 pub fn HcdChannelSendWaitOne(
     device: &mut UsbDevice,
@@ -935,6 +937,7 @@ pub unsafe fn HcdSubmitControlMessage(
     buffer_length: u32,
     request: &mut UsbDeviceRequest,
 ) -> ResultCode {
+    // println!("| HcdSubmitControlMessage for device {}", pipe.device);
     let roothub_device_number = unsafe { (*device.bus).roothub_device_number };
     if pipe.device == roothub_device_number as u8 {
         return unsafe { HcdProcessRootHubMessage(device, pipe, buffer, buffer_length, request) };

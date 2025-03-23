@@ -31,6 +31,8 @@ use crate::device::usb::usbd::transfer::*;
 
 use core::ptr;
 
+const DEBUG_DISABLE_MAX_PACKET_SIZE: bool = true;
+
 //TODO: This needs checking under load
 pub static USB_TRANSFER_QUEUE: UsbTransferQueue = UsbTransferQueue::new();
 
@@ -55,11 +57,13 @@ pub fn UsbInitialise(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
         return ResultCode::ErrorCompiler;
     }
 
+    println!("| HcdInitialize");
     if HcdInitialize(bus, base_addr) != ResultCode::OK {
         println!("Error: HcdInitialize failed");
         return ResultCode::ErrorDevice;
     }
 
+    println!("| HcdStart");
     if HcdStart(bus) != ResultCode::OK {
         println!("Error: HcdStart failed");
         return ResultCode::ErrorDevice;
@@ -279,7 +283,7 @@ pub unsafe fn UsbGetDescriptor(
     recipient: u8,
 ) -> ResultCode {
     let result;
-    // println!("| USBD: Getting descriptor at device {}", device.number);
+    println!("| USBD: Getting descriptor at device {}", device.number);
     result = unsafe {
         UsbControlMessage(
             device,
@@ -293,7 +297,8 @@ pub unsafe fn UsbGetDescriptor(
                 _reserved: 0,
             },
             buffer,
-            length,
+            // length,
+            minimumLength,
             &mut UsbDeviceRequest {
                 request_type: 0x80 | recipient,
                 request: UsbDeviceRequestRequest::GetDescriptor,
@@ -321,8 +326,11 @@ pub unsafe fn UsbGetDescriptor(
 fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
     let result;
     let descriptor_ptr = &mut device.descriptor as *mut UsbDeviceDescriptor as *mut u8;
+    println!("| UsbReadDeviceDescriptor; speed: {:?}", device.speed);
     if device.speed == UsbSpeed::Low {
-        device.descriptor.max_packet_size0 = 8;
+        if !DEBUG_DISABLE_MAX_PACKET_SIZE {
+            device.descriptor.max_packet_size0 = 8;
+        }
         result = unsafe {
             UsbGetDescriptor(
                 device,
@@ -355,8 +363,10 @@ fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
             )
         };
     } else if device.speed == UsbSpeed::Full {
-        device.descriptor.max_packet_size0 = 64;
-        // device.descriptor.max_packet_size0 = 8;
+        if !DEBUG_DISABLE_MAX_PACKET_SIZE {
+            device.descriptor.max_packet_size0 = 64;
+            // device.descriptor.max_packet_size0 = 8;
+        }
         result = unsafe {
             UsbGetDescriptor(
                 device,
@@ -372,6 +382,7 @@ fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
         if result != ResultCode::OK {
             return result;
         }
+        println!("//RIGHT HERE!");
 
         if device.last_transfer == size_of::<UsbDeviceDescriptor>() as u32 {
             return result;
@@ -389,8 +400,10 @@ fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
             )
         };
     } else {
-        device.descriptor.max_packet_size0 = 64;
-        // device.descriptor.max_packet_size0 = 8;
+        if !DEBUG_DISABLE_MAX_PACKET_SIZE {
+            device.descriptor.max_packet_size0 = 64;
+            // device.descriptor.max_packet_size0 = 8;
+        }
         return unsafe {
             UsbGetDescriptor(
                 device,
@@ -624,14 +637,14 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
 pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
     let bus = unsafe { &mut *(device.bus) };
 
-    // println!("| USBD: Attaching device {}", device.number);
+    println!("| USBD: Attaching device {}", device.number);
 
     let address = device.number;
     device.number = 0;
 
     let mut result = UsbReadDeviceDescriptor(device);
     //print USB device descriptor
-    // println!("| USBD: Device descriptor:\n {:#?}", device.descriptor);
+    println!("| USBD: Device descriptor: {:?}", device.descriptor);
     if result != ResultCode::OK {
         println!("| USBD: Failed to read device descriptor");
         return result;
@@ -649,7 +662,7 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
             }
         }
     } else {
-        // println!("| USBD: No parent device");
+        println!("| USBD: No parent device");
     }
 
     result = UsbSetAddress(device, address as u8);
@@ -665,7 +678,7 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
         println!("| USBD: Failed to read device descriptor");
         return result;
     }
-    // println!("| USBD: Device descriptor:\n {:#?}", device.descriptor);
+    println!("| USBD: Device descriptor: {:?}", device.descriptor);
 
     let vendor_id = device.descriptor.vendor_id;
     let product_id = device.descriptor.product_id;
@@ -680,10 +693,10 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
         return result;
     }
 
-    // println!(
-    //     "\n Device interface class: {} at device number {}\n",
-    //     device.interfaces[0].class as u16, device.number
-    // );
+    println!(
+        "\n Device interface class: {} at device number {}\n",
+        device.interfaces[0].class as u16, device.number
+    );
 
     if (device.interfaces[0].class as usize) < INTERFACE_CLASS_ATTACH_COUNT {
         // for j in 0..device.configuration.interface_count {
@@ -724,6 +737,7 @@ pub fn UsbAllocateDevice(mut devices: Box<UsbDevice>) -> ResultCode {
     device.error = UsbTransferError::NoError;
     device.port_number = 0;
     device.configuration_index = 0xff;
+    device.descriptor.max_packet_size0 = 8;
 
     for number in 0..MaximumDevices {
         if bus.devices[number].is_none() {

@@ -278,9 +278,15 @@ impl VideoCoreMailbox {
         let read_reg = Volatile(self.base.wrapping_byte_add(Self::MBOX_READ));
         let write_reg = Volatile(self.base.wrapping_byte_add(Self::MBOX_WRITE));
 
+        let mut i = 0;
+
         unsafe {
             while (status_reg.read() & Self::STATUS_FULL) != 0 {
                 core::hint::spin_loop();
+                i = i + 1;
+                if i % 100 == 0 {
+                    // println!("mailbox full...");
+                }
             }
         }
         unsafe { core::arch::asm!("dsb sy") }; // TODO
@@ -316,6 +322,9 @@ impl VideoCoreMailbox {
             memory::invalidate_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
         }
         unsafe { write_reg.write(value) };
+
+        // TODO: why is this load-bearing...
+        // crate::sync::spin_sleep(20_000);
 
         loop {
             unsafe {
@@ -372,12 +381,24 @@ impl VideoCoreMailbox {
             self.mailbox_call(8, &mut *buffer).unwrap();
         }
 
+        // let debug = crate::device::LED_OUT.get();
+        // debug.put(0b11111111);
+        // debug.sleep(250_000);
+
         let words: &[u32] = bytemuck::cast_slice::<_, u32>(&*buffer);
 
         let response = words[1];
         let response_buffer_size = words[3];
         let response_code = words[4];
         let mut response_size = response_code & 0x7FFFFFFF;
+
+        // for b in u32::to_be_bytes(response_code) {
+        //     debug.put(b);
+        //     debug.sleep(250_000);
+        // }
+        // debug.sleep(250_000);
+        // debug.put(0b11111111);
+        // debug.sleep(250_000);
 
         if (response_code & 0x80000000) == 0 {
             return Err(MailboxError);
@@ -486,7 +507,7 @@ impl VideoCoreMailbox {
         let words: &[u32; BUFFER_WORDS] =
             bytemuck::cast_slice::<_, u32>(&buffer).try_into().unwrap();
 
-        let response = words[1];
+        let _response = words[1];
 
         // TODO: parse the output to get these, rather than assuming their locations
         let width = words[10] as usize;
@@ -498,7 +519,7 @@ impl VideoCoreMailbox {
         assert!(pitch == width * 4);
 
         // println!("{:?}", bytemuck::cast_slice_mut::<_, u32>(&mut buffer));
-        println!("Response: {response:#010x}\nbuffer: {buffer_ptr:#010x}, {buffer_size:#010x}, {pitch:#010x}");
+        // println!("Response: {response:#010x}\nbuffer: {buffer_ptr:#010x}, {buffer_size:#010x}, {pitch:#010x}");
 
         assert!(buffer_ptr % 4096 == 0);
         RawFB {
@@ -533,12 +554,12 @@ pub struct RawFB {
 
 pub struct Surface {
     alternate: alloc::boxed::Box<[u128]>,
-    buffer: &'static mut [u128],
+    pub buffer: &'static mut [u128],
     framerate: usize,
     time_step: usize,
     width: usize,
     height: usize,
-    pitch_elems: usize,
+    pub pitch_elems: usize,
 }
 
 #[cfg(target_arch = "aarch64")]
