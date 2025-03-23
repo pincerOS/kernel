@@ -148,9 +148,17 @@ dependencies = [
  "endian",
  "gfx",
  "initfs",
+ "libcsud",
  "linked_list_allocator",
  "smallbox",
  "tinyvec",
+]
+
+[[package]]
+name = "libcsud"
+version = "0.1.0"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

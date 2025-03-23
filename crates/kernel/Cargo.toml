@@ -15,3 +15,6 @@ endian = { path = "../endian" }
 elf = { path = "../elf" }
 initfs = { path = "../initfs"}
 gfx = { path = "../gfx" }
+
+[dev-dependencies]
+libcsud = { path = "../libcsud" }

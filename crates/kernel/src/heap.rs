@@ -194,7 +194,8 @@ unsafe impl GlobalAlloc for VirtAllocator {
                 .unwrap()
             };
         }
-        // println!("Allocating ptr {:p}, layout {layout:?}", vaddr_base as *mut u8);
+        // println!("Allocating ptr {:p}, layout {layout:?} ({} pages)", vaddr_base as *mut u8, pages);
+        // unsafe { core::ptr::write_bytes(vaddr_base as *mut u8, 0, size) };
 
         vaddr_base as *mut u8
     }

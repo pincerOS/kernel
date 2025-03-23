@@ -139,9 +139,11 @@ impl UARTInner {
             console.input(bytes);
             if bytes.contains(&b'\n') {
                 console.render();
+                drop(console);
+                spin_sleep(10000);
+            } else {
+                drop(console);
             }
-            drop(console);
-            spin_sleep(3000);
         }
     }
 }

@@ -24,7 +24,7 @@ use device_tree::util::MappingIterator;
 use device_tree::DeviceTree;
 use usb::usbd::endpoint::endpoint_descriptor;
 
-const ENABLE_USB: bool = true;
+const ENABLE_USB: bool = false;
 
 // TODO: a non-O(n²) approach to device discovery and registration
 pub fn discover_compatible<'a, 'b>(
@@ -324,9 +324,14 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
 
     if ENABLE_USB {
         println!("| Initializing USB");
-        let usb = discover_compatible(tree, b"brcm,bcm2708-usb")
+        let usb = discover_compatible(tree, b"brcm,bcm2835-usb")
             .unwrap()
             .next()
+            .or_else(|| {
+                discover_compatible(tree, b"brcm,bcm2708-usb")
+                    .unwrap()
+                    .next()
+            })
             .unwrap();
 
         let (usb_addr, _) = find_device_addr(usb).unwrap().unwrap();

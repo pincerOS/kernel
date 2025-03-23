@@ -508,6 +508,11 @@ fn HubCheckConnectionDevice(device: &mut UsbDevice, child: &mut UsbDevice) -> Re
 }
 
 fn HubAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
+    println!("| Device config:");
+    println!("|   config: {:?}", device.configuration);
+    println!("|   interfaces: {:?}", &device.interfaces[..device.descriptor.configuration_count as usize]);
+    println!("|   endpoints: {:?}", &device.endpoints[interface_number as usize][..device.interfaces[interface_number as usize].endpoint_count as usize]);
+
     if device.interfaces[interface_number as usize].endpoint_count != 1 {
         println!(
             "| HUB: cannot enumerate hub with {} endpoints",
