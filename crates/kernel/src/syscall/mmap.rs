@@ -43,7 +43,7 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
         } else {
             let file = proc.file_descriptors.lock().get(fd).cloned();
             let Some(file) = file else {
-                context.regs().regs[0] = i64::from(-1) as usize;
+                context.regs().regs[0] = i64::from(-10) as usize;
                 return context.resume_final();
             };
             MappingKind::File(file)
@@ -63,8 +63,12 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
                 context.resume_final()
             }
             Err(e) => {
+                use crate::process::mem::MmapError;
                 let code = match e {
-                    _ => -1,
+                    MmapError::MemoryRangeCollision => -2,
+                    MmapError::NoSuchEntry => -3,
+                    MmapError::RequestedSizeUnavailable => -4,
+                    MmapError::FileError => -5,
                 };
                 context.regs().regs[0] = code as usize;
                 context.resume_final()

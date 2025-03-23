@@ -92,7 +92,7 @@ pub extern "C" fn main() {
     let mut editor = editor::LineEditor::new();
 
     let cwd = 3;
-    let fd = ulib::sys::openat(cwd, b"shell.elf", 0, 0).unwrap();
+    let fd = ulib::sys::openat(cwd, b"doomgeneric", 0, 0).unwrap();
 
     let (_shell, shell_stdin_tx, shell_stdout_rx) = {
         let (shell_stdin_rx, shell_stdin_tx) = pipe(0).unwrap();

@@ -18,6 +18,7 @@ pub fn stats() -> HeapStats {
     HeapStats { used: 0 }
 }
 
+#[derive(Debug)]
 pub enum AllocatorHack {
     Uninit,
     Bump(BumpAllocator),
@@ -57,6 +58,7 @@ unsafe impl GlobalAlloc for InterruptSpinLock<AllocatorHack> {
 //     }
 // }
 
+#[derive(Debug)]
 pub struct BumpAllocator {
     pub offset: AtomicUsize,
     pub max: AtomicUsize,
@@ -118,6 +120,7 @@ unsafe impl GlobalAlloc for BumpAllocator {
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
 }
 
+#[derive(Debug)]
 pub struct VirtAllocator {
     pub base: usize,
     pub offset: AtomicUsize,

@@ -89,6 +89,8 @@ fn init_buffer(width: usize, height: usize) -> BufferInfo {
 
     let fd = unsafe { ulib::sys::sys_memfd_create() } as u32;
 
+    println!("created new memfd: {}", fd);
+
     let buffer = unsafe { mmap(0, total_size, 0, 0, fd, 0) }.unwrap();
     println!("buffer allocated, {buffer:p}");
 
@@ -183,16 +185,16 @@ impl WindowManager {
     ) -> (Index, U16Vec2) {
         let size = pref_size.min(self.screen_dims).max(min_size);
 
-        if self
+        let overflow = self
             .default_pos
             .saturating_add(size)
-            .cmpgt(self.screen_dims)
-            .any()
-        {
-            self.default_pos = U16Vec2::ZERO;
+            .cmpgt(self.screen_dims);
+        if overflow.any() {
+            // self.default_pos = U16Vec2::ZERO;
+            self.default_pos = self.default_pos * U16Vec2::new((!overflow.x) as u16, (!overflow.y) as u16);
         }
         let pos = self.default_pos;
-        self.default_pos += U16Vec2::new(16, 16);
+        self.default_pos += U16Vec2::new(128, 128);
 
         let idx = self.windows.insert(Window {
             pos,
@@ -315,6 +317,8 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
     let mut intermediate_fb = alloc::vec![0u128; fb.data.len()];
     let mut cursor = U16Vec2::new(0, 0);
 
+    let mut any_updated = true;
+
     loop {
         let mut buf = [0u64; 32];
         while let Ok((len, msg)) = recv_nonblock(server_socket, bytemuck::bytes_of_mut(&mut buf)) {
@@ -328,7 +332,7 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
             window_manager.windows[window].client = idx;
         }
 
-        intermediate_fb.fill(0);
+        intermediate_fb.fill(0xFFFF00FFFFFF00FFFFFF00FFFFFF00FF);
 
         // TODO: better scheduling for this
         loop {
@@ -395,8 +399,6 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                 }
             }
         }
-
-        let mut any_updated = false;
 
         for (i, client) in clients.iter_mut() {
             let mut ev_limit = 10;
@@ -487,6 +489,7 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
         if any_updated || cursor_moved {
             framebuffer::present(&mut fb, &intermediate_fb);
         }
+        any_updated = false;
 
         if !to_remove.is_empty() {
             to_remove.sort_by(|a, b| a.cmp(b).reverse());

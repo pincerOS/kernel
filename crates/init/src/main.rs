@@ -6,7 +6,7 @@ extern crate ulib;
 
 mod runtime;
 
-use ulib::sys::spawn_elf;
+use ulib::sys::{spawn_elf, sys_sleep_ms};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
@@ -29,6 +29,16 @@ pub extern "C" fn main() {
         stdout: None,
     })
     .unwrap();
+
+    for _ in 0..4 {
+        spawn_elf(&ulib::sys::SpawnArgs {
+            fd: ulib::sys::openat(root_fd, "console.elf".as_bytes(), 0, 0).unwrap(),
+            stdin: None,
+            stdout: None,
+        })
+        .unwrap();
+        unsafe { sys_sleep_ms(1000); }
+    }
 
     let path = b"shell.elf";
     let file = ulib::sys::openat(root_fd, path, 0, 0).unwrap();

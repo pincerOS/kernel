@@ -125,15 +125,26 @@ impl UARTInner {
             }
         }
     }
+
+    pub fn write_bytes(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.writec(*b);
+        }
+        if super::CONSOLE.is_initialized() {
+            let mut console = super::CONSOLE.get().lock();
+            console.input(bytes);
+            // if bytes.contains(&b'\n') {
+            //     console.render();
+            // }
+        }
+    }
 }
 
 unsafe impl Send for UARTInner {}
 
 impl core::fmt::Write for UARTInner {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        for b in s.bytes() {
-            self.writec(b);
-        }
+        self.write_bytes(s.as_bytes());
         Ok(())
     }
 }

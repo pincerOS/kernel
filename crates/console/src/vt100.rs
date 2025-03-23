@@ -1,8 +1,8 @@
 use alloc::boxed::Box;
 use alloc::vec;
 
-use crate::color::rgba;
-use crate::grid::{Colors, GridRef};
+use super::grid::{Colors, GridRef};
+use gfx::color::rgba;
 
 // TODO: line/row separation
 // TODO: handling double width chars (emoji)
