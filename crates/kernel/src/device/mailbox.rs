@@ -101,6 +101,56 @@ unsafe impl PropertyRequest for PropSetPowerState {
     }
 }
 
+#[repr(C, align(4))]
+#[derive(Copy, Clone)]
+pub struct PropGetStatusLED {}
+unsafe impl bytemuck::Zeroable for PropGetStatusLED {}
+unsafe impl bytemuck::Pod for PropGetStatusLED {}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct PropGetStatusLEDResponse {
+    pub pin: u32,
+    pub state: u32,
+}
+unsafe impl bytemuck::Zeroable for PropGetStatusLEDResponse {}
+unsafe impl bytemuck::Pod for PropGetStatusLEDResponse {}
+
+unsafe impl PropertyRequest for PropGetStatusLED {
+    const TAG: u32 = 0x00030041;
+    type Output = PropGetStatusLEDResponse;
+    unsafe fn parse_response(data: &[u8]) -> Self::Output {
+        *bytemuck::from_bytes(&data[..size_of::<Self::Output>()])
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct PropSetStatusLED {
+    pub pin: u32,
+    pub state: u32,
+}
+unsafe impl bytemuck::Zeroable for PropSetStatusLED {}
+unsafe impl bytemuck::Pod for PropSetStatusLED {}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct PropSetStatusLEDResponse {
+    pub pin: u32,
+    pub state: u32,
+}
+unsafe impl bytemuck::Zeroable for PropSetStatusLEDResponse {}
+unsafe impl bytemuck::Pod for PropSetStatusLEDResponse {}
+
+unsafe impl PropertyRequest for PropSetStatusLED {
+    const TAG: u32 = 0x00038041;
+    type Output = PropSetStatusLEDResponse;
+    unsafe fn parse_response(data: &[u8]) -> Self::Output {
+        *bytemuck::from_bytes(&data[..size_of::<Self::Output>()])
+    }
+}
+
+
 #[derive(Debug)]
 pub struct MailboxError;
 
@@ -136,12 +186,14 @@ impl VideoCoreMailbox {
 
         unsafe {
             while (status_reg.read() & Self::STATUS_FULL) != 0 {
-                crate::arch::wfe();
+                core::hint::spin_loop();
             }
         }
+        unsafe { core::arch::asm!("dsb sy") }; // TODO
 
         let buffer_bytes = size_of_val(buffer);
         let buffer_ptr = buffer.as_mut_ptr();
+
         let addr = physical_addr(buffer_ptr.addr()).unwrap();
         assert!(addr <= u32::MAX as u64 && addr % 16 == 0);
         assert!(channel as u32 <= Self::CHANNEL_MASK);
@@ -162,9 +214,12 @@ impl VideoCoreMailbox {
         // (GPU memory and CPU memory may have different virtual addresses)
 
         unsafe {
-            memory::clean_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
+            memory::invalidate_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
         }
         unsafe { write_reg.write(value) };
+
+        // TODO: why is this load-bearing...
+        crate::sync::spin_sleep(1_000);
 
         loop {
             unsafe {
@@ -176,7 +231,7 @@ impl VideoCoreMailbox {
             let message = unsafe { read_reg.read() };
             if (message & Self::CHANNEL_MASK) == channel as u32 {
                 unsafe {
-                    memory::invalidate_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
+                    memory::clean_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
                 }
                 break;
             } else {
@@ -221,11 +276,23 @@ impl VideoCoreMailbox {
             self.mailbox_call(8, &mut *buffer).unwrap();
         }
 
+        // let debug = crate::device::LED_OUT.get();
+        // debug.put(0b11111111);
+        // debug.sleep(250_000);
+
         let words: &[u32] = bytemuck::cast_slice::<_, u32>(&*buffer);
 
         let response = words[1];
         let response_size = words[3];
         let response_code = words[4];
+
+        // for b in u32::to_be_bytes(response_code) {
+        //     debug.put(b);
+        //     debug.sleep(250_000);
+        // }
+        // debug.sleep(250_000);
+        // debug.put(0b11111111);
+        // debug.sleep(250_000);
 
         if response_code != 0x80000000 {
             return Err(MailboxError);
@@ -269,6 +336,7 @@ impl VideoCoreMailbox {
         const TAG_BLANK_SCREEN: u32 = 0x00040002;
         const TAG_SET_PHYS_DIMS: u32 = 0x00048003;
         const TAG_SET_VIRT_DIMS: u32 = 0x00048004;
+        const TAG_SET_VIRT_OFF: u32 = 0x00048009;
         const TAG_SET_DEPTH: u32 = 0x00048005;
         const TAG_SET_PIXEL_ORDER: u32 = 0x00048006;
         const TAG_GET_PITCH: u32 = 0x00040008;
@@ -299,6 +367,11 @@ impl VideoCoreMailbox {
             0,
             width as u32,
             height as u32,
+            TAG_SET_VIRT_OFF,
+            8,
+            0,
+            0,
+            0,
             TAG_SET_DEPTH,
             4,
             0,
@@ -332,9 +405,13 @@ impl VideoCoreMailbox {
 
         let response = words[1];
 
-        let buffer_ptr = words[23];
-        let buffer_size = words[24] as usize;
-        let pitch = words[28] as usize;
+        // TODO: parse the output to get these, rather than assuming their locations
+        let width = words[10] as usize;
+        let height = words[11] as usize;
+        let _pixel_order = words[24];
+        let buffer_ptr = words[28] & 0x3FFFFFFF;
+        let buffer_size = words[29] as usize;
+        let pitch = words[33] as usize;
         assert!(pitch == width * 4);
         let pitch_elems = pitch / 4;
 

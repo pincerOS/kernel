@@ -99,6 +99,10 @@ impl UARTInner {
         (unsafe { self.reg(Self::UART_FR).read() } & (1 << 4) > 0)
     }
     pub fn writec(&mut self, c: u8) {
+        if super::LED_OUT.is_initialized() {
+            super::LED_OUT.get().put(c);
+            // crate::sync::spin_sleep(33 * 1000);
+        }
         unsafe {
             while self.transmit_fifo_full() {}
             self.reg(Self::UART_DR).write(c as u32);

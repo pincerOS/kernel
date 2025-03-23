@@ -95,8 +95,56 @@ pub static PER_CORE_INIT: UnsafeInit<Vec<InitTask>> = unsafe { UnsafeInit::unini
 
 pub static GPIO: UnsafeInit<SpinLock<gpio::bcm2711_gpio_driver>> = unsafe { UnsafeInit::uninit() };
 
+pub static LED_OUT: UnsafeInit<LEDDebugger> = unsafe { UnsafeInit::uninit() };
+
+pub struct LEDDebugger {
+    pins: [u8; 8],
+}
+impl LEDDebugger {
+    pub fn init(pins: [u8; 8]) -> Self {
+        let mut gpio = GPIO.get().lock();
+        for pin in pins {
+            gpio.set_function(pin, gpio::GpioFunction::Output);
+        }
+        Self { pins }
+    }
+    pub fn put(&self, value: u8) {
+        let mut gpio = GPIO.get().lock();
+        let mut value = value;
+        for pin in self.pins.iter().rev().copied() {
+            if (value & 1) == 0 {
+                gpio.set_low(pin);
+            } else {
+                gpio.set_high(pin);
+            }
+            value >>= 1;
+        }
+    }
+    pub fn sleep(&self, time: u64) {
+        let timer = system_timer::SYSTEM_TIMER.get();
+        let target = timer.get_time() + time;
+        while timer.get_time() < target {
+            core::hint::spin_loop();
+        }
+    }
+}
+
 pub fn init_devices(tree: &DeviceTree<'_>) {
     let mut init_fns: Vec<InitTask> = Vec::new();
+
+    {
+        let gpio = discover_compatible(tree, b"brcm,bcm2711-gpio")
+            .unwrap()
+            .next()
+            .unwrap();
+        let (gpio_addr, _) = find_device_addr(gpio).unwrap().unwrap();
+        let gpio_base = unsafe { map_device(gpio_addr) }.as_ptr();
+        let gpio = unsafe { gpio::bcm2711_gpio_driver::init_with_defaults(gpio_base, true) };
+        unsafe { GPIO.init(SpinLock::new(gpio)) };
+    }
+
+    let debug = LEDDebugger::init([16, 20, 21, 6, 5, 22, 27, 17]);
+    unsafe { LED_OUT.init(debug) };
 
     let mut uarts = discover_compatible(tree, b"arm,pl011").unwrap();
     {
@@ -134,13 +182,26 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         println!("| last reset: {:#010x}", WATCHDOG.get().lock().last_reset());
     }
 
+    {
+        println!("| initializing timer");
+        let timer_iter = discover_compatible(tree, b"brcm,bcm2835-system-timer")
+            .unwrap()
+            .next()
+            .unwrap();
+        let (timer_addr, _) = find_device_addr(timer_iter).unwrap().unwrap();
+        let timer_base = unsafe { map_device(timer_addr) }.as_ptr();
+        println!("| timer addr: {:#010x}", timer_addr);
+        unsafe { system_timer::initialize_system_timer(timer_base) };
+        let time = system_timer::get_time();
+        println!("| timer initialized, time: {time}");
+    }
+
     if let Some(gic) = discover_compatible(tree, b"arm,gic-400").unwrap().next() {
         println!("| initializing GIC-400 interrupt controller");
         let (gic_addr, _) = find_device_addr(gic).unwrap().unwrap();
         let gic_base = unsafe { map_device_block(gic_addr, 0x8000) }.as_ptr();
 
         println!("| GIC-400 addr: {:#010x}", gic_addr);
-        println!("| GIC-400 base: {:#010x}", gic_base as usize);
 
         let gic = unsafe { gic::Gic400Driver::init(gic_base) };
         unsafe { gic::GIC.init(gic) };
@@ -169,34 +230,6 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         }
     }
 
-    {
-        println!("| initializing timer");
-        let timer_iter = discover_compatible(tree, b"brcm,bcm2835-system-timer")
-            .unwrap()
-            .next()
-            .unwrap();
-        let (timer_addr, _) = find_device_addr(timer_iter).unwrap().unwrap();
-        let timer_base = unsafe { map_device(timer_addr) }.as_ptr();
-        println!("| timer addr: {:#010x}", timer_addr);
-        unsafe { system_timer::initialize_system_timer(timer_base) };
-        let time = system_timer::get_time();
-        println!("| timer initialized, time: {time}");
-    }
-
-    {
-        let gpio = discover_compatible(tree, b"brcm,bcm2711-gpio")
-            .unwrap()
-            .next()
-            .unwrap();
-        let (gpio_addr, _) = find_device_addr(gpio).unwrap().unwrap();
-        let gpio_base = unsafe { map_device(gpio_addr) }.as_ptr();
-        println!("| GPIO controller addr: {:#010x}", gpio_addr);
-        println!("| GPIO controller base: {:#010x}", gpio_base as usize);
-        let gpio = unsafe { gpio::bcm2711_gpio_driver::init_with_defaults(gpio_base, true) };
-        unsafe { GPIO.init(SpinLock::new(gpio)) };
-        println!("| initialized GPIO");
-    }
-
     // Set up the interrupt controllers to preempt on the arm generic
     // timer interrupt.
     if gic::GIC.is_initialized() {
@@ -217,8 +250,8 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
     init_fns.push(Box::new(|| {
         // Run the generic timer at a 1ms interval for preemption
         system_timer::ARM_GENERIC_TIMERS.with_current(|timer| {
-            timer.intialize_timer();
-            timer.set_timer_milliseconds(1);
+            // timer.intialize_timer();
+            // timer.set_timer_milliseconds(1);
         });
     }));
 
@@ -236,6 +269,8 @@ fn timer_handler(ctx: &mut crate::event::context::Context) {
 
 /// Discovers and starts all cores, and returns the number of cores found.
 pub fn enable_cpus(tree: &device_tree::DeviceTree<'_>, start_fn: unsafe extern "C" fn()) -> usize {
+    return 1;
+
     use crate::memory::map_physical;
     use device_tree::format::StructEntry;
     use device_tree::util::find_node;
