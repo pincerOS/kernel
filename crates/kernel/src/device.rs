@@ -13,12 +13,15 @@ pub mod uart;
 pub mod usb;
 pub mod watchdog;
 
+pub mod console;
+
 use crate::device::usb::usbd::device::UsbBus;
 use crate::memory;
 use crate::memory::{map_device, map_device_block};
 use crate::sync::{InterruptSpinLock, UnsafeInit};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use console::Console;
 use device_tree::format::StructEntry;
 use device_tree::util::MappingIterator;
 use device_tree::DeviceTree;
@@ -107,6 +110,42 @@ pub static MAILBOX: UnsafeInit<InterruptSpinLock<mailbox::VideoCoreMailbox>> =
 
 pub static BOX: UnsafeInit<Box<UsbBus>> = unsafe { UnsafeInit::uninit() };
 
+pub static CONSOLE: UnsafeInit<InterruptSpinLock<Console>> = unsafe { UnsafeInit::uninit() };
+
+// pub static LED_OUT: UnsafeInit<LEDDebugger> = unsafe { UnsafeInit::uninit() };
+
+// pub struct LEDDebugger {
+//     pins: [u8; 8],
+// }
+// impl LEDDebugger {
+//     pub fn init(pins: [u8; 8]) -> Self {
+//         let mut gpio = GPIO.get().lock();
+//         for pin in pins {
+//             gpio.set_function(pin, gpio::GpioFunction::Output);
+//         }
+//         Self { pins }
+//     }
+//     pub fn put(&self, value: u8) {
+//         let mut gpio = GPIO.get().lock();
+//         let mut value = value;
+//         for pin in self.pins.iter().rev().copied() {
+//             if (value & 1) == 0 {
+//                 gpio.set_low(pin);
+//             } else {
+//                 gpio.set_high(pin);
+//             }
+//             value >>= 1;
+//         }
+//     }
+//     pub fn sleep(&self, time: u64) {
+//         let timer = system_timer::SYSTEM_TIMER.get();
+//         let target = timer.get_time() + time;
+//         while timer.get_time() < target {
+//             core::hint::spin_loop();
+//         }
+//     }
+// }
+
 pub fn init_devices(tree: &DeviceTree<'_>) {
     let mut init_fns: Vec<InitTask> = Vec::new();
 
@@ -171,6 +210,12 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         unsafe { bcm2835_aux::MINI_UART.init(bcm2835_aux::MiniUartLock::new(miniuart)) };
         println!("| initialized Mini UART");
     }
+
+    // let debug = LEDDebugger::init([16, 20, 21, 6, 5, 22, 27, 17]);
+    // unsafe { LED_OUT.init(debug) };
+
+    let console = console::init();
+    unsafe { CONSOLE.init(InterruptSpinLock::new(console)) };
 
     {
         let mut guard = MAILBOX.get().lock();
@@ -338,6 +383,8 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
     }));
 
     unsafe { PER_CORE_INIT.init(init_fns) };
+
+    println!("| device init done");
 }
 
 fn preemption_callback(_endpoint: endpoint_descriptor) {

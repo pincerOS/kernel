@@ -619,6 +619,9 @@ impl Surface {
     pub fn dimensions(&self) -> (usize, usize) {
         (self.width, self.height)
     }
+    pub fn stride(&self) -> usize {
+        self.pitch_elems
+    }
     pub fn framerate(&self) -> usize {
         self.framerate
     }

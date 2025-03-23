@@ -89,6 +89,7 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     }
     INIT_WAIT.store(true, Ordering::SeqCst);
 
+    println!("| init devices per core");
     device::init_devices_per_core();
 
     println!("| creating initial thread");

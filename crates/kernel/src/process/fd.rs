@@ -165,7 +165,7 @@ impl FileDescriptor for UartFd {
         boxed_future(async move {
             // TODO: async UART handling
             let v = buf[0];
-            self.0.lock().writec(v);
+            self.0.lock().write_bytes(&[v]);
             FileDescResult::ok(1)
         })
     }

@@ -149,6 +149,7 @@ dependencies = [
  "elf",
  "endian",
  "filesystem",
+ "gfx",
  "initfs",
  "linked_list_allocator",
  "smallbox",
