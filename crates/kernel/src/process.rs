@@ -113,7 +113,11 @@ impl Process {
             new_process.page_table.lock().reserve_memory_range(*range_start, node.size, match node.file_descriptor_index {
                 None => u32::MAX,
                 Some(idx) => idx,
-            }, *range_start != 0x200_000);
+            }, *range_start != 0x200_000).unwrap();
+            
+            if node.is_physical {
+                new_process.page_table.lock().set_range_as_physical(*range_start);
+            }
 
             let mut copy_idx: usize = 0;
             let copy_size = core::cmp::min(node.size, buf_size);
@@ -420,4 +424,38 @@ impl UserPageTable {
 
         return Err(MappingError::NotInMemoryRange);
     }
+
+    pub fn clear_address_space(&mut self) -> () {
+        let curr_map: &mut BTreeMap<usize, MemoryRangeNode> = &mut self.memory_range_map;
+        for (range_start, node) in &mut *curr_map {
+            
+            let range_end = range_start + node.size;
+            let is_physical: bool = node.is_physical;
+            for addr in (*range_start..range_end).step_by(USER_PG_SZ) {
+                unsafe {
+                    match crate::arch::memory::vmm::unmap_va_user(addr, &mut self.table) {
+                        Ok(val) => {
+                            if !is_physical {
+                                //TODO: free the page here
+                            }
+                            
+                        }
+                        //These two can do nothing, just means that page was never mapped/used
+                        Err(MappingError::TableDescriptorNotValid) => {}
+                        Err(MappingError::LeafTableSpotNotValid) => {}
+                        Err(MappingError::HugePagePresent) => {
+                            if !is_physical {
+                                //TODO: once huge page support is added update this
+                            }
+                        }
+                        Err(e) => println!("Error: {}", e),
+                    }
+                };
+            }
+        
+        }
+        
+        curr_map.clear();
+    }
+
 }

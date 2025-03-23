@@ -1,5 +1,5 @@
 use crate::event::async_handler::{run_async_handler, HandlerContext};
-use crate::event::context::{Context, CORES};
+use crate::event::context::Context;
 
 bitflags::bitflags! {
     struct ExecFlags: u32 {
@@ -96,15 +96,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
         // TODO: create new address space rather than modifying current
         // TODO: how to deal with other threads of same process???
         context.with_user_vmem(|| {
-            let cur_process = CORES.with_current(|core| {
-                let thread = core.thread.take().unwrap();
-                // TODO: don't require cloning here
-                // TODO: how to make longer periods of access to the current thread sound?
-                // (ie. either internal mutability, or can't yield/preempt/check preempt status...)
-                let cur_process = thread.process.clone();
-                core.thread.set(Some(thread));
-                cur_process
-            });
+            proc.page_table.lock().clear_address_space();
 
             let phdrs = elf.program_headers().unwrap();
             for phdr in phdrs {
@@ -112,15 +104,14 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                 if matches!(phdr.p_type, elf::program_header::Type::Load) {
                     let data = elf.segment_data(&phdr).unwrap();
                     let memsize = (phdr.p_memsz as usize).next_multiple_of(4096).max(4096);
+                    
+                    /*
+                    if !((0x200_000 <= phdr.p_vaddr) && (phdr.p_vaddr < (0x200_000 + (0x200_000 * 7)))){ 
+                        proc.page_table.lock().reserve_memory_range(phdr.p_vaddr as usize, memsize, u32::MAX, false).unwrap();
+                    }
+                    */
 
-                    cur_process
-                        .as_ref()
-                        .unwrap()
-                        .page_table
-                        .lock()
-                        //TODO: update this when adding support for file mmaping
-                        .reserve_memory_range(phdr.p_vaddr as usize, memsize, u32::MAX, false)
-                        .unwrap();
+                    proc.page_table.lock().reserve_memory_range(phdr.p_vaddr as usize, memsize, u32::MAX, false).unwrap();
                     let addr = (phdr.p_vaddr as usize) as *mut u8;
                     let mapping: &mut [u8] =
                         unsafe { core::slice::from_raw_parts_mut(addr, memsize) };

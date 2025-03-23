@@ -128,3 +128,4 @@ syscall!(17 => pub fn wait(fd: usize) -> isize);
 
 syscall!(18 => pub fn mmap(req_addr: usize, size: usize, fill_pages: bool) -> usize);
 syscall!(19 => pub fn munmap(req_addr: usize) -> usize);
+syscall!(20 => pub fn map_physical(virtual_addr: usize, physical_adddr: usize) -> usize);
