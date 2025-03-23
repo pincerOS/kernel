@@ -13,6 +13,28 @@ const INTEN_A: usize = 0x18; // PCM Interrupt Enables
 const INTSTC_A: usize = 0x1c; // PCM Interrupt Status & Clear
 const GRAY: usize = 0x20; // PCM Gray Mode Control
 
+const RXTHR_SINGLE_SAMPLE: usize = 0;
+const RXTHR_25_PERCENT: usize = 1;
+const RXTHR_75_PERCENT: usize = 2;
+const RXTHR_FULL: usize = 3;
+
+const TXTHR_EMPTY: usize = 0;
+const TXTHR_25_PERCENT: usize = 1;
+const TXTHR_75_PERCENT: usize = 2;
+const TXTHR_SINGLE_SAMPLE: usize = 3;
+
+const PCM_CLOCK_MASTER: usize = 0;
+const PCM_CLOCK_SLAVE: usize = 1;
+
+const PCM_CLOCK_OUTPUT_RISING: usize = 0; // default
+const PCM_CLOCK_OUTPUT_FALLING: usize = 1; // inverted
+
+const PCM_FRAME_SYNC_MASTER: usize = 0;
+const PCM_FRAME_SYNC_SLAVE: usize = 1;
+
+const PCM_FRAME_SYNC_HIGH: usize = 0; // default
+const PCM_FRAME_SYNC_LOW: usize = 1; // inverted
+
 pub struct bcm2711_pcm_driver {
     base_addr: *mut (), /// 0x7e203000
 }
@@ -295,4 +317,157 @@ impl bcm2711_pcm_driver {
         self.write_bits(FIFO_A, 0, 32, data)
     }
 
+    fn pcm_clock_disabled(&mut self) -> bool {
+        self.check_bit(MODE_A, 28)
+    }
+
+    fn toggle_pcm_clock(&mut self, disabled: bool) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.set_bit(MODE_A, 28, disabled)
+        }
+    }
+
+    fn get_pdm_decimation_factor(&mut self) -> u32 {
+        if self.check_bit(MODE_A, 27) {32} else {16}
+    }
+
+    fn set_pdm_decimation_factor(&mut self, factor: u32) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            if factor == 16 {
+                self.set_bit(MODE_A, 27, false)
+            }
+            else if factor == 32 {
+                self.set_bit(MODE_A, 27, true)
+            }
+            else {
+                false
+            }
+        }
+    }
+
+    fn pdm_enabled(&mut self) -> bool {
+        self.check_bit(MODE_A, 26)
+    }
+
+    fn toggle_pdm(&mut self, on: bool) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.set_bit(MODE_A, 26, on)
+        }
+    }
+
+    fn reception_frame_packing_enabled(&mut self) -> bool {
+        self.check_bit(MODE_A, 25)
+    }
+
+    fn transmission_frame_packing_enabled(&mut self) -> bool {
+        self.check_bit(MODE_A, 24)
+    }
+
+    fn toggle_reception_frame_packing(&mut self, on: bool) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.set_bit(MODE_A, 25, on)
+        }
+    }
+
+    fn toggle_transmission_frame_packing(&mut self, on: bool) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.set_bit(MODE_A, 24, on)
+        }
+    }
+
+    fn get_pcm_clock_mode(&mut self) -> u32 {
+        if self.check_bit(MODE_A, 23) { 1 } else { 0 }
+    }
+
+    fn set_pcm_clock_mode(&mut self, mode: u32) -> bool {
+        if self.pcm_is_enabled() {
+            false 
+        }
+        else { 
+            self.set_bit(MODE_A, 23, if mode == 0 { false } else { true })
+        }
+    }
+
+    fn get_pcm_clock_inversion(&mut self) -> u32 {
+        if self.check_bit(MODE_A, 22) { 1 } else { 0 }
+    }
+
+    fn set_pcm_clock_inversion(&mut self, mode: u32) -> bool {
+        if self.pcm_is_enabled() {
+            false 
+        }
+        else { 
+            self.set_bit(MODE_A, 22, if mode == 0 { false } else { true })
+        }
+    }
+
+    fn get_pcm_frame_sync_mode(&mut self) -> u32 {
+        if self.check_bit(MODE_A, 21) { 1 } else { 0 }
+    }
+
+    fn set_pcm_frame_sync_mode(&mut self, mode: u32) -> bool {
+        if self.pcm_is_enabled() {
+            false 
+        }
+        else { 
+            self.set_bit(MODE_A, 21, if mode == 0 { false } else { true })
+        }
+    }
+
+    fn get_pcm_frame_sync_inversion(&mut self) -> u32 {
+        if self.check_bit(MODE_A, 20) { 1 } else { 0 }
+    }
+
+    fn set_pcm_frame_sync_inversion(&mut self, mode: u32) -> bool {
+        if self.pcm_is_enabled() {
+            false 
+        }
+        else { 
+            self.set_bit(MODE_A, 20, if mode == 0 { false } else { true })
+        }
+    }
+
+    fn get_pcm_frame_length(&mut self) -> u32 {
+        self.read_bits(MODE_A, 10, 10) + 1
+    }
+
+    fn set_pcm_frame_length(&mut self, length: u32) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.write_bits(MODE_A, 10, 10, (length - 1) & ((1 << 10) - 1));
+            true
+        }
+    }
+
+    fn get_pcm_frame_sync_length(&mut self) -> u32 {
+        self.read_bits(MODE_A, 0, 10)
+    }
+
+    // only in master frame sync mode
+    fn set_pcm_frame_sync_length(&mut self, length: u32) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.write_bits(MODE_A, 0, 10, length & ((1 << 10) - 1));
+            true
+        }
+    }
 }
