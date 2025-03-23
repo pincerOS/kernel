@@ -279,6 +279,35 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         }
     }
 
+    // println!("| acquiring framebuffer");
+    // let mut surface = unsafe { MAILBOX.get().lock().map_framebuffer_kernel(640, 480) };
+    // println!("| surface constructed");
+    // let (width, height) = surface.dimensions();
+
+    // for i in 0.. {
+    //     println!("| drawing frame");
+    //     let color = 0xFFFF0000 | (i as i32 % 512 - 256).abs().min(255) as u32;
+    //     let color2 = 0xFF0000FF | (((i as i32 % 512 - 256).abs().min(255) as u32) << 16);
+    //     let stripe_width = width / 20;
+    //     let offset = i * (120 / surface.framerate());
+    //     for r in 0..height {
+    //         for c in 0..width {
+    //             let cluster = (c + offset % (2 * stripe_width)) / stripe_width;
+    //             let color = if cluster % 2 == 0 { color } else { color2 };
+    //             surface[(r, c)] = color;
+    //         }
+    //     }
+
+    //     surface.present();
+    // }
+    // let console = console::init();
+    // unsafe { CONSOLE.init(InterruptSpinLock::new(console)) };
+    // for i in 0.. {
+    // println!("Line {i}");
+    // console.input(alloc::format!("Line {i}\n").as_bytes());
+    // console.render();
+    // }
+
     {
         println!("| initializing timer");
         let timer_iter = discover_compatible(tree, b"brcm,bcm2835-system-timer")

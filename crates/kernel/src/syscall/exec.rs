@@ -155,6 +155,16 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
         let user_entry = elf.elf_header().e_entry();
         let user_sp = stack_start;
 
+        // println!("Exec returning to new process with ttbr0: {ttbr0:#x}, sp: {user_sp:#x}, entry: {user_entry:#x}");
+        // print!("A");
+        // crate::sync::spin_sleep(500_000);
+        // {
+        //     let mut console = crate::device::CONSOLE.get().lock();
+        //     // console.surface.present();
+        //     core::hint::black_box(&mut *console.surface.buffer);
+        // }
+        // unsafe { core::arch::asm!("isb", "dsb sy", "tlbi vmalle1is", "dsb sy") };
+
         {
             let mut regs = context.regs();
             regs.regs = [0; 31];
@@ -166,7 +176,9 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
 
         // TODO: initial stack setup
         // (argc, argv, envp, auxv)
-
+        // let resumed = context.resume().await;
+        // println!("Exec returned to new process with ttbr0: {ttbr0:#x}, sp: {user_sp:#x}, entry: {user_entry:#x}");
+        // resumed
         context.resume_final()
     })
 }

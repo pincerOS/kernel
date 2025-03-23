@@ -278,9 +278,15 @@ impl VideoCoreMailbox {
         let read_reg = Volatile(self.base.wrapping_byte_add(Self::MBOX_READ));
         let write_reg = Volatile(self.base.wrapping_byte_add(Self::MBOX_WRITE));
 
+        let mut i = 0;
+
         unsafe {
             while (status_reg.read() & Self::STATUS_FULL) != 0 {
                 core::hint::spin_loop();
+                i = i + 1;
+                if i % 100 == 0 {
+                    println!("mailbox full...");
+                }
             }
         }
         unsafe { core::arch::asm!("dsb sy") }; // TODO
@@ -316,6 +322,9 @@ impl VideoCoreMailbox {
             memory::invalidate_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
         }
         unsafe { write_reg.write(value) };
+
+        // TODO: why is this load-bearing...
+        // crate::sync::spin_sleep(20_000);
 
         loop {
             unsafe {
@@ -372,12 +381,24 @@ impl VideoCoreMailbox {
             self.mailbox_call(8, &mut *buffer).unwrap();
         }
 
+        // let debug = crate::device::LED_OUT.get();
+        // debug.put(0b11111111);
+        // debug.sleep(250_000);
+
         let words: &[u32] = bytemuck::cast_slice::<_, u32>(&*buffer);
 
         let response = words[1];
         let response_buffer_size = words[3];
         let response_code = words[4];
         let mut response_size = response_code & 0x7FFFFFFF;
+
+        // for b in u32::to_be_bytes(response_code) {
+        //     debug.put(b);
+        //     debug.sleep(250_000);
+        // }
+        // debug.sleep(250_000);
+        // debug.put(0b11111111);
+        // debug.sleep(250_000);
 
         if (response_code & 0x80000000) == 0 {
             return Err(MailboxError);
@@ -512,13 +533,17 @@ impl VideoCoreMailbox {
 
     pub unsafe fn map_framebuffer_kernel(&mut self, width: usize, height: usize) -> Surface {
         let fb = unsafe { self.get_framebuffer_raw(width, height) };
+        println!("| mapping framebuffer");
         let ptr = unsafe { memory::map_physical_noncacheable(fb.paddr, fb.size) };
         let ptr = ptr.as_ptr().cast::<u128>();
         assert!(ptr.is_aligned());
+        println!("| framebuffer mapped");
 
         let array_elems = fb.size / size_of::<u128>();
         let array = unsafe { core::slice::from_raw_parts_mut(ptr, array_elems) };
-        Surface::new(array, width, height, fb.pitch / 4)
+        let surface = Surface::new(array, width, height, fb.pitch / 4);
+        println!("| framebuffer surface created");
+        surface
     }
 }
 
@@ -533,12 +558,12 @@ pub struct RawFB {
 
 pub struct Surface {
     alternate: alloc::boxed::Box<[u128]>,
-    buffer: &'static mut [u128],
+    pub buffer: &'static mut [u128],
     framerate: usize,
     time_step: usize,
     width: usize,
     height: usize,
-    pitch_elems: usize,
+    pub pitch_elems: usize,
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -580,9 +605,11 @@ impl Surface {
         let framerate = 30;
         let time_step = 1_000_000 / framerate;
 
+        println!("allocating fb");
         let mut alternate = alloc::vec::Vec::new();
         alternate.reserve_exact(buffer.len());
         alternate.resize(height * pitch_elems / 4, 0);
+        println!("allocated fb");
 
         Self {
             alternate: alternate.into_boxed_slice(),

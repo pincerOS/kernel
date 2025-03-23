@@ -149,6 +149,10 @@ pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
         );
     }
 
+    // if thread.is_user_thread() {
+    //     println!("Preempting user at elr: {:x}", ctx.elr);
+    // }
+
     unsafe { thread.save_context(ctx.into(), thread.is_kernel_thread()) };
     unsafe { deschedule_thread(DescheduleAction::Yield, Some(thread)) };
 }

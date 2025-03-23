@@ -1,4 +1,4 @@
-use crate::sync::{InterruptSpinLock, UnsafeInit, Volatile};
+use crate::sync::{spin_sleep, InterruptSpinLock, UnsafeInit, Volatile};
 
 // https://documentation-service.arm.com/static/5e8e36c2fd977155116a90b5
 
@@ -105,6 +105,10 @@ impl UARTInner {
         (unsafe { self.reg(Self::UART_FR).read() } & (1 << 4) > 0)
     }
     pub fn writec(&mut self, c: u8) {
+        // if super::LED_OUT.is_initialized() {
+        //     super::LED_OUT.get().put(c);
+        //     // crate::sync::spin_sleep(33 * 1000);
+        // }
         unsafe {
             while self.transmit_fifo_full() {}
             self.reg(Self::UART_DR).write(c as u32);
@@ -133,9 +137,11 @@ impl UARTInner {
         if super::CONSOLE.is_initialized() {
             let mut console = super::CONSOLE.get().lock();
             console.input(bytes);
-            // if bytes.contains(&b'\n') {
-            //     console.render();
-            // }
+            if bytes.contains(&b'\n') {
+                console.render();
+            }
+            drop(console);
+            spin_sleep(3000);
         }
     }
 }

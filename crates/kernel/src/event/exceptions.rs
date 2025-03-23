@@ -264,6 +264,8 @@ unsafe extern "C" fn exception_handler_example(
         println!("{:#?}", ctx);
     }
 
+    // crate::device::LED_OUT.get().put(exception_class as u8);
+
     match exception_class {
         _ => halt(),
     }
@@ -277,6 +279,7 @@ unsafe extern "C" fn exception_handler_unhandled(
     _esr: u64,
     _arg: u64,
 ) -> *mut Context {
+    // crate::device::LED_OUT.get().put(0b11100111);
     halt();
 }
 
