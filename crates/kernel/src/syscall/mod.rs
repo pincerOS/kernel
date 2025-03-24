@@ -10,8 +10,6 @@ pub mod proc;
 pub mod sync;
 
 pub unsafe fn register_syscalls() {
-    channel::OBJECTS.lock().push(None);
-
     unsafe {
         register_syscall_handler(1, proc::sys_shutdown);
         register_syscall_handler(3, sync::sys_yield);

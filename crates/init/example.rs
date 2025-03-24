@@ -28,9 +28,12 @@ exit # -->"##]
 #[macro_use]
 extern crate ulib;
 
-fn try_read_stdin(buf: &mut [u8]) -> isize {
-    let stdin_fd = 0;
-    unsafe { ulib::sys::pread(stdin_fd, buf.as_mut_ptr(), buf.len(), 0) }
+use ulib::sys::FileDesc;
+
+const STDIN_FD: FileDesc = 0;
+
+fn try_read_stdin(buf: &mut [u8]) -> Result<usize, usize> {
+    ulib::sys::pread(STDIN_FD, buf, 0)
 }
 
 struct LineReader {
@@ -51,7 +54,7 @@ impl LineReader {
     }
 }
 
-fn readline(reader: &mut LineReader) -> Result<&[u8], isize> {
+fn readline(reader: &mut LineReader) -> Result<&[u8], usize> {
     reader.shift();
     loop {
         while reader.processed < reader.cursor {
@@ -69,12 +72,8 @@ fn readline(reader: &mut LineReader) -> Result<&[u8], isize> {
             }
         }
 
-        let read = try_read_stdin(&mut reader.buf[reader.cursor..]);
-        match read {
-            -2 => continue,
-            err @ (..=-1) => return Err(err),
-            read @ 0.. => reader.cursor += read as usize,
-        }
+        let read = try_read_stdin(&mut reader.buf[reader.cursor..])?;
+        reader.cursor += read;
     }
 }
 
@@ -84,7 +83,7 @@ fn main(_chan: ulib::sys::ChannelDesc) {
 
     let root = 3;
     let path = "test.txt";
-    let fd = unsafe { ulib::sys::openat(root, path.len(), path.as_bytes().as_ptr(), 0, 0) };
+    let fd = ulib::sys::openat(root, path.as_bytes(), 0, 0).unwrap();
 
     println!("File: {}", fd);
 
@@ -92,17 +91,10 @@ fn main(_chan: ulib::sys::ChannelDesc) {
 
     let mut read = 0;
     while read < data.len() {
-        match unsafe {
-            ulib::sys::pread(
-                fd as usize,
-                data[read..].as_mut_ptr(),
-                data[read..].len(),
-                read as u64,
-            )
-        } {
-            (..=-1) => break,
-            i @ (1..) => read += i as usize,
-            0 => break,
+        match ulib::sys::pread(fd, &mut data[read..], read as u64) {
+            Err(_) => break,
+            Ok(0) => break,
+            Ok(i) => read += i,
         }
     }
 
@@ -113,7 +105,7 @@ fn main(_chan: ulib::sys::ChannelDesc) {
 
     let stdout = 1;
     let buf = b"Stdout write test\n";
-    unsafe { ulib::sys::pwrite_all(stdout, buf, 0) };
+    ulib::sys::pwrite_all(stdout, buf, 0).unwrap();
 
     println!("Dir: {}", root);
 
@@ -142,9 +134,13 @@ fn main(_chan: ulib::sys::ChannelDesc) {
 
     loop {
         println!("reading dir with cookie {}", cookie);
-        match unsafe { ulib::sys::pread(root, data.as_mut_ptr(), data.len(), cookie) } {
-            (..=-1) => break,
-            len @ (1..) => {
+        match ulib::sys::pread(root, data, cookie) {
+            Err(_) => break,
+            Ok(0) => {
+                println!("read 0 bytes, exiting");
+                break;
+            }
+            Ok(len) => {
                 println!("read {} bytes", len);
                 let mut i = 0;
                 while i < len as usize {
@@ -152,8 +148,8 @@ fn main(_chan: ulib::sys::ChannelDesc) {
                     assert!(slice.len() >= size_of::<DirEntry>());
                     let entry = unsafe { *slice.as_ptr().cast::<DirEntry>() };
                     println!("Entry: {:#?}", entry);
-                    let name =
-                        &slice[core::mem::offset_of!(DirEntry, name)..][..entry.name_len as usize];
+                    let name_off = core::mem::offset_of!(DirEntry, name);
+                    let name = &slice[name_off..][..entry.name_len as usize];
                     println!("Name: {}", core::str::from_utf8(name).unwrap());
                     i += entry.rec_len as usize;
                     cookie = entry.next_entry_cookie;
@@ -161,10 +157,6 @@ fn main(_chan: ulib::sys::ChannelDesc) {
                 if cookie == 0 {
                     break;
                 }
-            }
-            0 => {
-                println!("read 0 bytes, exiting");
-                break;
             }
         }
     }
@@ -215,5 +207,5 @@ fn main(_chan: ulib::sys::ChannelDesc) {
         }
     }
 
-    unsafe { ulib::sys::exit(15) };
+    ulib::sys::exit(15);
 }

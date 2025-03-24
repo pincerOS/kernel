@@ -200,7 +200,7 @@ impl FileDescriptorList {
         idx
     }
     #[must_use]
-    pub fn close(&mut self, idx: usize) -> Option<fd::ArcFd> {
+    pub fn remove(&mut self, idx: usize) -> Option<fd::ArcFd> {
         match self.desc.get_mut(idx) {
             Some(slot) => slot.take(),
             None => None,
