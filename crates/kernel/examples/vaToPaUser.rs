@@ -67,7 +67,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     let phys_addr: usize = crate::arch::memory::physical_addr((page_ptr).addr()).unwrap() as usize;
 
     // TODO: directly modifying the page tables will break mmap
-    let table_paddr = process.mem.get_ttbr0();
+    let table_paddr = process.mem.lock().get_ttbr0();
     let user_table =
         PageTablePtr::from_full_page(PhysicalPage::<Size4KiB>::new(PAddr(table_paddr)));
 

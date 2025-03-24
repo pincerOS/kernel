@@ -38,8 +38,7 @@ pub struct KernelTranslationTable(pub [TranslationDescriptor; 16]);
 #[repr(C, align(4096))]
 pub struct KernelLeafTable(pub [LeafDescriptor; KERNEL_LEAF_TABLE_SIZE]);
 
-#[allow(dead_code)]
-const USER_PG_SZ: usize = 0x1000;
+pub const USER_PG_SZ: usize = 0x1000;
 
 #[allow(improper_ctypes)]
 unsafe extern "C" {

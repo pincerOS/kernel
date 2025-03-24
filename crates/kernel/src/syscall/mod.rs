@@ -3,6 +3,7 @@ use crate::event::exceptions::register_syscall_handler;
 pub mod channel;
 pub mod exec;
 pub mod file;
+pub mod mmap;
 pub mod pipe;
 pub mod proc;
 pub mod sync;
@@ -26,5 +27,9 @@ pub unsafe fn register_syscalls() {
         register_syscall_handler(15, file::sys_openat);
         register_syscall_handler(16, exec::sys_execve_fd);
         register_syscall_handler(17, proc::sys_wait);
+
+        register_syscall_handler(18, mmap::sys_mmap);
+        register_syscall_handler(19, mmap::sys_munmap);
+        register_syscall_handler(20, mmap::sys_map_physical_range);
     }
 }

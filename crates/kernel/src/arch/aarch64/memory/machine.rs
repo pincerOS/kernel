@@ -209,6 +209,14 @@ impl From<TableDescriptor> for TranslationDescriptor {
     }
 }
 
+impl TranslationDescriptor {
+    pub fn unset() -> Self {
+        Self {
+            leaf: LeafDescriptor::empty(),
+        }
+    }
+}
+
 /// A translation table.
 ///
 /// Note that alignment varies based on the configured translation process, and so must be checked at runtime.

@@ -18,7 +18,7 @@ pub struct ExitStatus {
 }
 
 pub struct Process {
-    pub mem: mem::UserAddrSpace,
+    pub mem: SpinLock<mem::UserAddrSpace>,
     pub root: Option<fd::ArcFd>,
     pub file_descriptors: SpinLock<FileDescriptorList>,
     pub exit_code: Arc<BlockingOnceCell<ExitStatus>>,
@@ -29,7 +29,7 @@ impl Process {
         let mem = mem::UserAddrSpace::new();
 
         Process {
-            mem,
+            mem: SpinLock::new(mem),
             root: None,
             file_descriptors: SpinLock::new(FileDescriptorList { desc: Vec::new() }),
             exit_code: Arc::new(BlockingOnceCell::new()),
@@ -37,11 +37,11 @@ impl Process {
     }
 
     pub fn get_ttbr0(&self) -> usize {
-        self.mem.get_ttbr0()
+        self.mem.lock().get_ttbr0()
     }
 
     pub fn fork(&self) -> Process {
-        let new_mem = self.mem.fork();
+        let new_mem = self.mem.lock().fork();
 
         let mut new_fds = FileDescriptorList { desc: Vec::new() };
         {
@@ -57,7 +57,7 @@ impl Process {
         }
 
         let new_process = Process {
-            mem: new_mem,
+            mem: SpinLock::new(new_mem),
             root: self.root.clone(),
             file_descriptors: SpinLock::new(new_fds),
             exit_code: Arc::new(BlockingOnceCell::new()),
