@@ -27,7 +27,7 @@ pub mod util;
 use arch::memory::palloc::PAGE_ALLOCATOR;
 use device::uart;
 use event::SCHEDULER;
-use heap::ALLOCATOR;
+use heap::BumpAllocator;
 use sync::{spin_sleep, SpinLock};
 
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -54,7 +54,10 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     let heap_size = unsafe { heap_end.byte_offset_from(heap_base) };
 
     // unsafe { heap::ALLOCATOR.init(heap_base, heap_size as usize) };
-    unsafe { heap::ALLOCATOR.lock().init(heap_base.cast(), heap_size as usize) };
+    // unsafe { heap::ALLOCATOR.lock().init(heap_base.cast(), heap_size as usize) };
+    let bump = unsafe { BumpAllocator::new_uninit() };
+    unsafe { bump.init(heap_base.cast(), heap_size as usize) };
+    *heap::ALLOCATOR_HACK.lock() = heap::AllocatorHack::Bump(bump);
 
     unsafe { crate::arch::memory::init_physical_alloc() };
 

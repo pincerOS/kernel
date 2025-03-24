@@ -210,7 +210,7 @@ pub fn register_interrupt_endpoint(
             let now = get_time();
             let waited2 = now - prev[(2 * prev.len() - i - 2) % prev.len()];
             if waited2 < μs / 3 {
-                panic!("{now} {waited2} {μs} {prev:?}");
+                // panic!("{now} {waited2} {μs} {prev:?}");
             }
             prev[i] = now; i = (i + 1) % prev.len();
             interrupt_endpoint_callback(endpoint);

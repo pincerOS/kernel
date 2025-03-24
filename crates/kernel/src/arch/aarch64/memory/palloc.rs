@@ -6,7 +6,7 @@ use core::sync::atomic::Ordering;
 use alloc::boxed::Box;
 use alloc::collections::vec_deque::VecDeque;
 
-use crate::sync::{SpinLock, UnsafeInit};
+use crate::sync::{InterruptSpinLock, SpinLock, UnsafeInit};
 
 use super::vmm::{
     __rpi_phys_binary_end_addr, __rpi_phys_binary_start_addr, __rpi_virt_base, DIRECT_MAP_BASE,
@@ -22,7 +22,7 @@ pub struct PhysicalPage<Size> {
 pub struct PAddr(pub usize);
 
 pub struct PageAllocator {
-    allocator: SpinLock<BuddyAllocator>,
+    allocator: InterruptSpinLock<BuddyAllocator>,
 }
 
 impl<S> PhysicalPage<S> {
@@ -41,7 +41,7 @@ impl PageAllocator {
         let floored_base = (start / maximal_size) * maximal_size;
         let allocator = BuddyAllocator::new(floored_base, start, end, 4096);
         PageAllocator {
-            allocator: SpinLock::new(allocator),
+            allocator: InterruptSpinLock::new(allocator),
         }
     }
 
@@ -297,6 +297,27 @@ impl BuddyAllocator {
         this
     }
 
+    fn insert_free(&mut self, level: usize, block: usize) {
+            // TODO: How much does the ordering of the nodes matter?
+            self.freelists[level].push_front(block);
+    }
+
+    fn pop_smallest_free(&mut self, max_level: usize) -> Option<(usize, usize)> {
+        for (level, freelist) in self.freelists[0..=max_level].iter_mut().enumerate().rev() {
+            if let Some(block) = freelist.pop_front() {
+                return Some((level, block));
+            }
+        }
+        None
+    }
+
+    fn remove_free(&mut self, cur_level: usize, sibling: usize) {
+        // TODO: efficiency
+        let cur_freelist = &mut self.freelists[cur_level as usize];
+        let sibling_idx = cur_freelist.iter().position(|i| *i == sibling).unwrap();
+        cur_freelist.remove(sibling_idx);
+    }
+
     pub fn mark_region_unusable(&mut self, range_start: usize, range_end: usize) {
         // assumes no allocations have been done yet within this range
         // iterate through all free blocks that intersect with this range
@@ -405,15 +426,7 @@ impl BuddyAllocator {
 
     fn alloc_at_level(&mut self, level: usize) -> Option<usize> {
         assert!(level < self.levels);
-        let mut free_block = None;
-        for (level, freelist) in self.freelists[0..=level].iter_mut().enumerate().rev() {
-            if let Some(block) = freelist.pop_front() {
-                free_block = Some((level, block));
-                break;
-            }
-        }
-
-        let (mut block_level, mut block_idx) = free_block?;
+        let (mut block_level, mut block_idx) = self.pop_smallest_free(level)?;
 
         // Split block repeatedly, if needed
         while block_level < level {
@@ -423,7 +436,7 @@ impl BuddyAllocator {
             let left_child = Self::child_idx_base(block_idx);
             let right_child = left_child + 1;
 
-            self.freelists[block_level + 1].push_front(right_child);
+            self.insert_free(block_level + 1, right_child);
 
             block_idx = left_child;
             block_level += 1;
@@ -458,18 +471,14 @@ impl BuddyAllocator {
             }
 
             // Remove the sibling from the freelist (coalesce it into the parent)
-            // TODO: efficiency
-            let cur_freelist = &mut self.freelists[cur_level as usize];
-            let sibling_idx = cur_freelist.iter().position(|i| *i == sibling).unwrap();
-            cur_freelist.remove(sibling_idx);
+            self.remove_free(cur_level as usize, sibling);
 
             idx = parent;
             cur_level -= 1;
         }
 
-        // TODO: How much does the ordering of the nodes matter?
         // Add the coalesced block to the free list
-        self.freelists[cur_level as usize].push_front(idx);
+        self.insert_free(cur_level as usize, idx);
     }
 
     pub fn alloc(&mut self, size: usize, align: usize) -> Option<usize> {

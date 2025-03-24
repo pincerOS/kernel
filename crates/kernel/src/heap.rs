@@ -1,16 +1,16 @@
 use alloc::alloc::{handle_alloc_error, GlobalAlloc, Layout};
+use linked_list_allocator::Heap;
+use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 // TODO: implement a proper allocator
 // TODO: clarify safety requirements of heap initialization
 
-use linked_list_allocator::LockedHeap;
-
-use crate::arch::memory::machine::LeafDescriptor;
+use crate::arch::memory::machine::{LeafDescriptor, TranslationDescriptor};
 use crate::arch::memory::palloc::{PhysicalPage, Size4KiB, PAGE_ALLOCATOR};
 use crate::arch::memory::table::PageTablePtr;
 use crate::arch::memory::vmm::PAGE_SIZE;
-use crate::sync::SpinLock;
+use crate::sync::InterruptSpinLock;
 
 pub struct HeapStats {
     pub used: usize,
@@ -19,12 +19,22 @@ pub struct HeapStats {
 pub fn stats() -> HeapStats {
     // ALLOCATOR.offset.load(Ordering::SeqCst)
     HeapStats {
-        used: ALLOCATOR.lock().used(),
+        used: 0,
+        // used: ALLOCATOR.lock().used(),
     }
 }
 
-#[global_allocator]
-pub static ALLOCATOR: LockedHeap = LockedHeap::empty();
+// #[global_allocator]
+// pub static ALLOCATOR: InterruptSpinLock<Heap> = InterruptSpinLock::new(Heap::empty());
+
+unsafe impl GlobalAlloc for InterruptSpinLock<Heap> {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        self.lock().allocate_first_fit(layout).unwrap().as_ptr()
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { self.lock().deallocate(NonNull::new(ptr).unwrap(), layout) }
+    }
+}
 
 // #[global_allocator]
 // pub static ALLOCATOR: BumpAllocator = unsafe { BumpAllocator::new_uninit() };
@@ -148,6 +158,7 @@ unsafe impl GlobalAlloc for VirtAllocator {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        println!("Deallocating ptr {ptr:p}, layout {layout:?}");
         let size = layout.size().next_multiple_of(PAGE_SIZE);
         let align = layout.align().next_multiple_of(PAGE_SIZE);
 
@@ -169,7 +180,45 @@ unsafe impl GlobalAlloc for VirtAllocator {
             let leaf = unsafe { desc.leaf };
             assert!(leaf.is_valid() && leaf.contains(LeafDescriptor::IS_PAGE_DESCRIPTOR), "invalid leaf {leaf:?}");
 
-            PAGE_ALLOCATOR.get().dealloc_frame(PhysicalPage::<Size4KiB>::new(leaf.get_pa()));
+            unsafe {
+                crate::arch::memory::vmm::set_translation_descriptor(table, vaddr, 3, 0, TranslationDescriptor::unset(), false).unwrap()
+            }
+
+            // PAGE_ALLOCATOR.get().dealloc_frame(PhysicalPage::<Size4KiB>::new(leaf.get_pa()));
+        }
+    }
+}
+
+pub enum AllocatorHack {
+    Uninit,
+    Bump(BumpAllocator),
+    Virt(VirtAllocator),
+}
+
+#[global_allocator]
+pub static ALLOCATOR_HACK: InterruptSpinLock<AllocatorHack> = InterruptSpinLock::new(AllocatorHack::Uninit);
+
+unsafe impl GlobalAlloc for InterruptSpinLock<AllocatorHack> {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        match &mut *self.lock() {
+            AllocatorHack::Uninit => panic!(),
+            AllocatorHack::Bump(bump_allocator) => {
+                unsafe { bump_allocator.alloc(layout) }
+            },
+            AllocatorHack::Virt(virt_allocator) => {
+                unsafe { virt_allocator.alloc(layout) }
+            },
+        }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        match &mut *self.lock() {
+            AllocatorHack::Uninit => panic!(),
+            AllocatorHack::Bump(bump_allocator) => {
+                unsafe { bump_allocator.dealloc(ptr, layout) }
+            },
+            AllocatorHack::Virt(virt_allocator) => {
+                unsafe { virt_allocator.dealloc(ptr, layout) }
+            },
         }
     }
 }
