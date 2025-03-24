@@ -26,8 +26,9 @@ pub mod util;
 
 use arch::memory::palloc::PAGE_ALLOCATOR;
 use device::uart;
+use event::SCHEDULER;
 use heap::ALLOCATOR;
-use sync::SpinLock;
+use sync::{spin_sleep, SpinLock};
 
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -52,7 +53,8 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     let heap_end = (&raw mut arch::memory::vmm::__rpi_virt_base).wrapping_byte_add(0x20_0000 * 14);
     let heap_size = unsafe { heap_end.byte_offset_from(heap_base) };
 
-    unsafe { heap::ALLOCATOR.init(heap_base, heap_size as usize) };
+    // unsafe { heap::ALLOCATOR.init(heap_base, heap_size as usize) };
+    unsafe { heap::ALLOCATOR.lock().init(heap_base.cast(), heap_size as usize) };
 
     unsafe { crate::arch::memory::init_physical_alloc() };
 
@@ -95,12 +97,42 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
         shutdown();
     });
 
+    // for _ in 0..3 {
+    //     event::task::spawn_async_rt(async move {
+    //         let period = 10_000;
+    //         let mut interval = sync::time::interval(period);
+    //         loop {
+    //             interval.tick().await;
+    //         }
+    //     });
+    // }
+
+    println!("heap size: {:#016x}", heap::stats().used);
+
+    let _large_alloc = alloc::boxed::Box::leak(alloc::vec![25u32; 65536].into_boxed_slice());
+
+    event::task::spawn_async_rt(async move {
+        let period = 200_000;
+        let mut interval = sync::time::interval(period);
+        loop {
+            interval.tick().await;
+            println!("heap size: {:#016x} (rt len {}, normal len {}), time {}", heap::stats().used, SCHEDULER.rt_queue.0.lock().len(), SCHEDULER.queue.0.lock().len(), device::system_timer::get_time());
+        }
+    });
     event::task::spawn_async(async move {
         let period = 200_000;
         let mut interval = sync::time::interval(period);
         loop {
             interval.tick().await;
-            println!("heap size: {:#016x}", ALLOCATOR.offset.load(Ordering::SeqCst));
+            println!("(non realtime)");
+        }
+    });
+
+    event::thread::thread(move || {
+        let period = 200_000;
+        loop {
+            spin_sleep(period);
+            println!("(preempt)");
         }
     });
 

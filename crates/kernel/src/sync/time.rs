@@ -36,7 +36,7 @@ pub fn spin_sleep_until(target: usize) {
 }
 
 pub async fn sleep(μs: u64) {
-    TIMER_SCHEDULER.sleep(μs).await
+    TIMER_SCHEDULER.sleep(μs).await;
 }
 
 pub async fn sleep_until(target: u64) {
@@ -192,7 +192,7 @@ impl TimerScheduler {
     }
     pub fn interval(&'static self, interval: u64) -> Interval {
         let cur_time = self.backend.get_time();
-        Interval(self.timer_future(Some(cur_time), Some(interval), MissedTicks::Burst))
+        Interval(self.timer_future(Some(cur_time), Some(interval / 2), MissedTicks::Burst))
     }
 }
 
@@ -238,7 +238,7 @@ impl TimerFuture {
         }
     }
 
-    fn poll_next(&mut self, cx: &mut core::task::Context<'_>) -> Poll<()> {
+    fn poll_next(&mut self, cx: &mut core::task::Context<'_>) -> Poll<u64> {
         let Some(target) = self.target else {
             return Poll::Pending;
         };
@@ -270,7 +270,7 @@ impl TimerFuture {
                 self.state = TimerFutureState::Unregistered;
             }
 
-            return Poll::Ready(());
+            return Poll::Ready(target);
         }
 
         match self.state {
@@ -299,7 +299,7 @@ impl TimerFuture {
 }
 
 impl Future for TimerFuture {
-    type Output = ();
+    type Output = u64;
     fn poll(
         self: core::pin::Pin<&mut Self>,
         cx: &mut core::task::Context<'_>,

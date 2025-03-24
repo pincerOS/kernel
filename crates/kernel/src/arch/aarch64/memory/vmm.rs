@@ -131,9 +131,9 @@ pub unsafe fn init_kernel_48bit() {
     let heap_size = 1 << 27; // 128 MiB
     let (start, end) = PAGE_ALLOCATOR.get().alloc_range(heap_size, huge_page_size);
 
-    let heap_base = MAPPED_HEAP_BASE + start.0;
+    let heap_base = MAPPED_HEAP_BASE;
     for paddr in (start.0..end.0).step_by(huge_page_size) {
-        let vaddr = MAPPED_HEAP_BASE + paddr;
+        let vaddr = MAPPED_HEAP_BASE + paddr - start.0;
         let leaf = LeafDescriptor::new(paddr)
             .set_global()
             .difference(LeafDescriptor::IS_PAGE_DESCRIPTOR);
@@ -142,7 +142,8 @@ pub unsafe fn init_kernel_48bit() {
         };
     }
 
-    unsafe { ALLOCATOR.init(heap_base as *mut (), heap_size) };
+    // ALLOCATOR.lock().z
+    // unsafe { ALLOCATOR.init(heap_base as *mut (), heap_size) };
 
     // Note that this will *also* be true on the secondary cores in 25 bit mode,
     // before they switch to 48, which could cause issues.

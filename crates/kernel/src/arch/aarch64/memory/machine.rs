@@ -391,8 +391,12 @@ impl LeafDescriptor {
     }
 
     //usize or u64
-    pub const fn get_pa(self) -> usize {
+    pub const fn get_phys_frame_num(self) -> usize {
         return ((self.bits() >> 12) & ((1 << 36) - 1)) as usize;
+    }
+
+    pub const fn get_pa(self) -> PAddr {
+        PAddr(self.intersection(Self::OA).bits() as usize)
     }
 
     pub const fn clear_pxn(self) -> Self {

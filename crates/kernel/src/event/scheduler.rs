@@ -12,8 +12,8 @@ pub enum Priority {
 }
 
 pub struct Scheduler {
-    rt_queue: Queue<Event>,
-    queue: Queue<Event>,
+    pub rt_queue: Queue<Event>,
+    pub queue: Queue<Event>,
 }
 
 impl Scheduler {

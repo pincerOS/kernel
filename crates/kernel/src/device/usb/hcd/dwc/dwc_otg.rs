@@ -78,6 +78,19 @@ fn schedule_next_transfer(channel: u8) {
     }
 }
 
+static CHECK: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+fn check(channel: usize) {
+    print!("{}", channel);
+    if channel > 2 {
+        if !CHECK.swap(true, core::sync::atomic::Ordering::Relaxed) {
+            let size = crate::heap::stats().used;
+            let time = crate::device::system_timer::get_time();
+            println!("\n\nUsing other channel: {channel}; time {time}, heap size: {size:#016x}\n\n")
+        }
+    }
+}
+
 pub fn dwc_otg_interrupt_handler(_ctx: &mut Context) {
     let mut hcint_channels = [0u32; ChannelCount];
     {
@@ -108,6 +121,7 @@ pub fn dwc_otg_interrupt_handler(_ctx: &mut Context) {
                     if let Some(callback) = unsafe { DWC_CHANNEL_CALLBACK.callback[i] } {
                         let hcint = hcint_channels[i];
                         schedule_rt(move || {
+                            check(i);
                             callback(endpoint_descriptor, hcint, i as u8);
                             schedule_next_transfer(i as u8);
                         });

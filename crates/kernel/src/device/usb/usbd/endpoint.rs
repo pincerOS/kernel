@@ -1,3 +1,4 @@
+use crate::device::system_timer::get_time;
 /**
  *
  * usbd/endpoint.rs
@@ -199,7 +200,19 @@ pub fn register_interrupt_endpoint(
     spawn_async_rt(async move {
         let μs = endpoint_time as u64 * 1000;
         let mut interval = interval(μs).with_missed_tick_behavior(MissedTicks::Skip);
+        let mut prev = [0; 4];
+        let mut i = 0;
+        prev[i] = get_time(); i = (i + 1) % prev.len();
+
+        interval.tick().await;
         while interval.tick().await {
+            print!("t");
+            let now = get_time();
+            let waited2 = now - prev[(2 * prev.len() - i - 2) % prev.len()];
+            if waited2 < μs / 3 {
+                panic!("{now} {waited2} {μs} {prev:?}");
+            }
+            prev[i] = now; i = (i + 1) % prev.len();
             interrupt_endpoint_callback(endpoint);
         }
     });
