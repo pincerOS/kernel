@@ -42,6 +42,8 @@ pub(crate) mod inode;
 #[cfg(feature = "std")]
 pub mod linux;
 pub(crate) mod superblock;
+#[cfg(test)]
+mod hash_tests;
 
 #[derive(Debug, PartialEq)]
 pub enum Ext2Error {

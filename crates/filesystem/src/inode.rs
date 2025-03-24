@@ -492,8 +492,8 @@ impl INodeWrapper {
 
                         if leaf_block + leaf_node_length > number {
                             block_to_read = Some(
-                                ((current_extent_leaf_node.ee_start_hi as usize) << 32)
-                                    | current_extent_leaf_node.ee_start_lo as usize,
+                                (((current_extent_leaf_node.ee_start_hi as usize) << 32)
+                                    | current_extent_leaf_node.ee_start_lo as usize) + (number - leaf_block),
                             );
                             found_data_block = true;
                             break;
@@ -757,7 +757,7 @@ impl INodeWrapper {
 
         {
             const DX_PADDING: usize = 0x18;
-            
+
             let dir_entry_root: &HTreeDirectoryEntryRoot = unsafe {
                 &block_buffer[DX_PADDING..]
                     .align_to::<HTreeDirectoryEntryRoot>()
@@ -774,7 +774,7 @@ impl INodeWrapper {
             filename_hash = filename_hash_result.unwrap();
 
             current_tree_level = 0;
-            current_node_length = dir_entry_root.count as usize;
+            current_node_length = (dir_entry_root.count as usize) - 1;
             target_htree_entry = HTreeDirectoryEntry {
                 hash: 0,
                 block: dir_entry_root.block,
@@ -782,7 +782,7 @@ impl INodeWrapper {
             indirect_levels = dir_entry_root.indirect_levels as usize;
         }
 
-        while current_tree_level < indirect_levels {
+        while current_tree_level <= indirect_levels {
             let htree_entry_start: usize = if current_tree_level == 0 { 0x28 } else { 0x12 };
             let (_, mut htree_slice, _) = unsafe {
                 block_buffer.as_mut_slice()[htree_entry_start..].align_to::<HTreeDirectoryEntry>()
@@ -801,7 +801,13 @@ impl INodeWrapper {
                 } else if htree_slice[index].hash > filename_hash {
                     end = index - 1;
                 } else {
-                    target_htree_entry = current_tree_entry;
+                    if start == 0 && start == end {
+                        if htree_slice[index].hash > filename_hash {
+                            target_htree_entry = current_tree_entry;
+                        }
+                    } else {
+                        target_htree_entry = current_tree_entry;
+                    }
                     break;
                 }
             }
@@ -815,18 +821,24 @@ impl INodeWrapper {
                 None,
             )?;
 
-            if current_tree_level < indirect_levels {
-                // the inode number must be zero to appear like this entry isn't in use
+            if current_tree_level <= indirect_levels {
+                const INTERIOR_NODE_PADDING: usize = 0x8;
+
+                // the inode number, name_len, and file_type
+                // must be zero to appear like this entry isn't in use AND
+                // rec_len must be equal to block size
                 assert_eq!(Self::get_word(&block_buffer[0..4]), 0);
+                assert_eq!(u16::from_le_bytes([block_buffer[4], block_buffer[5]]), 
+                           ext2.get_block_size() as u16);
+                assert_eq!(u16::from_le_bytes([block_buffer[6], block_buffer[7]]), 0);
 
                 let htree_dir_entry_node: &HTreeDirectoryEntryNode = unsafe {
-                    &block_buffer
-                        .as_slice()
+                    &block_buffer[INTERIOR_NODE_PADDING..]
                         .align_to::<HTreeDirectoryEntryNode>()
                         .1[0]
                 };
 
-                current_node_length = htree_dir_entry_node.count as usize;
+                current_node_length = (htree_dir_entry_node.count as usize) - 1;
                 target_htree_entry.block = htree_dir_entry_node.block;
             }
         }
