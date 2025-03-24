@@ -6,6 +6,7 @@ members = [
     "crates/display-client",
     "crates/display-proto",
     "crates/display-server",
+    "crates/doomgeneric",
     "crates/elf",
     "crates/endian",
     "crates/filesystem",
