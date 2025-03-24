@@ -221,8 +221,24 @@ pub fn wait(fd: FileDesc) -> Result<usize, usize> {
     int_to_error(res)
 }
 
-pub fn mmap(req_addr: usize, size: usize, prot_flags: u32, fill_pages: u32, file_descriptor: FileDesc, offset: usize) -> Result<usize, usize> {
-    let res = unsafe { sys_mmap(req_addr, size, prot_flags as usize, fill_pages as usize, file_descriptor as usize, offset) };
+pub fn mmap(
+    req_addr: usize,
+    size: usize,
+    prot_flags: u32,
+    fill_pages: u32,
+    file_descriptor: FileDesc,
+    offset: usize,
+) -> Result<usize, usize> {
+    let res = unsafe {
+        sys_mmap(
+            req_addr,
+            size,
+            prot_flags as usize,
+            fill_pages as usize,
+            file_descriptor as usize,
+            offset,
+        )
+    };
     int_to_error(res)
 }
 
@@ -235,4 +251,3 @@ pub fn map_physical(virtual_addr: usize, physical_addr: usize) -> Result<usize, 
     let res = unsafe { sys_map_physical(virtual_addr, physical_addr) };
     int_to_error(res)
 }
-
