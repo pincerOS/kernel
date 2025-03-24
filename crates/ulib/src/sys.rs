@@ -84,6 +84,9 @@ syscall!(17 => pub fn sys_wait(fd: usize) -> isize);
 syscall!(18 => pub fn sys_mmap(addr: usize, size: usize, prot_flags: usize, flags: usize, fd: usize, offset: usize) -> isize);
 syscall!(19 => pub fn sys_munmap(addr: usize) -> isize);
 
+syscall!(21 => pub fn sys_get_time_ms() -> usize);
+syscall!(22 => pub fn sys_sleep_ms(time: usize));
+
 // syscall!(23 => pub fn sys_acquire_fb(width: usize, height: usize) -> (usize, usize, usize, usize, usize));
 #[repr(C)]
 pub struct RawFB {
@@ -115,6 +118,8 @@ core::arch::global_asm!(
 unsafe extern "C" {
     pub fn sys_acquire_fb(width: usize, height: usize, res: *mut RawFB) -> isize;
 }
+
+syscall!(25 => pub fn sys_poll_key_event() -> isize);
 
 /* * * * * * * * * * * * * * * * * * * */
 /* Syscall wrappers                    */

@@ -251,8 +251,8 @@ pub unsafe fn HcdTransmitChannel(device: &UsbDevice, channel: u8, buffer: *mut u
             );
         }
 
-        let dma_address = 0x2FF0000;
-        let dma_loc = dwc_sc.dma_loc;
+        let dma_address = 0x2FF0000 + 0x1000 * channel as usize;
+        let dma_loc = dwc_sc.dma_loc + 0x1000 * channel as usize;
         //copy from buffer to dma_loc for 32 bytes
         memory_copy(dma_loc as *mut u8, buffer, 100);
 

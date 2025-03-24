@@ -3,6 +3,7 @@ unsafe extern "Rust" {
 }
 
 #[unsafe(no_mangle)]
+#[cfg(not(feature = "newlib-stub"))]
 extern "C" fn _start(x0: usize) -> ! {
     unsafe { main(crate::sys::ChannelDesc(x0 as u32)) };
     crate::sys::exit(0);
@@ -10,6 +11,7 @@ extern "C" fn _start(x0: usize) -> ! {
 
 #[cfg(not(test))]
 #[cfg(not(feature = "test"))]
+#[cfg(not(feature = "newlib-stub"))]
 #[panic_handler]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     if let Some(loc) = info.location() {
@@ -23,5 +25,11 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     } else {
         crate::println!("Panic; {}", info.message());
     }
+    unsafe { core::arch::asm!("udf #2", options(noreturn)) }
+}
+
+#[cfg(feature = "newlib-stub")]
+#[panic_handler]
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     unsafe { core::arch::asm!("udf #2", options(noreturn)) }
 }

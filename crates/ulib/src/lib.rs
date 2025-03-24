@@ -1,9 +1,12 @@
 #![no_std]
 
-pub mod sys;
-
 #[cfg(feature = "runtime")]
 pub mod runtime;
+
+pub mod newlib_stubs;
+pub mod sys;
+
+pub mod spinlock;
 
 pub struct Stdout;
 

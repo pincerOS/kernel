@@ -9,7 +9,8 @@ PROFILE=${PROFILE-"release"}
 # cargo clean
 cargo rustc --profile="${PROFILE}" --example="${EXAMPLE}" \
     --target="${TARGET}" -- \
-    -C relocation-model=static
+    -C relocation-model=static \
+    -C force-frame-pointers=true
 
 if test "$PROFILE" = "dev" ; then
     BINARY="../../target/${TARGET}/debug/examples/${EXAMPLE}"
