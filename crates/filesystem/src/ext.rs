@@ -199,8 +199,8 @@ where
         let inode_size = superblock.s_inode_size as usize;
 
         let block_group_number = (inode_num - 1) / superblock.s_inodes_per_group as usize;
-        let inode_table_block =
-            block_group_descriptor_tables[block_group_number].get_inode_table(superblock) as usize;
+        let current_bgd: &BGD = &block_group_descriptor_tables[block_group_number];
+        let inode_table_block = current_bgd.get_inode_table(superblock) as usize;
 
         let inode_table_index: usize = (inode_num - 1) % (superblock.s_inodes_per_group as usize);
         let inode_table_block_with_offset: usize =
@@ -373,7 +373,7 @@ where
         let block_size: usize = superblock.get_block_size();
         let block_group_descriptor_block: usize = if block_size == 1024 { 2 } else { 1 };
         let supports_64bit =
-            (superblock.s_feature_incompat & s_feature_incompat::EXT4_FEATURE_INCOMPAT_64BIT) == 0;
+            (superblock.s_feature_incompat & s_feature_incompat::EXT4_FEATURE_INCOMPAT_64BIT) != 0;
         let bgd_size: usize = if supports_64bit && superblock.s_desc_size > 32 {
             size_of::<BGD>()
         } else {

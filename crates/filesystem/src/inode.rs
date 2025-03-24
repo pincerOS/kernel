@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 use std::prelude::rust_2015::Vec;
 use std::{print, slice, vec};
+use crate::superblock::Superblock;
 
 pub mod i_mode {
     pub const EXT2_S_IFSOCK: u16 = 0xC000;
@@ -755,15 +756,16 @@ impl INodeWrapper {
         let mut indirect_levels: usize;
 
         {
+            const DX_PADDING: usize = 0x18;
+            
             let dir_entry_root: &HTreeDirectoryEntryRoot = unsafe {
-                &block_buffer
-                    .as_slice()
+                &block_buffer[DX_PADDING..]
                     .align_to::<HTreeDirectoryEntryRoot>()
                     .1[0]
             };
 
             let filename_hash_result: Result<u32, Ext2Error> =
-                self.filename_dir_hash(name, dir_entry_root.hash_version);
+                self.filename_dir_hash(&ext2.superblock, name, dir_entry_root.hash_version);
 
             if filename_hash_result.is_err() {
                 return Err(filename_hash_result.unwrap_err());
@@ -1684,12 +1686,15 @@ impl INodeWrapper {
         Ok(size)
     }
 
-    pub fn filename_dir_hash(&self, name: &[u8], hash_version: u8) -> Result<u32, Ext2Error> {
+    pub fn filename_dir_hash(&self, superblock: &Superblock, name: &[u8], hash_version: u8) -> Result<u32, Ext2Error> {
         match hash_version {
             dirhash::LEGACY | dirhash::LEGACY_UNSIGNED => {
-                Ok(hash::hash_legacy(name, hash_version == dirhash::LEGACY))
+                Ok(hash::hash_legacy(name, hash_version == dirhash::LEGACY)[0])
             }
-            dirhash::HALF_MD4 | dirhash::HALF_MD4_UNSIGNED => Err(Ext2Error::NotYetImplemented),
+            dirhash::HALF_MD4 | dirhash::HALF_MD4_UNSIGNED => {
+                Ok(hash::hash_md4(superblock.s_hash_seed, name,
+                                  hash_version == dirhash::HALF_MD4)[0])
+            },
             dirhash::TEA | dirhash::TEA_UNSIGNED => Err(Ext2Error::NotYetImplemented),
             _ => Err(Ext2Error::UnsupportedDirHashVersion),
         }
