@@ -419,7 +419,7 @@ where
             let table_bytes_slice_end = (i + 1) * bgd_size;
 
             let bgd_vec_slice_start = i * size_of::<BGD>();
-            let bgd_vec_slice_end = (i + 1) * size_of::<BGD>();
+            let bgd_vec_slice_end = bgd_vec_slice_start + bgd_size;
 
             bgd_vector_slice[bgd_vec_slice_start..bgd_vec_slice_end].copy_from_slice(
                 &block_group_descriptor_tables_bytes
