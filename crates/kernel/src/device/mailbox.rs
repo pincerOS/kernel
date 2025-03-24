@@ -271,7 +271,7 @@ impl VideoCoreMailbox {
         res.map(|(_code, data)| unsafe { T::parse_response(data) })
     }
 
-    pub unsafe fn get_framebuffer(&mut self) -> Surface {
+    pub unsafe fn get_framebuffer_raw(&mut self, width: usize, height: usize) -> RawFB {
         // https://github.com/raspberrypi/firmware/wiki/Mailbox-property-interface
 
         const TAG_ALLOC_BUFFER: u32 = 0x00040001;
@@ -283,11 +283,6 @@ impl VideoCoreMailbox {
         const TAG_SET_PIXEL_ORDER: u32 = 0x00048006;
         const TAG_GET_PITCH: u32 = 0x00040008;
         const TAG_END: u32 = 0x00000000;
-
-        // let width = 640;
-        // let height = 480;
-        let width = 1280;
-        let height = 720;
 
         const BUFFER_WORDS: usize = 64;
         let mut buffer = [0u128; BUFFER_WORDS / 4];
@@ -330,15 +325,12 @@ impl VideoCoreMailbox {
         ];
         words[..data.len()].copy_from_slice(&data);
 
-        // println!("{:?}", words);
-
         unsafe {
             self.mailbox_call(8, &mut buffer).unwrap();
         }
 
         let words: &[u32; BUFFER_WORDS] =
             bytemuck::cast_slice::<_, u32>(&buffer).try_into().unwrap();
-        // println!("{:?}", words);
 
         let response = words[1];
 
@@ -346,20 +338,39 @@ impl VideoCoreMailbox {
         let buffer_size = words[24] as usize;
         let pitch = words[28] as usize;
         assert!(pitch == width * 4);
-        let pitch_elems = pitch / 4;
 
         // println!("{:?}", bytemuck::cast_slice_mut::<_, u32>(&mut buffer));
         println!("Response: {response:#010x}\nbuffer: {buffer_ptr:#010x}, {buffer_size:#010x}, {pitch:#010x}");
 
-        let ptr = unsafe { memory::map_physical_noncacheable(buffer_ptr as usize, buffer_size) };
+        assert!(buffer_ptr % 4096 == 0);
+        RawFB {
+            paddr: buffer_ptr as usize,
+            size: buffer_size,
+            pitch,
+            width,
+            height,
+        }
+    }
+
+    pub unsafe fn map_framebuffer_kernel(&mut self, width: usize, height: usize) -> Surface {
+        let fb = unsafe { self.get_framebuffer_raw(width, height) };
+        let ptr = unsafe { memory::map_physical_noncacheable(fb.paddr, fb.size) };
         let ptr = ptr.as_ptr().cast::<u128>();
         assert!(ptr.is_aligned());
 
-        let array_elems = buffer_size / size_of::<u128>();
+        let array_elems = fb.size / size_of::<u128>();
         let array = unsafe { core::slice::from_raw_parts_mut(ptr, array_elems) };
-
-        Surface::new(array, width, height, pitch_elems)
+        Surface::new(array, width, height, fb.pitch / 4)
     }
+}
+
+#[derive(Copy, Clone)]
+pub struct RawFB {
+    pub paddr: usize,
+    pub size: usize,
+    pub pitch: usize,
+    pub width: usize,
+    pub height: usize,
 }
 
 pub struct Surface {
