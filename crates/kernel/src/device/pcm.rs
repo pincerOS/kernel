@@ -38,6 +38,11 @@ const PCM_FRAME_SYNC_LOW: usize = 1; // inverted
 const CHANNEL_RXC: usize = 0x00;
 const CHANNEL_TXC: usize = 0x04;
 
+const INT_TXW: usize = 0x01;
+const INT_RXR: usize = 0x02;
+const INT_TXERR: usize = 0x04;
+const INT_RXERR: usize = 0x08;
+
 pub struct bcm2711_pcm_driver {
     base_addr: *mut (), /// 0x7e203000
 }
@@ -532,5 +537,121 @@ impl bcm2711_pcm_driver {
             let bit: usize = (2 - num) * 16 + 14;
             self.set_bit(reg, bit, on)
         }
+    }
+
+    fn get_reception_fifo_dreq_level(&mut self) -> u32 {
+        self.read_bits(self.reg_dreq(), 0, 6)
+    }
+
+    fn set_reception_fifo_dreq_level(&mut self, level: u32) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.write_bits(self.reg_dreq(), 0, 6, level);
+            true
+        }
+    }
+
+    fn get_transmission_fifo_dreq_level(&mut self) -> u32 {
+        self.read_bits(self.reg_dreq(), 8, 6)
+    }
+
+    fn set_transmission_fifo_dreq_level(&mut self, level: u32) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.write_bits(self.reg_dreq(), 8, 6, level);
+            true
+        }
+    }
+
+    fn get_reception_fifo_panic_level(&mut self) -> u32 {
+        self.read_bits(self.reg_dreq(), 16, 6)
+    }
+
+    fn set_reception_fifo_panic_level(&mut self, level: u32) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.write_bits(self.reg_dreq(), 16, 6, level);
+            true
+        }
+    }
+
+    fn get_transmission_fifo_panic_level(&mut self) -> u32 {
+        self.read_bits(self.reg_dreq(), 24, 6)
+    }
+
+    fn set_transmission_fifo_panic_level(&mut self, level: u32) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.write_bits(self.reg_dreq(), 24, 6, level);
+            true
+        }
+    }
+
+    fn transmission_write_interrupt_enabled(&mut self) -> bool {
+        self.check_bit(self.reg_inten(), 0)
+    }
+
+    fn toggle_transmission_write_interrupt(&mut self, on: bool) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.set_bit(self.reg_inten(), 0, on)
+        }
+    }
+
+    fn reception_read_interrupt_enabled(&mut self) -> bool {
+        self.check_bit(self.reg_inten(), 1)
+    }
+
+    fn toggle_reception_read_interrupt(&mut self, on: bool) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.set_bit(self.reg_inten(), 1, on)
+        }
+    }
+
+    fn transmission_error_interrupt_enabled(&mut self) -> bool {
+        self.check_bit(self.reg_inten(), 2)
+    }
+
+    fn toggle_transmission_error_interrupt(&mut self, on: bool) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.set_bit(self.reg_inten(), 2, on)
+        }
+    }
+
+    fn reception_error_interrupt_enabled(&mut self) -> bool {
+        self.check_bit(self.reg_inten(), 3)
+    }
+
+    fn toggle_reception_error_interrupt(&mut self, on: bool) -> bool {
+        if self.pcm_is_enabled() {
+            false
+        }
+        else {
+            self.set_bit(self.reg_inten(), 3, on)
+        }
+    }
+
+    fn report_interrupt_status(&mut self) -> u32 {
+        self.read_bits(self.reg_intstc(), 0, 4)
+    }
+
+    fn clear_interrupt_status(&mut self, bitfield: u32) {
+        self.write_bits(self.reg_intstc(), 0, 4, bitfield);
     }
 }
