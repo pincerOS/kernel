@@ -138,11 +138,12 @@ impl FileDescriptor for UartFd {
         if buf.is_empty() {
             return boxed_future(async move { FileDescResult::ok(0) });
         }
+        let target = &mut buf[0];
         boxed_future(async move {
             if READ_NO_BLOCK {
                 let c = self.0.lock().try_getc();
                 if let Some(c) = c {
-                    buf[0] = c;
+                    *target = c;
                     FileDescResult::ok(1)
                 } else {
                     // TODO: proper non-blocking reads, or proper kernel heap...
@@ -152,7 +153,7 @@ impl FileDescriptor for UartFd {
             } else {
                 // TODO: async UART handling
                 let c = self.0.lock().getc();
-                buf[0] = c;
+                *target = c;
                 FileDescResult::ok(1)
             }
         })

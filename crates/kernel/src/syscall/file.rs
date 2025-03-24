@@ -62,24 +62,49 @@ pub unsafe fn sys_close(ctx: &mut Context) -> *mut Context {
 
 /// syscall pread(fd: u32, buf: *mut u8, len: u64, offset: u64) -> i64
 pub unsafe fn sys_pread(ctx: &mut Context) -> *mut Context {
-    let fd = ctx.regs[0];
+    let fd = ctx.regs[0].min(u32::MAX as usize) as u32;
     let buf_ptr = ctx.regs[1];
-    let buf_len = ctx.regs[2];
+    let buf_len = ctx.regs[2].min(u32::MAX as usize) as u32;
     let offset = ctx.regs[3];
+    struct Args {
+        fd: u32,
+        buf_ptr: usize,
+        buf_len: u32,
+        offset: usize,
+    }
+
+    // Hack to work around Rust's terrible async codegen
+    // Hopefully this improves in the future: https://github.com/rust-lang/rust/pull/135527
+    let args = Args {
+        fd,
+        buf_ptr,
+        buf_len,
+        offset,
+    };
 
     run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
-        let proc = context.cur_process().unwrap();
+        let args = args;
+        let Args {
+            fd,
+            buf_ptr,
+            buf_len,
+            offset,
+        } = args;
+        let (file, buf) = {
+            let proc = context.cur_process().unwrap();
+            let file = proc.file_descriptors.lock().get(fd as usize).cloned();
+            let Some(file) = file else {
+                return context.resume_return(-1i64 as usize);
+            };
 
-        let file = proc.file_descriptors.lock().get(fd).cloned();
-        let Some(file) = file else {
-            return context.resume_return(-1i64 as usize);
+            // TODO: sound abstraction for usermode buffers...
+            // (prevent TOCTOU issues, pin pages to prevent user unmapping them,
+            // deal with unmapped pages...)
+            // TODO: check user buffers
+            let buf =
+                unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, buf_len as usize) };
+            (file, buf)
         };
-
-        // TODO: sound abstraction for usermode buffers...
-        // (prevent TOCTOU issues, pin pages to prevent user unmapping them,
-        // deal with unmapped pages...)
-        // TODO: check user buffers
-        let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr as *mut u8, buf_len) };
 
         let res = file.read(offset as u64, buf).await;
 
