@@ -16,13 +16,13 @@ pub extern "C" fn main() {
     println!("Starting specified addr mmap test!");
 
     //prot flags and offset are currently not used
-    let mut mmap_addr: usize = unsafe { sys::mmap(VIRTUAL_ADDR, 4096, 0, 1, u32::MAX as usize, 0) };
-    if mmap_addr == usize::MAX {
-        println!("Error: mmap failed!");
-        unsafe {
-            sys::shutdown();
-        }
-        unreachable!();
+    let mut mmap_addr: usize = sys::mmap(VIRTUAL_ADDR, 4096, 0, 1, u32::MAX, 0).unwrap();
+
+    //This doesn't always need to hold but in this case it does since the virtual addr is page
+    //aligned
+    if mmap_addr != VIRTUAL_ADDR {
+        println!("Error: mmap addr is not the same as the requested addr!");
+        sys::shutdown();
     }
 
     println!("Done with mmap, writing bytes");
@@ -35,34 +35,22 @@ pub extern "C" fn main() {
     for _i in 0..4096 {
         if unsafe { *virt_ptr } != ('a' as u8) {
             println!("Error: incorrect value found at address {:p}", virt_ptr);
-            unsafe {
-                sys::shutdown();
-            }
-            unreachable!();
+            sys::shutdown();
         }
         virt_ptr = virt_ptr.wrapping_add(1);
     }
     println!("Bytes verified, unmapping range");
     //length parameter is not used
-    let mut munmap_ret_val = unsafe { sys::munmap(VIRTUAL_ADDR, 0) };
-    if munmap_ret_val != 0 {
-        println!("Error: munmap return value is {}", munmap_ret_val);
-        unsafe {
-            sys::shutdown();
-        }
-        unreachable!();
-    }
+    _ = sys::munmap(VIRTUAL_ADDR, 0).unwrap();
 
     let mut a_counter: u32 = 0;
     virt_ptr = VIRTUAL_ADDR as *mut u8;
 
-    mmap_addr = unsafe { sys::mmap(VIRTUAL_ADDR, 4096, 0, 1, u32::MAX as usize, 0) };
-    if mmap_addr == usize::MAX {
-        println!("Error: mmap failed!");
-        unsafe {
-            sys::shutdown();
-        }
-        unreachable!();
+    mmap_addr = sys::mmap(VIRTUAL_ADDR, 4096, 0, 1, u32::MAX, 0).unwrap();
+
+    if mmap_addr != VIRTUAL_ADDR {
+        println!("Error: mmap addr is not the same as the requested addr!");
+        sys::shutdown();
     }
 
     println!("Range mapped again");
@@ -73,86 +61,39 @@ pub extern "C" fn main() {
         virt_ptr = virt_ptr.wrapping_add(1);
     }
     println!("Done counting, unmapping again");
-    munmap_ret_val = unsafe { sys::munmap(VIRTUAL_ADDR, 0) };
-    if munmap_ret_val != 0 {
-        println!("Error: munmap return value is {}", munmap_ret_val);
-        unsafe {
-            sys::shutdown();
-        }
-        unreachable!();
-    }
+    _ = sys::munmap(VIRTUAL_ADDR, 0).unwrap();
 
     println!("Found {} 'a' characters in the mmaped range", a_counter);
 
     println!("Done with specified addrm map test!");
 
     println!("Testing unspecified mmap");
-    let first_unspec_addr: usize = unsafe { sys::mmap(0, 4096, 0, 1, u32::MAX as usize, 0) };
-    if first_unspec_addr == usize::MAX {
-        println!("Error: mmap failed!");
-        unsafe {
-            sys::shutdown();
-        }
-        unreachable!();
-    }
+    let first_unspec_addr: usize = sys::mmap(0, 4096, 0, 1, u32::MAX, 0).unwrap();
 
-    munmap_ret_val = unsafe { sys::munmap(first_unspec_addr, 0) };
-    if munmap_ret_val != 0 {
-        println!("Error: munmap return value is {}", munmap_ret_val);
-        unsafe {
-            sys::shutdown();
-        }
-        unreachable!();
-    }
+    _ = sys::munmap(first_unspec_addr, 0).unwrap();
 
-    let second_unspec_addr: usize = unsafe { sys::mmap(0, 4096, 0, 1, u32::MAX as usize, 0) };
-    if second_unspec_addr == usize::MAX {
-        println!("Error: mmap failed!");
-        unsafe {
-            sys::shutdown();
-        }
-        unreachable!();
-    }
+    let second_unspec_addr: usize = sys::mmap(0, 4096, 0, 1, u32::MAX, 0).unwrap();
 
-    munmap_ret_val = unsafe { sys::munmap(second_unspec_addr, 0) };
-    if munmap_ret_val != 0 {
-        println!("Error: munmap return value is {}", munmap_ret_val);
-        unsafe {
-            sys::shutdown();
-        }
-        unreachable!();
-    }
+    _ = sys::munmap(second_unspec_addr, 0).unwrap();
 
     if first_unspec_addr != second_unspec_addr {
         println!(
             "Unspecifed mmap addrs do not match! First addr: {:x} Second addr: {:x}",
             first_unspec_addr, second_unspec_addr
         );
-        unsafe {
-            sys::shutdown();
-        }
-        unreachable!();
+        sys::shutdown();
     }
 
     println!("Unspecified mmap works as intended!");
 
     println!("Starting physical range mmap test!");
-    let phys_addr: usize = 0x5ee000;
+    let phys_addr: usize = 0x5ef000;
     println!("Physical addr used: {:x}. Ensure that the kernel part of this test case is leaking this physical addr", phys_addr);
 
     //Don't want to fill pages!
-    mmap_addr = unsafe { sys::mmap(0, 4096 * 2, 0, 0, u32::MAX as usize, 0) };
-    if mmap_addr == usize::MAX {
-        println!("Error: mmap failed!");
-        unsafe {
-            sys::shutdown();
-        }
-        unreachable!();
-    }
+    mmap_addr = sys::mmap(0, 4096 * 2, 0, 0, u32::MAX, 0).unwrap();
 
-    unsafe {
-        sys::map_physical(mmap_addr, phys_addr);
-    }
+    _ = sys::map_physical(mmap_addr, phys_addr).unwrap();
     println!("Associated virtual addr: {:x}", mmap_addr);
     virt_ptr = mmap_addr as *mut u8;
     a_counter = 0;
@@ -172,17 +113,9 @@ pub extern "C" fn main() {
         );
     }
 
-    munmap_ret_val = unsafe { sys::munmap(mmap_addr, 0) };
-    if munmap_ret_val != 0 {
-        println!("Error: munmap return value is {}", munmap_ret_val);
-        unsafe {
-            sys::shutdown();
-        }
-        unreachable!();
-    }
+    _ = sys::munmap(mmap_addr, 0).unwrap();
 
-    unsafe { sys::shutdown() };
-    unreachable!();
+    sys::shutdown();
 }
 
 #[macro_use]

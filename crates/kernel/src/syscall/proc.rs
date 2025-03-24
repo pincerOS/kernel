@@ -129,7 +129,7 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
             //For debug
             println!("Error: {}", e);
             //TODO: find a better way to tell the user what went wrong
-            usize::MAX
+            i64::from(-1) as usize
         }
     };
     ctx.regs[0] = range_start;
@@ -161,7 +161,7 @@ pub unsafe fn sys_map_physical_range(ctx: &mut Context) -> *mut Context {
             //For debug
             println!("Error: {}", e);
             //TODO: find a better way to tell the user what went wrong
-            usize::MAX
+            i64::from(-1) as usize
         }
     };
     ctx.regs[0] = retval;
@@ -194,7 +194,7 @@ pub unsafe fn sys_munmap(ctx: &mut Context) -> *mut Context {
             //For debug
             println!("Error: {}", e);
             //TODO: find a better way to tell the user what went wrong
-            usize::MAX
+            i64::from(-1) as usize
         }
     };
     ctx.regs[0] = retval;
