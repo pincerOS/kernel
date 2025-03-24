@@ -1,3 +1,4 @@
+use core::mem::offset_of;
 use core::mem::MaybeUninit;
 
 macro_rules! syscall {
@@ -82,6 +83,38 @@ syscall!(17 => pub fn sys_wait(fd: usize) -> isize);
 
 syscall!(18 => pub fn sys_mmap(addr: usize, size: usize, prot_flags: usize, flags: usize, fd: usize, offset: usize) -> isize);
 syscall!(19 => pub fn sys_munmap(addr: usize) -> isize);
+
+// syscall!(23 => pub fn sys_acquire_fb(width: usize, height: usize) -> (usize, usize, usize, usize, usize));
+#[repr(C)]
+pub struct RawFB {
+    pub fd: usize,
+    pub size: usize,
+    pub pitch: usize,
+    pub width: usize,
+    pub height: usize,
+}
+
+core::arch::global_asm!(
+    ".global {name}; {name}:",
+    "mov x7, x2",
+    "svc #{num}",
+    "str x0, [x7, {fd_offset}]",
+    "str x1, [x7, {size_offset}]",
+    "str x2, [x7, {pitch_offset}]",
+    "str x3, [x7, {width_offset}]",
+    "str x4, [x7, {height_offset}]",
+    "ret",
+    name = sym sys_acquire_fb,
+    num = const 23,
+    fd_offset = const offset_of!(RawFB, fd),
+    size_offset = const offset_of!(RawFB, size),
+    pitch_offset = const offset_of!(RawFB, pitch),
+    width_offset = const offset_of!(RawFB, width),
+    height_offset = const offset_of!(RawFB, height),
+);
+unsafe extern "C" {
+    pub fn sys_acquire_fb(width: usize, height: usize, res: *mut RawFB) -> isize;
+}
 
 /* * * * * * * * * * * * * * * * * * * */
 /* Syscall wrappers                    */

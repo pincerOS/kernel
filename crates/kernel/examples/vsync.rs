@@ -26,7 +26,7 @@ async fn main(tree: device_tree::DeviceTree<'static>) {
     let mut mailbox = unsafe { mailbox::VideoCoreMailbox::init(mailbox_base) };
 
     println!("| acquiring framebuffer");
-    let mut surface = unsafe { mailbox.get_framebuffer() };
+    let mut surface = unsafe { mailbox.map_framebuffer_kernel(640, 480) };
 
     println!("| starting vsync demo; make sure to run with 'just run-ui'");
     vsync_tearing_demo(&mut surface).await;
