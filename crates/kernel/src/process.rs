@@ -46,7 +46,7 @@ impl Process {
         let user_table_vaddr = (&*table as *const _ as *const ()).addr();
         let user_table_phys = crate::memory::physical_addr(user_table_vaddr).unwrap() as usize;
 
-        let mut page_table = UserPageTable {
+        let page_table = UserPageTable {
             table,
             phys_addr: user_table_phys,
             memory_range_map: BTreeMap::new(),
@@ -390,7 +390,7 @@ impl UserPageTable {
         for addr in (range_start..range_end).step_by(USER_PG_SZ) {
             unsafe {
                 match crate::arch::memory::vmm::unmap_va_user(addr, &mut self.table) {
-                    Ok(val) => {
+                    Ok(_val) => {
                         if !is_physical {
                             //TODO: free the page here
                         }
@@ -452,7 +452,7 @@ impl UserPageTable {
             for addr in (*range_start..range_end).step_by(USER_PG_SZ) {
                 unsafe {
                     match crate::arch::memory::vmm::unmap_va_user(addr, &mut self.table) {
-                        Ok(val) => {
+                        Ok(_val) => {
                             if !is_physical {
                                 //TODO: free the page here
                             }

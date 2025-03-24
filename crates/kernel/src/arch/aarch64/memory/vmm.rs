@@ -74,6 +74,7 @@ impl PageAlloc {
     }
 }
 
+#[allow(dead_code)]
 unsafe fn kernel_paddr_to_vaddr(paddr: usize) -> *mut () {
     core::ptr::with_exposed_provenance_mut(paddr + (virt_addr_base().as_ptr() as usize))
 }
@@ -342,7 +343,7 @@ pub unsafe fn unmap_va_user(
     let mut mask = (1 << index_bits) - 1;
     //level 2 table index is bits 29-21
     let mut table_index = (va >> 21) & mask;
-    let mut table_descriptor: TableDescriptor = unsafe { translation_table.0[table_index].table };
+    let table_descriptor: TableDescriptor = unsafe { translation_table.0[table_index].table };
 
     if !table_descriptor.is_valid() {
         //Error: the table descriptor for this page is not valid
@@ -420,7 +421,7 @@ pub unsafe fn clear_user_vaddr_space(translation_table: &mut Box<UserTranslation
                 continue;
             }
 
-            let page_pa: usize = unsafe { entry.read() }.get_pa() << 12;
+            let _page_pa: usize = unsafe { entry.read() }.get_pa() << 12;
             //TODO: free the page here
         }
 
