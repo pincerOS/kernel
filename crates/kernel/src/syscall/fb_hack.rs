@@ -3,7 +3,7 @@ use alloc::sync::Arc;
 use crate::arch::memory::vmm::PAGE_SIZE;
 use crate::device::mailbox::RawFB;
 use crate::device::MAILBOX;
-use crate::event::async_handler::{run_async_handler, HandlerContext};
+use crate::event::async_handler::{run_async_handler, run_event_handler, HandlerContext};
 use crate::event::context::Context;
 use crate::process::fd;
 
@@ -74,4 +74,15 @@ impl fd::FileDescriptor for FramebufferFd {
     fn as_any(&self) -> &dyn core::any::Any {
         self
     }
+}
+
+pub unsafe fn sys_poll_key_event(ctx: &mut Context) -> *mut Context {
+    run_event_handler(ctx, |context: HandlerContext<'_>| {
+        let res = crate::device::usb::keyboard::KEY_EVENTS.poll();
+        let code = match res {
+            Some(event) => event.code as usize | ((event.pressed as usize) << 8),
+            None => (-1isize) as usize,
+        };
+        context.resume_return(code)
+    })
 }
