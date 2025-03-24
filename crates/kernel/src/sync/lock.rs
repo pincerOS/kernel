@@ -12,7 +12,7 @@ pub trait LockImpl {
 }
 
 pub struct Lock<T: ?Sized, L> {
-    pub(super) inner: L,
+    inner: L,
     value: UnsafeCell<T>,
 }
 
