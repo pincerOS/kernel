@@ -48,12 +48,13 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
     let dma_addr = dwc_sc.dma_addr[endpoint.channel as usize];
 
     let buffer = endpoint.buffer;
-
+    let buffer_length = device.last_transfer;
     unsafe {
-        core::ptr::copy_nonoverlapping(dma_addr as *const u8, buffer, 8);
+        core::ptr::copy_nonoverlapping(dma_addr as *const u8, buffer, buffer_length as usize);
     }
 
     if let Some(callback) = endpoint_device.endpoints[endpoint.device_endpoint_number as usize] {
+        // TODO: make this take a slice
         unsafe { callback(buffer, device.last_transfer) };
     } else {
         println!(
@@ -95,7 +96,6 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     //TODO: Hardcoded for usb-kbd for now
-    let mut buffer = Box::new([0u8; 8]);
     let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
 
     let dma_addr = dwc_sc.dma_addr[endpoint.channel as usize];
@@ -108,13 +108,21 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
         shutdown();
     }
 
+    let buffer_length = device.last_transfer.clamp(0, 8);
+    let mut buffer = Box::new_uninit_slice(buffer_length as usize);
+
     if hcint & HCINT_NAK != 0 {
         //NAK received, do nothing
+        assert_eq!(buffer_length, 0);
     } else if hcint & HCINT_XFERCOMPL != 0 {
         //Transfer complete
         //copy from dma_addr to buffer
         unsafe {
-            core::ptr::copy_nonoverlapping(dma_addr as *const u8, buffer.as_mut_ptr(), 8);
+            core::ptr::copy_nonoverlapping(
+                dma_addr as *const u8,
+                buffer.as_mut_ptr().cast(),
+                buffer_length as usize,
+            );
         }
     } else {
         println!(
@@ -124,8 +132,10 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
         shutdown();
     }
 
+    let mut buffer = unsafe { buffer.assume_init() };
+
     if let Some(callback) = endpoint_device.endpoints[endpoint.device_endpoint_number as usize] {
-        unsafe { callback(buffer.as_mut_ptr(), device.last_transfer) };
+        unsafe { callback(buffer.as_mut_ptr(), buffer_length) };
     } else {
         println!(
             "| USB: No callback for endpoint number {}.",

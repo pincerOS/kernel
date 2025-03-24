@@ -4,54 +4,108 @@
  *  By Aaron Lo
  *   
  */
-use crate::SpinLock;
-use alloc::vec;
-use alloc::vec::Vec;
+use core::sync::atomic::AtomicU64;
 
-pub static KeyboardBuffer: SpinLock<Vec<Key>> = SpinLock::new(Vec::new());
+use super::iter_changed_bits;
+use crate::sync::SpinLock;
 
-pub unsafe fn KeyboardAnalyze(buffer: *mut u8, _buffer_length: u32) {
-    let mut keys = ModifierToKeys(unsafe { *buffer });
-
-    //the second byte is always 0
-    for i in 2..8 {
-        let key = ByteToKey(unsafe { *buffer.offset(i as isize) });
-        if !matches!(key, Key::NotDefined) {
-            keys.push(key);
-        }
-    }
-
-    *KeyboardBuffer.lock() = keys;
-    // unsafe { KeyboardBuffer = keys };
+#[derive(Debug)]
+pub struct KeyEvent {
+    pub code: u8,
+    pub key: Key,
+    pub pressed: bool,
 }
 
-pub fn ModifierToKeys(byte: u8) -> Vec<Key> {
-    let mut keys = vec![];
-    if byte & 0x01 != 0 {
-        keys.push(Key::LeftCtrl);
+pub struct KeyEventBuffer {
+    recv_lock: SpinLock<()>,
+    buffer: crate::ringbuffer::SpscOverwritingRingBuffer<4096, KeyEvent>,
+}
+
+impl KeyEventBuffer {
+    pub fn poll(&self) -> Option<KeyEvent> {
+        let _guard = self.recv_lock.lock();
+        unsafe { self.buffer.try_recv() }
     }
-    if byte & 0x02 != 0 {
-        keys.push(Key::LeftShift);
+}
+
+// Reading from the queue has a lock, and writing to it is only done
+// from within this module.
+// TODO: ensure that KeyboardAnalyze can't run concurrently with itself?
+unsafe impl Sync for KeyEventBuffer {}
+
+pub static KEY_EVENTS: KeyEventBuffer = KeyEventBuffer {
+    recv_lock: SpinLock::new(()),
+    buffer: crate::ringbuffer::SpscOverwritingRingBuffer::new(),
+};
+
+static LAST_KEYBOARD_REPORT: AtomicU64 = AtomicU64::new(0);
+
+pub unsafe fn KeyboardAnalyze(buffer: *mut u8, buffer_length: u32) {
+    let buffer = unsafe { core::slice::from_raw_parts(buffer, buffer_length as usize) };
+    if buffer.is_empty() {
+        return;
     }
-    if byte & 0x04 != 0 {
-        keys.push(Key::LeftAlt);
+
+    let mut new_report: [u8; 8] = buffer.try_into().unwrap();
+
+    // Sort the key array as descending to get a consistent ordering;
+    // Keyboards may buffer events (..) into a single report.
+    // https://usb.org/sites/default/files/hid1_11.pdf#page=83
+    new_report[2..].sort_unstable_by(|a, b| b.cmp(a));
+
+    let old_report = u64::to_ne_bytes(LAST_KEYBOARD_REPORT.swap(
+        u64::from_ne_bytes(new_report),
+        core::sync::atomic::Ordering::SeqCst,
+    ));
+
+    if old_report == new_report {
+        return;
     }
-    if byte & 0x08 != 0 {
-        keys.push(Key::LeftGui); //Windows key, Command on Mac
+
+    let emit_key = |keycode, pressed| {
+        let key = ByteToKey(keycode);
+        let event = KeyEvent {
+            key,
+            code: keycode,
+            pressed,
+        };
+        unsafe { KEY_EVENTS.buffer.send_overwrite(event) };
+    };
+
+    let old_mods = old_report[0];
+    let new_mods = new_report[0];
+
+    iter_changed_bits(old_mods, new_mods, |idx, state| match idx {
+        0 => emit_key(0xE0, state), // LEFT_CTRL
+        1 => emit_key(0xE1, state), // LEFT_SHIFT
+        2 => emit_key(0xE2, state), // LEFT_ALT
+        3 => emit_key(0xE3, state), // LEFT_GUI
+        4 => emit_key(0xE4, state), // RIGHT_CTRL
+        5 => emit_key(0xE5, state), // RIGHT_SHIFT
+        6 => emit_key(0xE6, state), // RIGHT_ALT
+        7 => emit_key(0xE7, state), // RIGHT_GUI
+        _ => unreachable!(),
+    });
+
+    let (mut i, mut j) = (2, 2);
+    while i < 8 && j < 8 {
+        let (a, b) = (new_report[i], old_report[j]);
+        if a == b {
+            // no change
+            i += 1;
+            j += 1;
+        } else if a > b {
+            // Both lists are descending, so if the new key is greater
+            // than the old key, the new key was added (key down)
+            emit_key(a, true);
+            i += 1; // Skip the new key, continue comparing
+        } else {
+            // The new key is less than the old key, so the old key
+            // was released.
+            emit_key(b, false);
+            j += 1; // Skip the old key, continue comparing
+        }
     }
-    if byte & 0x10 != 0 {
-        keys.push(Key::RightCtrl);
-    }
-    if byte & 0x20 != 0 {
-        keys.push(Key::RightShift);
-    }
-    if byte & 0x40 != 0 {
-        keys.push(Key::RightAlt);
-    }
-    if byte & 0x80 != 0 {
-        keys.push(Key::RightGui);
-    }
-    return keys;
 }
 
 //Table is here: https://github.com/tmk/tmk_keyboard/wiki/USB%3A-HID-Usage-Table
@@ -98,6 +152,14 @@ pub fn ByteToKey(byte: u8) -> Key {
         0x2A => Key::Backspace,
         0x2B => Key::Tab,
         0x2C => Key::Space,
+        0xE0 => Key::LeftCtrl,
+        0xE1 => Key::LeftShift,
+        0xE2 => Key::LeftAlt,
+        0xE3 => Key::LeftGui,
+        0xE4 => Key::RightCtrl,
+        0xE5 => Key::RightShift,
+        0xE6 => Key::RightAlt,
+        0xE7 => Key::RightGui,
         _ => Key::NotDefined,
     }
 }

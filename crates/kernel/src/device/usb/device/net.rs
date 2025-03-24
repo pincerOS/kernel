@@ -129,8 +129,11 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     return ResultCode::OK;
 }
 
-pub unsafe fn NetAnalyze(buffer: *mut u8, _buffer_length: u32) {
-    let buffer32 = unsafe { core::slice::from_raw_parts(buffer, 32) };
+pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
+    let buffer32 = unsafe { core::slice::from_raw_parts(buffer, buffer_length as usize) };
+    if buffer32.is_empty() {
+        return;
+    }
 
     if buffer32[0] != 0 {
         println!("| Net: Buffer1: {:?}", buffer32[0]);

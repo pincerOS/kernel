@@ -34,6 +34,16 @@ use crate::device::usb::usbd::request::*;
 use crate::shutdown;
 use alloc::boxed::Box;
 
+fn iter_changed_bits(from: u8, to: u8, callback: impl Fn(u32, bool)) {
+    let mut diff = from ^ to;
+    while diff != 0 {
+        let idx = diff.trailing_zeros();
+        diff &= diff - 1; // clear lowest set bit
+        let new_state = (to & (1 << idx)) != 0; // get the new state of the bit
+        callback(idx, new_state)
+    }
+}
+
 pub const HidMessageTimeout: u32 = 10;
 
 pub fn HidLoad(bus: &mut UsbBus) {

@@ -227,18 +227,25 @@ impl VideoCoreMailbox {
         let words: &[u32] = bytemuck::cast_slice::<_, u32>(&*buffer);
 
         let response = words[1];
-        let response_size = words[3];
+        let response_buffer_size = words[3];
         let response_code = words[4];
+        let mut response_size = response_code & 0x7FFFFFFF;
 
-        if response_code != 0x80000000 {
+        if (response_code & 0x80000000) == 0 {
             return Err(MailboxError);
+        }
+
+        if response_size == 0 && [PropGetPowerState::TAG, PropGetPowerWaitTime::TAG].contains(&tag)
+        {
+            // TODO: Unsupported in qemu
+            response_size = 8;
         }
 
         let response_data: &[u8] = &bytemuck::cast_slice(&words[5..])[..response_size as usize];
 
         // TODO: properly detect & handle responses that require a larger buffer
         // (ie. try requesing the commandline with a small buffer?)
-        if response_size > data_words * size_of::<u32>() as u32 {
+        if response_size > response_buffer_size {
             // retry?  response was truncated
             return Err(MailboxError);
         }
