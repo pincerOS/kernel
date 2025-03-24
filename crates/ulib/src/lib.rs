@@ -3,6 +3,7 @@
 #[cfg(feature = "runtime")]
 pub mod runtime;
 
+pub mod newlib_stubs;
 pub mod spinlock;
 pub mod stdout;
 pub mod sys;
