@@ -126,6 +126,6 @@ syscall!(16 => pub fn execve_fd(
 
 syscall!(17 => pub fn wait(fd: usize) -> isize);
 
-syscall!(18 => pub fn mmap(req_addr: usize, size: usize, fill_pages: bool) -> usize);
-syscall!(19 => pub fn munmap(req_addr: usize) -> usize);
+syscall!(18 => pub fn mmap(req_addr: usize, size: usize, prot_flags: usize, fill_pages: usize, fd_index: usize, offset: usize) -> usize);
+syscall!(19 => pub fn munmap(req_addr: usize, length: usize) -> usize);
 syscall!(20 => pub fn map_physical(virtual_addr: usize, physical_adddr: usize) -> usize);

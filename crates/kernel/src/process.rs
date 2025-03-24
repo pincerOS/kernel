@@ -51,20 +51,19 @@ impl Process {
             phys_addr: user_table_phys,
             memory_range_map: BTreeMap::new(),
         };
-        
+
         Process {
             page_table: SpinLock::new(page_table),
             root: None,
             file_descriptors: SpinLock::new(FileDescriptorList { desc: Vec::new() }),
             exit_code: Arc::new(BlockingOnceCell::new()),
         }
-
     }
 
     pub fn get_ttbr0(&self) -> usize {
         self.page_table.lock().phys_addr
     }
-    
+
     pub fn fork(&self) -> Process {
         use core::arch::asm;
         use core::mem::MaybeUninit;
@@ -76,13 +75,13 @@ impl Process {
         let buf_ptr: *mut u8 = buffer.as_mut_ptr().cast();
 
         let new_process = Process::new();
-        
+
         /*
         let dst_data = 0x20_0000 as *mut u8;
         let src_data = 0x20_0000 as *const u8;
         let src_size = 0x20_0000 * 7;
         */
-        
+
         let old_page_dir = self.get_ttbr0();
         let new_page_dir = new_process.get_ttbr0();
 
@@ -93,7 +92,7 @@ impl Process {
                 asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) old_page_dir);
             }
         }
-        
+
         /*
         for i in 0..(src_size / buf_size) {
             unsafe {
@@ -108,25 +107,35 @@ impl Process {
         // /*
         //bad: locks other threads in the process from using this
         for (range_start, node) in &self.page_table.lock().memory_range_map {
-
             //this is mildly sus and will need to be changed
-            new_process.page_table.lock().reserve_memory_range(*range_start, node.size, match node.file_descriptor_index {
-                None => u32::MAX,
-                Some(idx) => idx,
-            }, *range_start != 0x200_000).unwrap();
-            
+            new_process
+                .page_table
+                .lock()
+                .reserve_memory_range(
+                    *range_start,
+                    node.size,
+                    match node.file_descriptor_index {
+                        None => u32::MAX,
+                        Some(idx) => idx,
+                    },
+                    *range_start != 0x200_000,
+                )
+                .unwrap();
+
             if node.is_physical {
-                new_process.page_table.lock().set_range_as_physical(*range_start);
+                new_process
+                    .page_table
+                    .lock()
+                    .set_range_as_physical(*range_start);
             }
 
             let mut copy_idx: usize = 0;
             let copy_size = core::cmp::min(node.size, buf_size);
-            
+
             let dst_data = *range_start as *mut u8;
             let src_data = *range_start as *const u8;
-            
+
             while copy_idx < node.size {
-                
                 unsafe {
                     copy_nonoverlapping(src_data.byte_add(copy_idx), buf_ptr, copy_size);
                     asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) new_page_dir);
@@ -136,10 +145,8 @@ impl Process {
 
                 copy_idx += copy_size;
             }
-
         }
         // */
-
         {
             let old_fds = self.file_descriptors.lock();
             let mut new_fds = new_process.file_descriptors.lock();
@@ -152,7 +159,7 @@ impl Process {
                 let _ = new_fds.set(idx, desc.clone());
             }
         }
-        
+
         new_process
     }
 }
@@ -285,7 +292,11 @@ impl UserPageTable {
             MemoryRangeNode {
                 start: start_addr,
                 size: size,
-                file_descriptor_index: if fd_index == u32::MAX { None } else { Some(fd_index) },
+                file_descriptor_index: if fd_index == u32::MAX {
+                    None
+                } else {
+                    Some(fd_index)
+                },
                 is_physical: false,
             },
         );
@@ -329,10 +340,13 @@ impl UserPageTable {
             }
         }
     }
-    
+
     ///Maps a range of phsical addresses to a previously reserved range of virtual addresses
-    pub fn map_to_physical_range(&mut self, mut start_va: usize, mut start_pa: usize) -> Result<(), MappingError> {
-        
+    pub fn map_to_physical_range(
+        &mut self,
+        mut start_va: usize,
+        mut start_pa: usize,
+    ) -> Result<(), MappingError> {
         start_va = (start_va / USER_PG_SZ) * USER_PG_SZ;
         start_pa = (start_pa / USER_PG_SZ) * USER_PG_SZ;
 
@@ -341,12 +355,18 @@ impl UserPageTable {
             Some(node) => {
                 size = node.size;
                 node.is_physical = true;
-            },
+            }
             None => return Err(MappingError::NotInMemoryRange),
         }
 
         for increment in (0..size).step_by(USER_PG_SZ) {
-            unsafe { crate::arch::memory::vmm::map_pa_to_va_user(start_pa + increment, start_va + increment, &mut self.table)?; }
+            unsafe {
+                crate::arch::memory::vmm::map_pa_to_va_user(
+                    start_pa + increment,
+                    start_va + increment,
+                    &mut self.table,
+                )?;
+            }
         }
 
         return Ok(());
@@ -374,7 +394,6 @@ impl UserPageTable {
                         if !is_physical {
                             //TODO: free the page here
                         }
-                        
                     }
                     //These two can do nothing, just means that page was never mapped/used
                     Err(MappingError::TableDescriptorNotValid) => {}
@@ -428,7 +447,6 @@ impl UserPageTable {
     pub fn clear_address_space(&mut self) -> () {
         let curr_map: &mut BTreeMap<usize, MemoryRangeNode> = &mut self.memory_range_map;
         for (range_start, node) in &mut *curr_map {
-            
             let range_end = range_start + node.size;
             let is_physical: bool = node.is_physical;
             for addr in (*range_start..range_end).step_by(USER_PG_SZ) {
@@ -438,7 +456,6 @@ impl UserPageTable {
                             if !is_physical {
                                 //TODO: free the page here
                             }
-                            
                         }
                         //These two can do nothing, just means that page was never mapped/used
                         Err(MappingError::TableDescriptorNotValid) => {}
@@ -452,10 +469,8 @@ impl UserPageTable {
                     }
                 };
             }
-        
         }
-        
+
         curr_map.clear();
     }
-
 }

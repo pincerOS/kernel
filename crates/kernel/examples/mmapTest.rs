@@ -4,13 +4,17 @@
 extern crate alloc;
 extern crate kernel;
 
-use core::arch::asm;
+use core::{arch::asm, ptr::write_bytes};
 
+use alloc::boxed::Box;
 use alloc::sync::Arc;
 use event::{context, task, thread};
 use kernel::*;
 
 static INIT_CODE: &[u8] = kernel::util::include_bytes_align!(u32, "../../mmapTest/mmapTest.bin");
+
+#[repr(C, align(4096))]
+struct SomePageRange([u8; 8192]);
 
 #[no_mangle]
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
@@ -71,7 +75,10 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
 
     // Create a user process
     let mut process = crate::process::Process::new();
-    process.page_table.lock().reserve_memory_range(0x200_000, 0x200_000 * 7, u32::MAX, false);
+    process
+        .page_table
+        .lock()
+        .reserve_memory_range(0x200_000, 0x200_000 * 7, u32::MAX, false);
     process.page_table.lock().set_range_as_physical(0x200_000);
     // Assume fixed mapped range in user process (0x20_0000 in virtual memory)
     let user_region = 0x20_0000 as *mut u8;
@@ -104,6 +111,13 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         "user access: {:?}",
         access.map(|b| b.bits()).map_err(|e| e.bits())
     );
+
+    //Creating two pages worth of 'a' characters which the user will ideally be able to read when
+    //they map the physical addr to some virtual addr
+    let page_box = Box::new(SomePageRange(['a' as u8; 8192]));
+    let page_ptr: *mut SomePageRange = Box::into_raw(page_box);
+    let phys_addr: usize = crate::arch::memory::physical_addr((page_ptr).addr()).unwrap() as usize;
+    println!("Physical addr: {:x}. Ensure that the user mode part of the test case is trying to map to this addr", phys_addr);
 
     let start = sync::get_time();
     unsafe {

@@ -101,8 +101,12 @@ pub unsafe fn sys_wait(ctx: &mut Context) -> *mut Context {
 pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
     let req_start_addr: usize = ctx.regs[0];
     let req_size: usize = ctx.regs[1];
+    //TODO: use this later
+    let _prot_flags: u32 = ctx.regs[2].try_into().unwrap();
     //TODO: update this to be flags later
-    let fill_pages: bool = ctx.regs[2] == 1;
+    let fill_pages: bool = ctx.regs[3] != 0;
+    let fd_index: u32 = ctx.regs[4].try_into().unwrap();
+    let _offset: usize = ctx.regs[5];
 
     let cur_process = CORES.with_current(|core| {
         let thread = core.thread.take().unwrap();
@@ -117,7 +121,7 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
     let range_start: usize = match cur_process.unwrap().page_table.lock().reserve_memory_range(
         req_start_addr,
         req_size,
-        u32::MAX, //TODO: update this for file support
+        fd_index,
         fill_pages,
     ) {
         Ok(start_addr) => start_addr,
@@ -135,7 +139,7 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
 pub unsafe fn sys_map_physical_range(ctx: &mut Context) -> *mut Context {
     let req_virtual_addr: usize = ctx.regs[0];
     let req_physical_addr: usize = ctx.regs[1];
-     
+
     let cur_process = CORES.with_current(|core| {
         let thread = core.thread.take().unwrap();
         // TODO: don't require cloning here
@@ -145,10 +149,15 @@ pub unsafe fn sys_map_physical_range(ctx: &mut Context) -> *mut Context {
         core.thread.set(Some(thread));
         cur_process
     });
-    
-    let retval: usize = match cur_process.unwrap().page_table.lock().map_to_physical_range(req_virtual_addr, req_physical_addr) {
+
+    let retval: usize = match cur_process
+        .unwrap()
+        .page_table
+        .lock()
+        .map_to_physical_range(req_virtual_addr, req_physical_addr)
+    {
         Ok(()) => 0,
-        Err(e) => { 
+        Err(e) => {
             //For debug
             println!("Error: {}", e);
             //TODO: find a better way to tell the user what went wrong
@@ -161,6 +170,8 @@ pub unsafe fn sys_map_physical_range(ctx: &mut Context) -> *mut Context {
 
 pub unsafe fn sys_munmap(ctx: &mut Context) -> *mut Context {
     let req_addr: usize = ctx.regs[0];
+    //Currently not used
+    let _len: usize = ctx.regs[1];
 
     let cur_process = CORES.with_current(|core| {
         let thread = core.thread.take().unwrap();

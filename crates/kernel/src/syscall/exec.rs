@@ -104,14 +104,17 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                 if matches!(phdr.p_type, elf::program_header::Type::Load) {
                     let data = elf.segment_data(&phdr).unwrap();
                     let memsize = (phdr.p_memsz as usize).next_multiple_of(4096).max(4096);
-                    
+
                     /*
-                    if !((0x200_000 <= phdr.p_vaddr) && (phdr.p_vaddr < (0x200_000 + (0x200_000 * 7)))){ 
+                    if !((0x200_000 <= phdr.p_vaddr) && (phdr.p_vaddr < (0x200_000 + (0x200_000 * 7)))){
                         proc.page_table.lock().reserve_memory_range(phdr.p_vaddr as usize, memsize, u32::MAX, false).unwrap();
                     }
                     */
 
-                    proc.page_table.lock().reserve_memory_range(phdr.p_vaddr as usize, memsize, u32::MAX, false).unwrap();
+                    proc.page_table
+                        .lock()
+                        .reserve_memory_range(phdr.p_vaddr as usize, memsize, u32::MAX, false)
+                        .unwrap();
                     let addr = (phdr.p_vaddr as usize) as *mut u8;
                     let mapping: &mut [u8] =
                         unsafe { core::slice::from_raw_parts_mut(addr, memsize) };
