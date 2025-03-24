@@ -4,7 +4,7 @@ use core::cell::Cell;
 use alloc::boxed::Box;
 
 use super::thread::Thread;
-use super::{run_event_loop, Event, SCHEDULER};
+use super::{Event, SCHEDULER};
 use crate::sync::{disable_interrupts, restore_interrupts};
 
 /// Per-core threading data, indicating the per-core stack pointers
@@ -199,12 +199,15 @@ unsafe extern "C" {
         core_sp: usize,
     ) -> !;
 
+    fn asm_run_event_loop() -> !;
+
     pub fn restore_context(ctx: *mut Context) -> !;
 }
 
 global_asm!(
     r#"
 .global asm_context_switch
+.global asm_run_event_loop
 .global switch_to_helper
 .global restore_context
 
@@ -300,9 +303,17 @@ restore_context:
 
 asm_deschedule_thread:
     mov sp, x2
-    bl deschedule_thread_callback
+    mov lr, #0
+    mov fp, #0
+    b deschedule_thread_callback
     udf #0
 
+asm_run_event_loop:
+    mov lr, #0
+    mov fp, #0
+    msr DAIFClr, #0b1111 // Enable interrupts
+    b run_event_loop
+    udf #0
 "#,
     thread_ctx_offset = const core::mem::offset_of!(Thread, last_context),
 );
@@ -370,6 +381,5 @@ fn context_switch_inner(thread: Option<Box<Thread>>, action: SwitchAction<'_>) -
     }
 
     // re-enable interrupts and run the event loop on this stack.
-    unsafe { crate::sync::enable_interrupts() };
-    unsafe { run_event_loop() }
+    unsafe { asm_run_event_loop() };
 }
