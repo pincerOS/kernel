@@ -12,8 +12,7 @@ pub mod watchdog;
 
 use crate::memory;
 use crate::memory::{map_device, map_device_block};
-use crate::sync::UnsafeInit;
-use crate::SpinLock;
+use crate::sync::{SpinLock, UnsafeInit};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use device_tree::format::StructEntry;

@@ -77,6 +77,30 @@ fn readline(reader: &mut LineReader) -> Result<&[u8], usize> {
     }
 }
 
+fn spawn_elf(fd: FileDesc) -> Result<FileDesc, usize> {
+    let current_stack = current_sp();
+    let target_pc = exec_child as usize;
+    let arg = fd;
+
+    let wait_fd = unsafe { ulib::sys::spawn(target_pc, current_stack, arg as usize, 0) };
+    wait_fd
+}
+
+fn current_sp() -> usize {
+    let sp: usize;
+    unsafe { core::arch::asm!("mov {0}, sp", out(reg) sp) };
+    sp
+}
+
+extern "C" fn exec_child(fd: FileDesc) -> ! {
+    let flags = 0;
+    let args = &[];
+    let env = &[];
+    let res = unsafe { ulib::sys::execve_fd(fd, flags, args, env) };
+    println!("Execve failed: {:?}", res);
+    ulib::sys::exit(1);
+}
+
 #[no_mangle]
 fn main(_chan: ulib::sys::ChannelDesc) {
     println!("Starting 🐚");
@@ -204,6 +228,17 @@ fn main(_chan: ulib::sys::ChannelDesc) {
 
         if line == "exit" {
             break;
+        } else {
+            let first = line.split_ascii_whitespace().next().unwrap_or(line);
+            let root_fd = 3;
+            if let Ok(file) = ulib::sys::openat(root_fd, first.as_bytes(), 0, 0) {
+                // TODO: channels
+                let child = spawn_elf(file).unwrap();
+                let status = ulib::sys::wait(child).unwrap();
+                println!("child exited with code {}", status);
+            } else {
+                println!("unknown command: {:?}", first);
+            }
         }
     }
 
