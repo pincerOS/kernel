@@ -108,11 +108,12 @@ impl fd::FileDescriptor for PipeReadFd {
         if buf.is_empty() {
             return fd::boxed_future(async move { fd::FileDescResult::ok(0) });
         }
+        let target = &mut buf[0];
         fd::boxed_future(async move {
             if READ_NO_BLOCK {
                 let c = self.0.lock().try_recv();
                 if let Some(c) = c {
-                    buf[0] = c;
+                    *target = c;
                     fd::FileDescResult::ok(1)
                 } else {
                     // TODO: proper non-blocking reads, or proper kernel heap...
@@ -121,7 +122,7 @@ impl fd::FileDescriptor for PipeReadFd {
                 }
             } else {
                 let c = self.0.lock().recv().await;
-                buf[0] = c;
+                *target = c;
                 fd::FileDescResult::ok(1)
             }
         })
