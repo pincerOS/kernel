@@ -1,9 +1,10 @@
 #![no_std]
 
-pub mod sys;
-
 #[cfg(feature = "runtime")]
 pub mod runtime;
+
+pub mod spinlock;
+pub mod sys;
 
 pub struct Stdout;
 
