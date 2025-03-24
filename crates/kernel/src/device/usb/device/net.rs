@@ -36,21 +36,24 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     rndis_initialize_msg(device);
 
     let mut buffer = [0u8; 52];
-    rndis_query_msg(
-        device,
-        OID::OID_GEN_CURRENT_PACKET_FILTER,
-        buffer.as_mut_ptr(),
-        30,
-    );
 
-    rndis_set_msg(device, OID::OID_GEN_CURRENT_PACKET_FILTER, 0xB);
+    unsafe {
+        rndis_query_msg(
+            device,
+            OID::OID_GEN_CURRENT_PACKET_FILTER,
+            buffer.as_mut_ptr(),
+            30,
+        );
 
-    rndis_query_msg(
-        device,
-        OID::OID_GEN_CURRENT_PACKET_FILTER,
-        buffer.as_mut_ptr(),
-        30,
-    );
+        rndis_set_msg(device, OID::OID_GEN_CURRENT_PACKET_FILTER, 0xB);
+
+        rndis_query_msg(
+            device,
+            OID::OID_GEN_CURRENT_PACKET_FILTER,
+            buffer.as_mut_ptr(),
+            30,
+        );
+    }
 
     let driver_data = Box::new(UsbEndpointDevice::new());
     device.driver_data = DriverData::new(driver_data);
@@ -119,15 +122,16 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     unsafe {
         NET_DEVICE.device = Some(device);
     }
-
-    rndis_send_packet(device, buffer.as_mut_ptr(), 64);
-    rndis_receive_packet(device, buffer.as_mut_ptr(), 64);
+    unsafe {
+        rndis_send_packet(device, buffer.as_mut_ptr(), 64);
+        rndis_receive_packet(device, buffer.as_mut_ptr(), 64);
+    }
     // micro_delay(1000000);
     // shutdown();
     return ResultCode::OK;
 }
 
-pub fn NetAnalyze(buffer: *mut u8, _buffer_length: u32) {
+pub unsafe fn NetAnalyze(buffer: *mut u8, _buffer_length: u32) {
     let buffer32 = unsafe { core::slice::from_raw_parts(buffer, 32) };
 
     if buffer32[0] != 0 {
@@ -164,7 +168,7 @@ pub fn RegisterNetReceiveCallback(callback: fn(*mut u8, u32)) {
     }
 }
 
-pub fn NetSendPacket(buffer: *mut u8, buffer_length: u32) {
+pub unsafe fn NetSendPacket(buffer: *mut u8, buffer_length: u32) {
     unsafe {
         if let Some(device) = NET_DEVICE.device {
             let usb_dev = &mut *device;

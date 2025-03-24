@@ -15,6 +15,7 @@ use alloc::vec::Vec;
 use device_tree::format::StructEntry;
 use device_tree::util::MappingIterator;
 use device_tree::DeviceTree;
+use usb::usbd::endpoint::endpoint_descriptor;
 
 use crate::memory::{map_device, map_device_block};
 use crate::sync::UnsafeInit;
@@ -182,13 +183,6 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         unsafe { system_timer::initialize_system_timer(timer_base) };
         let time = system_timer::get_time();
         println!("| timer initialized, time: {time}");
-
-        system_timer::ARM_GENERIC_TIMERS.with_current(|timer| {
-            timer.intialize_timer();
-        });
-
-        system_timer::TIMER_SCHEDULER.lock().intialize_timer();
-        // gic::GIC.get().register_isr(30, system_timer::timer_scheduler_handler);
     }
 
     {
@@ -213,7 +207,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
             .unwrap();
 
         let (usb_addr, _) = find_device_addr(usb).unwrap().unwrap();
-        let usb_base = unsafe { map_device_block(usb_addr, 0x13000) }.as_ptr(); ////TODO: Get actual size
+        let usb_base = unsafe { map_device_block(usb_addr, 0x11000) }.as_ptr(); //size is from core gloabl to dev ep 15
 
         let _bus = usb::usb_init(usb_base);
 
@@ -240,22 +234,31 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         }));
     }
 
-    //TODO: temporarily disable the preemption timer
     init_fns.push(Box::new(|| {
         // Run the generic timer at a 1ms interval for preemption
         system_timer::ARM_GENERIC_TIMERS.with_current(|timer| {
             timer.intialize_timer();
-            // timer.set_timer_milliseconds(1);
+        });
+
+        system_timer::TIMER_SCHEDULER.with_current(|timer_scheduler| {
+            timer_scheduler.intialize_timer();
+            timer_scheduler.add_timer_event(
+                1,
+                preemption_callback,
+                endpoint_descriptor::new(),
+                true,
+            );
         });
     }));
 
     unsafe { PER_CORE_INIT.init(init_fns) };
 }
 
-fn timer_handler(ctx: &mut crate::event::context::Context) {
-    crate::device::system_timer::ARM_GENERIC_TIMERS.with_current(|timer| {
-        timer.reset_timer();
-    });
+fn preemption_callback(_endpoint: endpoint_descriptor) {
+    //Do nothing
+}
+
+pub fn timer_handler(ctx: &mut crate::event::context::Context) {
     // TODO: will this break batched interrupts?
     // This will generally not return, and instead switch into the event loop
     unsafe { crate::event::timer_handler(ctx) };

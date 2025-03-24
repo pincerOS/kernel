@@ -33,56 +33,64 @@ pub fn rndis_initialize_msg(device: &mut UsbDevice) -> ResultCode {
 
     let mut buffer_req = [0u8; 52];
 
-    let result = UsbControlMessage(
-        device,
-        UsbPipeAddress {
-            transfer_type: UsbTransfer::Control,
-            speed: device.speed,
-            end_point: 0,
-            device: device.number as u8,
-            direction: UsbDirection::Out,
-            max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
-            _reserved: 0,
-        },
-        buffer as *mut RndisInitializeMsg as *mut u8,
-        size_of::<RndisInitializeMsg>() as u32,
-        &mut UsbDeviceRequest {
-            request_type: 0x21,
-            request: convert_usb_device_request_cdc(UsbDeviceRequestCDC::SendEncapsulatedCommand),
-            value: 0,
-            index: 0,
-            length: size_of::<RndisInitializeMsg>() as u16,
-        },
-        ControlTimeoutPeriod,
-    );
+    let result = unsafe {
+        UsbControlMessage(
+            device,
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Control,
+                speed: device.speed,
+                end_point: 0,
+                device: device.number as u8,
+                direction: UsbDirection::Out,
+                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
+                _reserved: 0,
+            },
+            buffer as *mut RndisInitializeMsg as *mut u8,
+            size_of::<RndisInitializeMsg>() as u32,
+            &mut UsbDeviceRequest {
+                request_type: 0x21,
+                request: convert_usb_device_request_cdc(
+                    UsbDeviceRequestCDC::SendEncapsulatedCommand,
+                ),
+                value: 0,
+                index: 0,
+                length: size_of::<RndisInitializeMsg>() as u16,
+            },
+            ControlTimeoutPeriod,
+        )
+    };
 
     if result != ResultCode::OK {
         print!("| RNDIS: Failed to send initialize message.\n");
         return ResultCode::ErrorDevice;
     }
 
-    let result = UsbControlMessage(
-        device,
-        UsbPipeAddress {
-            transfer_type: UsbTransfer::Control,
-            speed: device.speed,
-            end_point: 0,
-            device: device.number as u8,
-            direction: UsbDirection::In,
-            max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
-            _reserved: 0,
-        },
-        buffer_req.as_mut_ptr(),
-        size_of::<RndisInitializeMsgCmplt>() as u32,
-        &mut UsbDeviceRequest {
-            request_type: 0xA1,
-            request: convert_usb_device_request_cdc(UsbDeviceRequestCDC::GetEncapsulatedResponse),
-            value: 0,
-            index: 0,
-            length: size_of::<RndisInitializeMsgCmplt>() as u16,
-        },
-        ControlTimeoutPeriod,
-    );
+    let result = unsafe {
+        UsbControlMessage(
+            device,
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Control,
+                speed: device.speed,
+                end_point: 0,
+                device: device.number as u8,
+                direction: UsbDirection::In,
+                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
+                _reserved: 0,
+            },
+            buffer_req.as_mut_ptr(),
+            size_of::<RndisInitializeMsgCmplt>() as u32,
+            &mut UsbDeviceRequest {
+                request_type: 0xA1,
+                request: convert_usb_device_request_cdc(
+                    UsbDeviceRequestCDC::GetEncapsulatedResponse,
+                ),
+                value: 0,
+                index: 0,
+                length: size_of::<RndisInitializeMsgCmplt>() as u16,
+            },
+            ControlTimeoutPeriod,
+        )
+    };
 
     if result != ResultCode::OK {
         print!("| RNDIS: Failed to receive initialize message.\n");
@@ -127,7 +135,7 @@ pub fn rndis_initialize_msg(device: &mut UsbDevice) -> ResultCode {
     return ResultCode::OK;
 }
 
-pub fn rndis_query_msg(
+pub unsafe fn rndis_query_msg(
     device: &mut UsbDevice,
     oid: OID,
     buffer_req: *mut u8,
@@ -148,56 +156,64 @@ pub fn rndis_query_msg(
         device_vc_handle: 0,
     };
 
-    let result = UsbControlMessage(
-        device,
-        UsbPipeAddress {
-            transfer_type: UsbTransfer::Control,
-            speed: device.speed,
-            end_point: 0,
-            device: device.number as u8,
-            direction: UsbDirection::Out,
-            max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
-            _reserved: 0,
-        },
-        query_msg as *mut RndisQueryMsg as *mut u8,
-        size_of::<RndisQueryMsg>() as u32,
-        &mut UsbDeviceRequest {
-            request_type: 0x21,
-            request: convert_usb_device_request_cdc(UsbDeviceRequestCDC::SendEncapsulatedCommand),
-            value: 0,
-            index: 0,
-            length: size_of::<RndisQueryMsg>() as u16,
-        },
-        ControlTimeoutPeriod,
-    );
+    let result = unsafe {
+        UsbControlMessage(
+            device,
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Control,
+                speed: device.speed,
+                end_point: 0,
+                device: device.number as u8,
+                direction: UsbDirection::Out,
+                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
+                _reserved: 0,
+            },
+            query_msg as *mut RndisQueryMsg as *mut u8,
+            size_of::<RndisQueryMsg>() as u32,
+            &mut UsbDeviceRequest {
+                request_type: 0x21,
+                request: convert_usb_device_request_cdc(
+                    UsbDeviceRequestCDC::SendEncapsulatedCommand,
+                ),
+                value: 0,
+                index: 0,
+                length: size_of::<RndisQueryMsg>() as u16,
+            },
+            ControlTimeoutPeriod,
+        )
+    };
 
     if result != ResultCode::OK {
         print!("| RNDIS: Failed to send query message.\n");
         return ResultCode::ErrorDevice;
     }
 
-    let result = UsbControlMessage(
-        device,
-        UsbPipeAddress {
-            transfer_type: UsbTransfer::Control,
-            speed: device.speed,
-            end_point: 0,
-            device: device.number as u8,
-            direction: UsbDirection::In,
-            max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
-            _reserved: 0,
-        },
-        buffer_req,
-        buffer_length,
-        &mut UsbDeviceRequest {
-            request_type: 0xA1,
-            request: convert_usb_device_request_cdc(UsbDeviceRequestCDC::GetEncapsulatedResponse),
-            value: 0,
-            index: 0,
-            length: buffer_length as u16,
-        },
-        ControlTimeoutPeriod,
-    );
+    let result = unsafe {
+        UsbControlMessage(
+            device,
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Control,
+                speed: device.speed,
+                end_point: 0,
+                device: device.number as u8,
+                direction: UsbDirection::In,
+                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
+                _reserved: 0,
+            },
+            buffer_req,
+            buffer_length,
+            &mut UsbDeviceRequest {
+                request_type: 0xA1,
+                request: convert_usb_device_request_cdc(
+                    UsbDeviceRequestCDC::GetEncapsulatedResponse,
+                ),
+                value: 0,
+                index: 0,
+                length: buffer_length as u16,
+            },
+            ControlTimeoutPeriod,
+        )
+    };
 
     if result != ResultCode::OK {
         print!("| RNDIS: Failed to receive query message.\n");
@@ -252,56 +268,64 @@ pub fn rndis_set_msg(device: &mut UsbDevice, oid: OID, value: u32) {
         value,
     };
 
-    let result = UsbControlMessage(
-        device,
-        UsbPipeAddress {
-            transfer_type: UsbTransfer::Control,
-            speed: device.speed,
-            end_point: 0,
-            device: device.number as u8,
-            direction: UsbDirection::Out,
-            max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
-            _reserved: 0,
-        },
-        set_msg as *mut RndisSetMsg as *mut u8,
-        size_of::<RndisSetMsg>() as u32,
-        &mut UsbDeviceRequest {
-            request_type: 0x21,
-            request: convert_usb_device_request_cdc(UsbDeviceRequestCDC::SendEncapsulatedCommand),
-            value: 0,
-            index: 0,
-            length: size_of::<RndisSetMsg>() as u16,
-        },
-        ControlTimeoutPeriod,
-    );
+    let result = unsafe {
+        UsbControlMessage(
+            device,
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Control,
+                speed: device.speed,
+                end_point: 0,
+                device: device.number as u8,
+                direction: UsbDirection::Out,
+                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
+                _reserved: 0,
+            },
+            set_msg as *mut RndisSetMsg as *mut u8,
+            size_of::<RndisSetMsg>() as u32,
+            &mut UsbDeviceRequest {
+                request_type: 0x21,
+                request: convert_usb_device_request_cdc(
+                    UsbDeviceRequestCDC::SendEncapsulatedCommand,
+                ),
+                value: 0,
+                index: 0,
+                length: size_of::<RndisSetMsg>() as u16,
+            },
+            ControlTimeoutPeriod,
+        )
+    };
 
     if result != ResultCode::OK {
         print!("| RNDIS: Failed to send set message.\n");
     }
 
     let buffer = &mut RndisSetMsgCmplt::default();
-    let result = UsbControlMessage(
-        device,
-        UsbPipeAddress {
-            transfer_type: UsbTransfer::Control,
-            speed: device.speed,
-            end_point: 0,
-            device: device.number as u8,
-            direction: UsbDirection::In,
-            max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
-            _reserved: 0,
-        },
-        buffer as *mut RndisSetMsgCmplt as *mut u8,
-        size_of::<RndisSetMsgCmplt>() as u32,
-        &mut UsbDeviceRequest {
-            request_type: 0xA1,
-            request: convert_usb_device_request_cdc(UsbDeviceRequestCDC::GetEncapsulatedResponse),
-            value: 0,
-            index: 0,
-            length: size_of::<RndisSetMsgCmplt>() as u16,
-        },
-        ControlTimeoutPeriod,
-    );
+    let result = unsafe {
+        UsbControlMessage(
+            device,
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Control,
+                speed: device.speed,
+                end_point: 0,
+                device: device.number as u8,
+                direction: UsbDirection::In,
+                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
+                _reserved: 0,
+            },
+            buffer as *mut RndisSetMsgCmplt as *mut u8,
+            size_of::<RndisSetMsgCmplt>() as u32,
+            &mut UsbDeviceRequest {
+                request_type: 0xA1,
+                request: convert_usb_device_request_cdc(
+                    UsbDeviceRequestCDC::GetEncapsulatedResponse,
+                ),
+                value: 0,
+                index: 0,
+                length: size_of::<RndisSetMsgCmplt>() as u16,
+            },
+            ControlTimeoutPeriod,
+        )
+    };
 
     if result != ResultCode::OK {
         print!("| RNDIS: Failed to receive set message.\n");
@@ -319,7 +343,7 @@ pub fn rndis_set_msg(device: &mut UsbDevice, oid: OID, value: u32) {
     println!("| RNDIS: Status: {:#?}", status);
 }
 
-pub fn rndis_send_packet(
+pub unsafe fn rndis_send_packet(
     device: &mut UsbDevice,
     buffer: *mut u8,
     buffer_length: u32,
@@ -358,24 +382,26 @@ pub fn rndis_send_packet(
         );
     }
 
-    let result = UsbBulkMessage(
-        device,
-        2,
-        UsbPipeAddress {
-            transfer_type: UsbTransfer::Bulk,
-            speed: device.speed,
-            end_point: 2,
-            device: device.number as u8,
-            direction: UsbDirection::Out,
-            max_size: size_from_number(64),
-            _reserved: 0,
-        },
-        complete_buffer.as_mut_ptr(),
-        size as u32,
-        PacketId::Data0,
-        1,
-        10,
-    );
+    let result = unsafe {
+        UsbBulkMessage(
+            device,
+            2,
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Bulk,
+                speed: device.speed,
+                end_point: 2,
+                device: device.number as u8,
+                direction: UsbDirection::Out,
+                max_size: size_from_number(64),
+                _reserved: 0,
+            },
+            complete_buffer.as_mut_ptr(),
+            size as u32,
+            PacketId::Data0,
+            1,
+            10,
+        )
+    };
 
     if result != ResultCode::OK {
         print!("| RNDIS: Failed to send packet message.\n");
@@ -385,29 +411,31 @@ pub fn rndis_send_packet(
     return ResultCode::OK;
 }
 
-pub fn rndis_receive_packet(
+pub unsafe fn rndis_receive_packet(
     device: &mut UsbDevice,
     buffer: *mut u8,
     buffer_length: u32,
 ) -> ResultCode {
-    let result = UsbBulkMessage(
-        device,
-        3,
-        UsbPipeAddress {
-            transfer_type: UsbTransfer::Bulk,
-            speed: device.speed,
-            end_point: 2,
-            device: device.number as u8,
-            direction: UsbDirection::In,
-            max_size: size_from_number(64),
-            _reserved: 0,
-        },
-        buffer,
-        buffer_length,
-        PacketId::Data0,
-        2,
-        10,
-    );
+    let result = unsafe {
+        UsbBulkMessage(
+            device,
+            3,
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Bulk,
+                speed: device.speed,
+                end_point: 2,
+                device: device.number as u8,
+                direction: UsbDirection::In,
+                max_size: size_from_number(64),
+                _reserved: 0,
+            },
+            buffer,
+            buffer_length,
+            PacketId::Data0,
+            2,
+            10,
+        )
+    };
 
     if result != ResultCode::OK {
         print!("| RNDIS: Failed to receive packet message.\n");

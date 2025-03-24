@@ -55,7 +55,7 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
     }
 
     if let Some(callback) = endpoint_device.endpoints[endpoint.device_endpoint_number as usize] {
-        callback(buffer, device.last_transfer);
+        unsafe { callback(buffer, device.last_transfer) };
     } else {
         println!(
             "| USB: No callback for endpoint number {}.",
@@ -126,7 +126,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
     }
 
     if let Some(callback) = endpoint_device.endpoints[endpoint.device_endpoint_number as usize] {
-        callback(buffer.as_mut_ptr(), device.last_transfer);
+        unsafe { callback(buffer.as_mut_ptr(), device.last_transfer) };
     } else {
         println!(
             "| USB: No callback for endpoint number {}.",
@@ -157,15 +157,17 @@ pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
     //TODO: Hardcoded for usb-kbd for now
     let mut buffer = Box::new([0u8; 8]);
     let channel = endpoint.channel;
-    let result = UsbInterruptMessage(
-        device,
-        channel,
-        pipe,
-        buffer.as_mut_ptr(),
-        8,
-        PacketId::Data0,
-        endpoint.timeout,
-    );
+    let result = unsafe {
+        UsbInterruptMessage(
+            device,
+            channel,
+            pipe,
+            buffer.as_mut_ptr(),
+            8,
+            PacketId::Data0,
+            endpoint.timeout,
+        )
+    };
 
     if result != ResultCode::OK {
         print!("| USB: Failed to read interrupt endpoint.\n");
@@ -258,5 +260,5 @@ impl UsbEndpointDevice {
 
 pub struct UsbEndpointDevice {
     //TODO: update for better?: The 5 is an arbitrary number
-    pub endpoints: [Option<fn(*mut u8, u32)>; 5],
+    pub endpoints: [Option<unsafe fn(*mut u8, u32)>; 5],
 }

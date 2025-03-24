@@ -213,6 +213,10 @@ run qemu_target=qemu_target qemu_debug=qemu_debug qemu_display=qemu_display debu
         -serial stdio \
         -serial "${SERIAL_ALT}" \
         -display "{{qemu_display}}" \
+        -usb \
+        -device usb-kbd \
+        -device usb-net,netdev=net0 \
+        -netdev user,id=net0,hostfwd=tcp::2222-:22 \
         ${QEMU_DEBUG_PFX} "{{qemu_debug}}" \
         {{debug_args}}
 

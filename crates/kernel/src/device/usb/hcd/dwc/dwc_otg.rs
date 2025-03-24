@@ -192,7 +192,7 @@ fn HcdPrepareChannel(
     return ResultCode::OK;
 }
 
-pub fn HcdTransmitChannel(device: &UsbDevice, channel: u8, buffer: *mut u8) {
+pub unsafe fn HcdTransmitChannel(device: &UsbDevice, channel: u8, buffer: *mut u8) {
     unsafe {
         let dwc_sc: &mut dwc_hub = &mut *(device.soft_sc as *mut dwc_hub);
         let hcsplt = read_volatile(DOTG_HCSPLT(channel as usize));
@@ -363,7 +363,7 @@ pub fn HcdChannelSendWaitOne(
         );
 
         // Transmit data.
-        HcdTransmitChannel(device, channel, buffer.wrapping_add(bufferOffset as usize));
+        unsafe { HcdTransmitChannel(device, channel, buffer.wrapping_add(bufferOffset as usize)) };
         timeout = 0;
         loop {
             if timeout == RequestTimeout {
@@ -801,7 +801,7 @@ pub fn ReadHPRT() -> u32 {
     read_volatile(DOTG_HPRT)
 }
 
-pub fn HcdSubmitBulkMessage(
+pub unsafe fn HcdSubmitBulkMessage(
     device: &mut UsbDevice,
     channel: u8,
     pipe: UsbPipeAddress,
@@ -827,7 +827,9 @@ pub fn HcdSubmitBulkMessage(
     if pipe.direction == UsbDirection::Out {
         // let data_buffer = dwc_sc.dma_loc as *const u8;
         let data_buffer = dwc_sc.dma_addr[channel as usize] as *mut u8;
-        memory_copy(data_buffer, buffer, buffer_length as usize);
+        unsafe {
+            memory_copy(data_buffer, buffer, buffer_length as usize);
+        }
     }
 
     let result = HcdChannelSend(
@@ -865,12 +867,13 @@ pub fn HcdSubmitBulkMessage(
             println!("| HCD: Weird transfer size\n");
             device.last_transfer = buffer_length;
         }
-
-        memory_copy(
-            buffer,
-            dwc_sc.dma_loc as *const u8,
-            device.last_transfer as usize,
-        );
+        unsafe {
+            memory_copy(
+                buffer,
+                dwc_sc.dma_loc as *const u8,
+                device.last_transfer as usize,
+            );
+        }
     } else {
         device.last_transfer = buffer_length;
     }
@@ -879,7 +882,7 @@ pub fn HcdSubmitBulkMessage(
     return ResultCode::OK;
 }
 
-pub fn HcdSubmitInterruptMessage(
+pub unsafe fn HcdSubmitInterruptMessage(
     device: &mut UsbDevice,
     channel: u8,
     pipe: UsbPipeAddress,
@@ -951,12 +954,13 @@ pub fn HcdSubmitInterruptMessage(
         //     dwc_sc.dma_loc as *const u8,
         //     device.last_transfer as usize,
         // );
-
-        memory_copy(
-            buffer,
-            dwc_sc.dma_addr[channel as usize] as *mut u8,
-            device.last_transfer as usize,
-        );
+        unsafe {
+            memory_copy(
+                buffer,
+                dwc_sc.dma_addr[channel as usize] as *mut u8,
+                device.last_transfer as usize,
+            );
+        }
     } else {
         device.last_transfer = buffer_length;
     }
@@ -965,7 +969,7 @@ pub fn HcdSubmitInterruptMessage(
     return ResultCode::OK;
 }
 
-pub fn HcdSubmitControlMessage(
+pub unsafe fn HcdSubmitControlMessage(
     device: &mut UsbDevice,
     pipe: UsbPipeAddress,
     buffer: *mut u8,
@@ -974,7 +978,7 @@ pub fn HcdSubmitControlMessage(
 ) -> ResultCode {
     let roothub_device_number = unsafe { (*device.bus).roothub_device_number };
     if pipe.device == roothub_device_number as u8 {
-        return HcdProcessRootHubMessage(device, pipe, buffer, buffer_length, request);
+        return unsafe { HcdProcessRootHubMessage(device, pipe, buffer, buffer_length, request) };
     }
 
     let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
@@ -1012,11 +1016,13 @@ pub fn HcdSubmitControlMessage(
 
     if !buffer.is_null() {
         if pipe.direction == UsbDirection::Out {
-            memory_copy(
-                dwc_sc.databuffer.as_mut_ptr(),
-                buffer,
-                buffer_length as usize,
-            );
+            unsafe {
+                memory_copy(
+                    dwc_sc.databuffer.as_mut_ptr(),
+                    buffer,
+                    buffer_length as usize,
+                );
+            }
         }
         tempPipe.speed = pipe.speed;
         tempPipe.device = pipe.device;
@@ -1051,18 +1057,19 @@ pub fn HcdSubmitControlMessage(
                 println!("| HCD: Weird transfer size\n");
                 device.last_transfer = buffer_length;
             }
+            unsafe {
+                memory_copy(
+                    dwc_sc.databuffer.as_mut_ptr(),
+                    dwc_sc.dma_loc as *const u8,
+                    device.last_transfer as usize,
+                );
 
-            memory_copy(
-                dwc_sc.databuffer.as_mut_ptr(),
-                dwc_sc.dma_loc as *const u8,
-                device.last_transfer as usize,
-            );
-
-            memory_copy(
-                buffer,
-                dwc_sc.databuffer.as_ptr(),
-                device.last_transfer as usize,
-            );
+                memory_copy(
+                    buffer,
+                    dwc_sc.databuffer.as_ptr(),
+                    device.last_transfer as usize,
+                );
+            }
         } else {
             device.last_transfer = buffer_length;
         }
@@ -1327,7 +1334,7 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
 
     let h_dmaen = hcfg & (1 << 23);
     let cfg4 = read_volatile(DOTG_GHWCFG4);
-    let c_dmad = cfg4 & cfg4 & (1 << 31);
+    let c_dmad = cfg4 & (1 << 31);
     let gsnpsid = read_volatile(DOTG_GSNPSID);
     println!(
         "| HCD: DMA enabled: {}, DMA description: {}, GSNPSID: {:#x}",
@@ -1485,7 +1492,7 @@ pub fn get_dwc_ptr(offset: usize) -> *mut u32 {
     unsafe { (dwc_otg_driver.base_addr + offset) as *mut u32 }
 }
 
-pub fn dwc_otg_initialize_controller(base_addr: *mut ()) {
+pub unsafe fn dwc_otg_initialize_controller(base_addr: *mut ()) {
     unsafe {
         dwc_otg_driver = DWC_OTG::init(base_addr);
     }
@@ -1557,7 +1564,7 @@ pub struct DWC_OTG {
 }
 
 impl DWC_OTG {
-    pub unsafe fn init(base_addr: *mut ()) -> Self {
+    pub fn init(base_addr: *mut ()) -> Self {
         Self {
             base_addr: base_addr as usize,
         }

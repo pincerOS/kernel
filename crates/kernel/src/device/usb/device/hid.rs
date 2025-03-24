@@ -38,28 +38,30 @@ pub fn HidLoad(bus: &mut UsbBus) {
 }
 
 fn HidSetProtocol(device: &mut UsbDevice, interface: u8, protocol: u16) -> ResultCode {
-    let result = UsbControlMessage(
-        device,
-        UsbPipeAddress {
-            transfer_type: UsbTransfer::Control,
-            speed: device.speed,
-            end_point: 0,
-            device: device.number as u8,
-            direction: UsbDirection::Out,
-            max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
-            _reserved: 0,
-        },
-        core::ptr::null_mut(),
-        0,
-        &mut UsbDeviceRequest {
-            request_type: 0x21,
-            request: UsbDeviceHidRequest::convert_request(UsbDeviceHidRequest::SetProtocol),
-            index: interface as u16,
-            value: protocol,
-            length: 0,
-        },
-        HidMessageTimeout,
-    );
+    let result = unsafe {
+        UsbControlMessage(
+            device,
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Control,
+                speed: device.speed,
+                end_point: 0,
+                device: device.number as u8,
+                direction: UsbDirection::Out,
+                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
+                _reserved: 0,
+            },
+            core::ptr::null_mut(),
+            0,
+            &mut UsbDeviceRequest {
+                request_type: 0x21,
+                request: UsbDeviceHidRequest::convert_request(UsbDeviceHidRequest::SetProtocol),
+                index: interface as u16,
+                value: protocol,
+                length: 0,
+            },
+            HidMessageTimeout,
+        )
+    };
 
     if result != ResultCode::OK {
         print!("| HID: Failed to set protocol.\n");
@@ -77,28 +79,30 @@ fn HidGetReport(
     buffer_length: u32,
     buffer: *mut u8,
 ) -> ResultCode {
-    let result = UsbControlMessage(
-        device,
-        UsbPipeAddress {
-            transfer_type: UsbTransfer::Control,
-            speed: device.speed,
-            end_point: 0,
-            device: device.number as u8,
-            direction: UsbDirection::In,
-            max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
-            _reserved: 0,
-        },
-        buffer,
-        buffer_length,
-        &mut UsbDeviceRequest {
-            request_type: 0xa1,
-            request: UsbDeviceHidRequest::convert_request(UsbDeviceHidRequest::GetReport),
-            index: interface as u16,
-            value: (report_type as u16) << 8 | report_id as u16,
-            length: buffer_length as u16,
-        },
-        HidMessageTimeout,
-    );
+    let result = unsafe {
+        UsbControlMessage(
+            device,
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Control,
+                speed: device.speed,
+                end_point: 0,
+                device: device.number as u8,
+                direction: UsbDirection::In,
+                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
+                _reserved: 0,
+            },
+            buffer,
+            buffer_length,
+            &mut UsbDeviceRequest {
+                request_type: 0xa1,
+                request: UsbDeviceHidRequest::convert_request(UsbDeviceHidRequest::GetReport),
+                index: interface as u16,
+                value: (report_type as u16) << 8 | report_id as u16,
+                length: buffer_length as u16,
+            },
+            HidMessageTimeout,
+        )
+    };
 
     if result != ResultCode::OK {
         print!("| HID: Failed to get report.\n");

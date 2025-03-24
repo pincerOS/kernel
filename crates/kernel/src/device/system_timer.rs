@@ -10,9 +10,9 @@
 use super::usb::usbd::device::UsbDevice;
 use super::usb::usbd::endpoint::endpoint_descriptor;
 use crate::event::context::Context;
+use crate::event::timer_handler;
 use crate::sync::spin_sleep;
 use crate::sync::{ConstInit, PerCore, UnsafeInit, Volatile};
-use crate::SpinLock;
 use alloc::vec::Vec;
 use core::arch::asm;
 use core::panic;
@@ -21,7 +21,7 @@ pub static SYSTEM_TIMER: UnsafeInit<Bcm2835SysTmr> = unsafe { UnsafeInit::uninit
 
 pub static ARM_GENERIC_TIMERS: PerCore<ArmGenericTimer> = PerCore::new();
 
-pub static TIMER_SCHEDULER: SpinLock<TimerScheduler> = SpinLock::new(TimerScheduler::new());
+pub static TIMER_SCHEDULER: PerCore<TimerScheduler> = PerCore::new();
 
 unsafe impl Sync for UsbDevice {}
 
@@ -58,6 +58,7 @@ fn system_timer_irq_handler(_ctx: &mut Context) {
     panic!("System timer IRQ handler not implemented");
 }
 
+#[derive(PartialEq)]
 enum TimerState {
     Uninit,
     Disabled,
@@ -66,6 +67,10 @@ enum TimerState {
 
 impl ConstInit for ArmGenericTimer {
     const INIT: Self = ArmGenericTimer::new();
+}
+
+impl ConstInit for TimerScheduler {
+    const INIT: Self = TimerScheduler::new();
 }
 
 // Need one per core
@@ -219,30 +224,37 @@ impl Bcm2835SysTmr {
     }
 }
 
-pub fn timer_scheduler_handler(_ctx: &mut Context) {
+pub fn timer_scheduler_handler(ctx: &mut Context) {
     let time = ARM_GENERIC_TIMERS.with_current(|timer| timer.get_time());
-    let mut timer_scheduler = TIMER_SCHEDULER.lock();
-    let timer_freq = timer_scheduler.timer_freq;
-    let mut timer_min = u64::MAX;
-    let events = &mut timer_scheduler.timer_events;
-    for event in events.iter_mut() {
-        if event.timer_timer <= time {
-            (event.callback)(event.endpoint);
-            // println!("Timer time: {} cur time {} repeat time {} new time {}", event.timer_timer, time, (event.repeat_time as u64) * TIMER_SCHEDULER.timer_freq / 1000, time + (event.repeat_time as u64) * TIMER_SCHEDULER.timer_freq / 1000);
-            event.timer_timer = time + (event.repeat_time as u64) * timer_freq / 1000;
+    let mut preemption_flag = false;
+    TIMER_SCHEDULER.with_current(|timer_scheduler| {
+        let timer_freq = timer_scheduler.timer_freq;
+        let mut timer_min = u64::MAX;
+        let events = &mut timer_scheduler.timer_events;
+
+        for event in events.iter_mut() {
+            if event.timer_timer <= time {
+                event.timer_timer = time + (event.repeat_time as u64) * timer_freq / 1000;
+                if event.is_preempted {
+                    preemption_flag = true;
+                }
+                (event.callback)(event.endpoint);
+            }
         }
-    }
-    for event in events.iter() {
-        if event.timer_timer < timer_min {
-            timer_min = event.timer_timer;
+        for event in events.iter() {
+            if event.timer_timer < timer_min {
+                timer_min = event.timer_timer;
+            }
         }
-    }
-    timer_scheduler.min_time = timer_min;
-    // println!("Freq: {}", TIMER_SCHEDULER.timer_freq);
-    // println!("Timer: {} cur time {}", TIMER_SCHEDULER.min_time, time);
-    ARM_GENERIC_TIMERS.with_current(|timer| {
-        timer.set_timer_abs(timer_min);
+        timer_scheduler.min_time = timer_min;
+        ARM_GENERIC_TIMERS.with_current(|timer| {
+            timer.set_timer_abs(timer_min);
+        });
     });
+
+    if preemption_flag {
+        unsafe { timer_handler(ctx) };
+    }
 }
 
 pub fn timer_scheduler_add_timer_event(
@@ -250,41 +262,29 @@ pub fn timer_scheduler_add_timer_event(
     callback: fn(endpoint_descriptor),
     endpoint: endpoint_descriptor,
 ) {
-    TIMER_SCHEDULER
-        .lock()
-        .add_timer_event(time, callback, endpoint);
+    TIMER_SCHEDULER.with_current(|timer_scheduler| {
+        timer_scheduler.add_timer_event(time, callback, endpoint, false)
+    });
 }
 
 impl TimerScheduler {
     pub const fn new() -> Self {
         Self {
+            timer_state: TimerState::Uninit,
             timer_events: Vec::new(),
-            timer_freq: 0,
+            timer_freq: 1,
             min_time: u64::MAX,
         }
     }
 
     pub fn intialize_timer(&mut self) {
         self.timer_freq = unsafe { read_cntfrq() };
-        //register handler
-    }
+        self.timer_state = TimerState::Enabled;
 
-    //the time is the interval in milliseconds, callback is the function to call, device is the device that the timer is associated with
-    pub fn add_timer_event(
-        &mut self,
-        time: u32,
-        callback: fn(endpoint_descriptor),
-        endpoint: endpoint_descriptor,
-    ) {
         let cur_timer = ARM_GENERIC_TIMERS.with_current(|timer| timer.get_time());
-        self.timer_events.push(TimerEvent {
-            timer_timer: cur_timer + (time as u64) * self.timer_freq / 1000,
-            repeat_time: time,
-            callback,
-            endpoint: endpoint,
-        });
-
-        for event in self.timer_events.iter() {
+        self.min_time = u64::MAX;
+        for event in self.timer_events.iter_mut() {
+            event.timer_timer = cur_timer + (event.repeat_time as u64) * self.timer_freq / 1000;
             if event.timer_timer < self.min_time {
                 self.min_time = event.timer_timer;
             }
@@ -293,6 +293,35 @@ impl TimerScheduler {
         ARM_GENERIC_TIMERS.with_current(|timer| {
             timer.set_timer_abs(self.min_time);
         });
+    }
+
+    //the time is the interval in milliseconds, callback is the function to call, device is the device that the timer is associated with
+    pub fn add_timer_event(
+        &mut self,
+        time: u32,
+        callback: fn(endpoint_descriptor),
+        endpoint: endpoint_descriptor,
+        is_preempted: bool,
+    ) {
+        let cur_timer = ARM_GENERIC_TIMERS.with_current(|timer| timer.get_time());
+        self.timer_events.push(TimerEvent {
+            timer_timer: cur_timer + (time as u64) * self.timer_freq / 1000,
+            repeat_time: time,
+            callback,
+            endpoint: endpoint,
+            is_preempted: is_preempted,
+        });
+        for event in self.timer_events.iter() {
+            if event.timer_timer < self.min_time {
+                self.min_time = event.timer_timer;
+            }
+        }
+
+        if self.timer_state == TimerState::Enabled {
+            ARM_GENERIC_TIMERS.with_current(|timer| {
+                timer.set_timer_abs(self.min_time);
+            });
+        }
     }
 }
 
@@ -303,9 +332,11 @@ pub struct TimerEvent {
     repeat_time: u32,
     callback: fn(endpoint_descriptor),
     endpoint: endpoint_descriptor,
+    is_preempted: bool, //TODO: Hacky solution as of now, it just checks if there is a preemption flag, and will preempt after running
 }
 
 pub struct TimerScheduler {
+    timer_state: TimerState,
     timer_events: Vec<TimerEvent>,
     timer_freq: u64,
     min_time: u64,

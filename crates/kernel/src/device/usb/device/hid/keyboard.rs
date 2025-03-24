@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 
 pub static KeyboardBuffer: SpinLock<Vec<Key>> = SpinLock::new(Vec::new());
 
-pub fn KeyboardAnalyze(buffer: *mut u8, _buffer_length: u32) {
+pub unsafe fn KeyboardAnalyze(buffer: *mut u8, _buffer_length: u32) {
     let mut keys = ModifierToKeys(unsafe { *buffer });
 
     //the second byte is always 0

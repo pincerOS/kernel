@@ -30,16 +30,18 @@ pub fn HubLoad(bus: &mut UsbBus) {
 fn HubReadDescriptor(device: &mut UsbDevice) -> ResultCode {
     let mut header = UsbDescriptorHeader::default();
 
-    let mut result = UsbGetDescriptor(
-        device,
-        DescriptorType::Hub,
-        0,
-        0,
-        &mut header as *mut UsbDescriptorHeader as *mut u8,
-        size_of::<UsbDescriptorHeader>() as u32,
-        size_of::<UsbDescriptorHeader>() as u32,
-        0x20,
-    );
+    let mut result = unsafe {
+        UsbGetDescriptor(
+            device,
+            DescriptorType::Hub,
+            0,
+            0,
+            &mut header as *mut UsbDescriptorHeader as *mut u8,
+            size_of::<UsbDescriptorHeader>() as u32,
+            size_of::<UsbDescriptorHeader>() as u32,
+            0x20,
+        )
+    };
 
     if result != ResultCode::OK {
         println!("| HUB: failed to read descriptor");
@@ -60,16 +62,18 @@ fn HubReadDescriptor(device: &mut UsbDevice) -> ResultCode {
 
     // TODO: this is still UB b/c descriptor aliases parts of device, but it's fine for now
     let descriptor = hub.Descriptor.as_mut().unwrap().as_mut() as *mut HubDescriptor as *mut u8;
-    result = UsbGetDescriptor(
-        device,
-        DescriptorType::Hub,
-        0,
-        0,
-        descriptor,
-        header.descriptor_length as u32,
-        header.descriptor_length as u32,
-        0x20,
-    );
+    result = unsafe {
+        UsbGetDescriptor(
+            device,
+            DescriptorType::Hub,
+            0,
+            0,
+            descriptor,
+            header.descriptor_length as u32,
+            header.descriptor_length as u32,
+            0x20,
+        )
+    };
     if result != ResultCode::OK {
         println!("| HUB: failed to read full descriptor");
         return result;
@@ -81,28 +85,30 @@ fn HubReadDescriptor(device: &mut UsbDevice) -> ResultCode {
 fn HubGetStatus(device: &mut UsbDevice) -> ResultCode {
     let hub = device.driver_data.downcast::<HubDevice>().unwrap();
     let status = (&mut hub.Status as *mut HubFullStatus) as *mut u8;
-    let result = UsbControlMessage(
-        device,
-        UsbPipeAddress {
-            transfer_type: UsbTransfer::Control,
-            speed: device.speed,
-            end_point: 0,
-            device: device.number as u8,
-            direction: UsbDirection::In,
-            max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
-            _reserved: 0,
-        },
-        status,
-        size_of::<HubFullStatus>() as u32,
-        &mut UsbDeviceRequest {
-            request_type: 0xa0,
-            request: UsbDeviceRequestRequest::GetStatus,
-            length: size_of::<HubFullStatus>() as u16,
-            value: 0,
-            index: 0,
-        },
-        ControlMessageTimeout as u32,
-    );
+    let result = unsafe {
+        UsbControlMessage(
+            device,
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Control,
+                speed: device.speed,
+                end_point: 0,
+                device: device.number as u8,
+                direction: UsbDirection::In,
+                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
+                _reserved: 0,
+            },
+            status,
+            size_of::<HubFullStatus>() as u32,
+            &mut UsbDeviceRequest {
+                request_type: 0xa0,
+                request: UsbDeviceRequestRequest::GetStatus,
+                length: size_of::<HubFullStatus>() as u16,
+                value: 0,
+                index: 0,
+            },
+            ControlMessageTimeout as u32,
+        )
+    };
 
     if result != ResultCode::OK {
         println!("| HUB: failed to get hub status");
@@ -123,32 +129,34 @@ fn HubChangePortFeature(
     port: u8,
     set: bool,
 ) -> ResultCode {
-    let result = UsbControlMessage(
-        device,
-        UsbPipeAddress {
-            transfer_type: UsbTransfer::Control,
-            speed: device.speed,
-            end_point: 0,
-            device: device.number as u8,
-            direction: UsbDirection::Out,
-            max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
-            _reserved: 0,
-        },
-        core::ptr::null_mut(),
-        0,
-        &mut UsbDeviceRequest {
-            request_type: 0x23,
-            request: if set {
-                UsbDeviceRequestRequest::SetFeature
-            } else {
-                UsbDeviceRequestRequest::ClearFeature
+    let result = unsafe {
+        UsbControlMessage(
+            device,
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Control,
+                speed: device.speed,
+                end_point: 0,
+                device: device.number as u8,
+                direction: UsbDirection::Out,
+                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
+                _reserved: 0,
             },
-            length: 0,
-            value: feature as u16,
-            index: (port + 1) as u16,
-        },
-        ControlMessageTimeout as u32,
-    );
+            core::ptr::null_mut(),
+            0,
+            &mut UsbDeviceRequest {
+                request_type: 0x23,
+                request: if set {
+                    UsbDeviceRequestRequest::SetFeature
+                } else {
+                    UsbDeviceRequestRequest::ClearFeature
+                },
+                length: 0,
+                value: feature as u16,
+                index: (port + 1) as u16,
+            },
+            ControlMessageTimeout as u32,
+        )
+    };
 
     return result;
 }
@@ -175,28 +183,30 @@ fn HubPowerOn(device: &mut UsbDevice) -> ResultCode {
 fn HubPortGetStatus(device: &mut UsbDevice, port: u8) -> ResultCode {
     let hub = device.driver_data.downcast::<HubDevice>().unwrap();
     let port_status = &mut hub.PortStatus[port as usize] as *mut HubPortFullStatus as *mut u8;
-    let result = UsbControlMessage(
-        device,
-        UsbPipeAddress {
-            transfer_type: UsbTransfer::Control,
-            speed: device.speed,
-            end_point: 0,
-            device: device.number as u8,
-            direction: UsbDirection::In,
-            max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
-            _reserved: 0,
-        },
-        port_status,
-        size_of::<HubPortFullStatus>() as u32,
-        &mut UsbDeviceRequest {
-            request: UsbDeviceRequestRequest::GetStatus,
-            request_type: 0xa3,
-            value: 0,
-            index: (port + 1) as u16,
-            length: size_of::<HubPortFullStatus>() as u16,
-        },
-        ControlMessageTimeout as u32,
-    );
+    let result = unsafe {
+        UsbControlMessage(
+            device,
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Control,
+                speed: device.speed,
+                end_point: 0,
+                device: device.number as u8,
+                direction: UsbDirection::In,
+                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
+                _reserved: 0,
+            },
+            port_status,
+            size_of::<HubPortFullStatus>() as u32,
+            &mut UsbDeviceRequest {
+                request: UsbDeviceRequestRequest::GetStatus,
+                request_type: 0xa3,
+                value: 0,
+                index: (port + 1) as u16,
+                length: size_of::<HubPortFullStatus>() as u16,
+            },
+            ControlMessageTimeout as u32,
+        )
+    };
 
     if result != ResultCode::OK {
         println!("| HUB: failed to get hub port status");
@@ -329,7 +339,7 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
     }
 
     let data = device.driver_data.downcast::<HubDevice>().unwrap();
-    let mut dev = Box::new(UsbDevice::new(device.bus, 0));
+    let mut dev = unsafe { Box::new(UsbDevice::new(device.bus, 0)) };
     data.Children[port as usize] = dev.as_mut() as *mut UsbDevice;
     result = UsbAllocateDevice(&mut dev);
     if result != ResultCode::OK {

@@ -31,7 +31,7 @@ use core::cmp::min;
 use core::mem::size_of;
 use core::ptr::copy;
 
-pub fn memory_copy(dest: *mut u8, src: *const u8, len: usize) {
+pub unsafe fn memory_copy(dest: *mut u8, src: *const u8, len: usize) {
     if len == 0 {
         return;
     }
@@ -41,7 +41,7 @@ pub fn memory_copy(dest: *mut u8, src: *const u8, len: usize) {
     }
 }
 
-pub fn memory_copy_buf(dest: &mut [u8; 1024], src: *const u8, len: usize) {
+pub unsafe fn memory_copy_buf(dest: &mut [u8; 1024], src: *const u8, len: usize) {
     if len == 0 {
         return;
     }
@@ -134,7 +134,7 @@ const HUB_DESCRIPTOR: HubDescriptor = HubDescriptor {
     Data: [0x01, 0xff],
 };
 
-pub fn HcdProcessRootHubMessage(
+pub unsafe fn HcdProcessRootHubMessage(
     device: &mut UsbDevice,
     pipe: UsbPipeAddress,
     buffer: *mut u8,
@@ -323,22 +323,27 @@ pub fn HcdProcessRootHubMessage(
                             //Device
                             reply_length =
                                 min(size_of::<UsbDeviceDescriptor>(), buffer_length as usize);
-                            memory_copy(
-                                buffer,
-                                (&DeviceDescriptor as *const UsbDeviceDescriptor).cast(),
-                                reply_length,
-                            );
+                            unsafe {
+                                memory_copy(
+                                    buffer,
+                                    (&DeviceDescriptor as *const UsbDeviceDescriptor).cast(),
+                                    reply_length,
+                                );
+                            }
                         }
                         2 => {
                             //Configuration
                             reply_length =
                                 min(size_of::<ConfigurationDescriptor>(), buffer_length as usize);
-                            memory_copy(
-                                buffer,
-                                (&CONFIGURATION_DESCRIPTOR as *const ConfigurationDescriptor)
-                                    .cast(),
-                                reply_length,
-                            );
+
+                            unsafe {
+                                memory_copy(
+                                    buffer,
+                                    (&CONFIGURATION_DESCRIPTOR as *const ConfigurationDescriptor)
+                                        .cast(),
+                                    reply_length,
+                                );
+                            }
                         }
                         3 => {
                             //String
@@ -355,11 +360,14 @@ pub fn HcdProcessRootHubMessage(
                         HUB_DESCRIPTOR.DescriptorLength as usize,
                         buffer_length as usize,
                     );
-                    memory_copy(
-                        buffer,
-                        (&HUB_DESCRIPTOR as *const HubDescriptor).cast(),
-                        reply_length as usize,
-                    );
+
+                    unsafe {
+                        memory_copy(
+                            buffer,
+                            (&HUB_DESCRIPTOR as *const HubDescriptor).cast(),
+                            reply_length as usize,
+                        );
+                    }
                 }
                 _ => {
                     result = ResultCode::ErrorArgument;

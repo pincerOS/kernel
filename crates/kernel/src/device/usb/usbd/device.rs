@@ -94,7 +94,7 @@ pub struct UsbDevice {
 }
 
 impl UsbDevice {
-    pub fn new(bus: *mut UsbBus, num: u32) -> Self {
+    pub unsafe fn new(bus: *mut UsbBus, num: u32) -> Self {
         Self {
             number: num,
             speed: UsbSpeed::Low,
