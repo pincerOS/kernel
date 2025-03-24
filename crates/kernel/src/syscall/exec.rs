@@ -119,7 +119,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
         {
             let mut regs = context.regs();
             regs.regs = [0; 31];
-            regs.link_reg = user_entry as usize;
+            regs.elr = user_entry as usize;
             regs.spsr = 0b0000; // TODO: standardize initial SPSR values
         }
         context.set_sp(user_sp);

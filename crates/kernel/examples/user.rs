@@ -81,7 +81,6 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     context::CORES.with_current(|core| {
         let mut thread = core.thread.take().unwrap();
         thread.user_regs = Some(thread::UserRegs {
-            sp_el0: 0,
             ttbr0_el1: ttbr0,
             usermode: false,
         });

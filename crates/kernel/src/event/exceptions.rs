@@ -12,7 +12,7 @@ global_asm!(
     // Depending on the mode, this may be on either SP_EL1
     // or SP_EL0; if this was from an interrupt/exception
     // in EL1 already, we risk overflowing the stack here.
-    sub sp, sp, #0x110
+    sub sp, sp, #0x120
 
     stp x0, x1, [sp, #0x00]
     stp x2, x3, [sp, #0x10]
@@ -30,14 +30,16 @@ global_asm!(
     stp x26, x27, [sp, #0xD0]
     stp x28, x29, [sp, #0xE0]
 
-    add x1, sp, #0x110
+    add x1, sp, #0x120
     stp x30, x1, [sp, #0xF0]
 
     mrs x1, ELR_EL1  // Exception link register (return addr)
     mrs x2, SPSR_EL1 // Saved program status (basically x86's EFLAGS)
     mrs x3, ESR_EL1  // Exception data
+    mrs x5, SP_EL0   // Saved stack pointer (if coming from SP_EL0)
 
     stp x1, x2, [sp, #0x100]
+    str x5, [sp, #0x110]
 
     mov x0, sp
     .ifnb \arg
@@ -234,7 +236,7 @@ unsafe fn read_ttbr0_el1() -> usize {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn exception_handler_example(
-    _ctx: &mut Context,
+    ctx: &mut Context,
     elr: u64,
     spsr: u64,
     esr: u64,
@@ -250,6 +252,7 @@ unsafe extern "C" fn exception_handler_example(
 
     if uart::UART.is_initialized() {
         println!("Received exception: elr={elr:#x} spsr={spsr:#010x} esr={esr:#010x} far={far:#010x} (class {exception_class:#x} / {class_name}) {arg}");
+        println!("{:#?}", ctx);
     }
 
     match exception_class {
@@ -307,6 +310,7 @@ unsafe extern "C" fn exception_handler_user(
             if uart::UART.is_initialized() {
                 println!("Received exception from usermode: elr={elr:#x} spsr={spsr:#010x} esr={esr:#010x} far={far:#010x} (class {exception_class:#x} / {class_name}) {arg}");
                 println!("ttbr0={ttbr0:#010x}");
+                println!("{:#?}", ctx);
             }
             halt()
         }

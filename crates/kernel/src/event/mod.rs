@@ -92,7 +92,6 @@ pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
     if ctx.current_el() == context::ExceptionLevel::EL1 {
         let stacks = &raw const crate::arch::boot::STACKS;
         let ptr_range = stacks as usize..stacks.wrapping_add(1) as usize;
-        #[allow(deprecated)]
         let kernel_sp = ctx.kernel_sp;
         assert!(
             !ptr_range.contains(&kernel_sp),

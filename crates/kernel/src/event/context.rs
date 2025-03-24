@@ -76,13 +76,10 @@ unsafe impl Sync for AllCores {}
 #[repr(C)]
 pub struct Context {
     pub regs: [usize; 31],
-    /// Note: don't use this, use a helper method on HandlerContext
-    /// or an equivalent.  (This will always resolve to the kernel sp,
-    /// even for user threads.)
-    #[deprecated = "Don't use the context sp directly; use get_sp/set_sp"]
     pub kernel_sp: usize,
-    pub link_reg: usize,
+    pub elr: usize,
     pub spsr: usize,
+    pub sp_el0: usize,
 }
 
 #[derive(Debug, PartialEq, PartialOrd)]
@@ -105,6 +102,37 @@ impl Context {
             3 => ExceptionLevel::EL3,
             _ => unreachable!(),
         }
+    }
+}
+
+impl core::fmt::Debug for Context {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if !f.alternate() {
+            return f
+                .debug_struct("Context")
+                .field("regs", &self.regs)
+                .field("kernel_sp", &self.kernel_sp)
+                .field("link_reg", &self.elr)
+                .field("spsr", &self.spsr)
+                .finish();
+        }
+        for i in (0..7).into_iter().map(|i| i * 4) {
+            write!(f, "x{:<2} {:016x} ", i + 0, self.regs[i + 0])?;
+            write!(f, "x{:<2} {:016x} ", i + 1, self.regs[i + 1])?;
+            write!(f, "x{:<2} {:016x} ", i + 2, self.regs[i + 2])?;
+            write!(f, "x{:<2} {:016x}\n", i + 3, self.regs[i + 3])?;
+        }
+        write!(f, "x28 {:016x} ", self.regs[28])?;
+        write!(f, "x29 {:016x} ", self.regs[28])?;
+        write!(f, "lr  {:016x}\n", self.regs[30])?;
+
+        write!(f, "elr {:016x} ", self.elr)?;
+        write!(f, "spsr {:016x} ", self.spsr)?;
+        write!(f, "cur_el {:?}\n", self.current_el())?;
+        write!(f, "sp_el0 {:016x} ", self.sp_el0)?;
+        write!(f, "sp_el1 {:016x}\n", self.kernel_sp)?;
+
+        Ok(())
     }
 }
 
@@ -189,7 +217,7 @@ asm_context_switch:
     // Shift the stack pointer to make room for the saved context
     // (not all of the context is used, but the entire space needs
     // to be reserved.)
-    sub sp, sp, #0x110
+    sub sp, sp, #0x120
 
     // TODO: ... this will actually load uninitialized stack values
     // into the unused registers ... but they're caller-saved, so the
@@ -203,8 +231,11 @@ asm_context_switch:
     stp x26, x27, [sp, #0xD0]
     stp x28, x29, [sp, #0xE0]
 
-    add x4, sp, #0x110
+    add x4, sp, #0x120
     stp x30, x4, [sp, #0xF0]
+
+    // saved_sp is 0, not coming from an exception
+    str xzr, [sp, #0x110]
 
     // TODO: how to restore the state of PSTATE, at least parts that
     // need to be preserved by context switches?
@@ -232,6 +263,9 @@ restore_context:
     ldp x1, x2, [x0, #0x100]
     msr ELR_EL1, x1
     msr SPSR_EL1, x2
+
+    ldr x1, [x0, #0x110]
+    msr SP_EL0, x1
 
     // Restore all registers
     ldp x2, x3, [x0, #0x10]
