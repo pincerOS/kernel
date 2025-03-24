@@ -227,7 +227,7 @@ pub fn mmap(req_addr: usize, size: usize, prot_flags: u32, fill_pages: u32, file
 }
 
 pub fn munmap(req_addr: usize, length: usize) -> Result<usize, usize> {
-    let res = unsafe { sys_munmap(req_addr, length)};
+    let res = unsafe { sys_munmap(req_addr, length) };
     int_to_error(res)
 }
 
