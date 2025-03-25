@@ -31,7 +31,7 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
 
     if hcint & HCINT_CHHLTD == 0 {
         println!(
-            "| Endpoint {} in: HCINT_CHHLTD not set, aborting. {:#x}",
+            "| Endpoint {} in: HCINT_CHHLTD not set, aborting. hcint: {:x}.",
             endpoint.channel, hcint
         );
         shutdown();
@@ -39,7 +39,7 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
 
     if hcint & HCINT_XFERCOMPL == 0 {
         println!(
-            "| Endpoint {} in: HCINT_XFERCOMPL not set, aborting. {:#x}",
+            "| Endpoint {} in: HCINT_XFERCOMPL not set, aborting. {:x}",
             endpoint.channel, hcint
         );
         shutdown();
@@ -103,8 +103,8 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
 
     if hcint & HCINT_CHHLTD == 0 {
         println!(
-            "| Endpoint {}: HCINT_CHHLTD not set, aborting.",
-            endpoint.channel
+            "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x}.",
+            endpoint.channel, hcint
         );
         shutdown();
     }
