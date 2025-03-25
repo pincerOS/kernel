@@ -9,6 +9,7 @@ members = [
     "crates/kernel",
     "crates/lz4",
     "crates/ulib",
+    "crates/networking",
 ]
 
 [profile.release]
