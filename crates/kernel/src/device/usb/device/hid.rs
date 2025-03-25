@@ -191,7 +191,6 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
                 device.interfaces[interface_number as usize].protocol
             );
             shutdown();
-            return ResultCode::ErrorArgument;
         }
 
         result = HidSetProtocol(device, interface_number as u8, 1);
@@ -219,7 +218,6 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     //https://github.com/tmk/tmk_keyboard/wiki/USB%3A-HID-Usage-Table
     register_interrupt_endpoint(
         device,
-        1,
         device.endpoints[interface_number as usize][0 as usize].interval as u32,
         endpoint_address_to_num(
             device.endpoints[interface_number as usize][0 as usize].endpoint_address,

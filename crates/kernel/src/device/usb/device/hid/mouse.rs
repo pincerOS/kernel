@@ -1,4 +1,3 @@
-
 use crate::SpinLock;
 
 pub static MouseActions: SpinLock<Mouse> = SpinLock::new(Mouse {
@@ -13,7 +12,7 @@ pub unsafe fn MouseAnalyze(buffer: *mut u8, _buffer_length: u32) {
     let x = unsafe { *buffer.offset(1) };
     let y = unsafe { *buffer.offset(2) };
     let wheel = unsafe { *buffer.offset(3) };
-    
+
     *MouseActions.lock() = Mouse {
         buttons,
         x: x as i8,

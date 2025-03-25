@@ -71,6 +71,7 @@ pub fn dwc_otg_interrupt_handler(_ctx: &mut Context) {
                     {
                         if let Some(callback) = DWC_CHANNEL_CALLBACK.callback[i] {
                             callback(endpoint_descriptor, hcint_channels[i]);
+                            dwc_otg_free_channel(i as u32);
                         } else {
                             println!("| DWC: No callback for channel {}.\n", i);
                             shutdown();
@@ -1497,15 +1498,15 @@ impl DwcChannelActive {
     }
 }
 
-pub fn dwc_otg_get_active_channel() -> u32 {
+pub fn dwc_otg_get_active_channel() -> u8 {
     let mut dwc_channels = DWC_CHANNEL_ACTIVE.lock();
     for i in 1..ChannelCount {
         if dwc_channels.channel[i] == 0 {
             dwc_channels.channel[i] = 1;
-            return i as u32;
+            return i as u8;
         }
     }
-    return ChannelCount as u32;
+    return ChannelCount as u8;
 }
 
 //TODO: Make this a mutex

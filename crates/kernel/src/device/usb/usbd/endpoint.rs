@@ -13,7 +13,6 @@ use super::pipe::*;
 use crate::device::system_timer::*;
 use crate::device::usb::dwc_hub;
 use crate::device::usb::hcd::dwc::dwc_otg::HcdUpdateTransferSize;
-use crate::device::usb::hcd::dwc::dwc_otg::DWC_CHANNEL_CALLBACK;
 use crate::device::usb::hcd::dwc::dwc_otgreg::HCINT_CHHLTD;
 use crate::device::usb::hcd::dwc::dwc_otgreg::HCINT_NAK;
 use crate::device::usb::hcd::dwc::dwc_otgreg::HCINT_XFERCOMPL;
@@ -148,24 +147,18 @@ pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
         _reserved: 0,
     };
 
-    unsafe {
-        DWC_CHANNEL_CALLBACK.callback[endpoint.channel as usize] =
-            Some(finish_interrupt_endpoint_callback);
-        DWC_CHANNEL_CALLBACK.endpoint_descriptors[endpoint.channel as usize] = Some(endpoint);
-    }
-
     //TODO: Hardcoded for usb-kbd for now
     let mut buffer = Box::new([0u8; 8]);
-    let channel = endpoint.channel;
     let result = unsafe {
         UsbInterruptMessage(
             device,
-            channel,
             pipe,
             buffer.as_mut_ptr(),
             8,
             PacketId::Data0,
             endpoint.timeout,
+            finish_interrupt_endpoint_callback,
+            endpoint,
         )
     };
 
@@ -189,7 +182,6 @@ pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
 
 pub fn register_interrupt_endpoint(
     device: &mut UsbDevice,
-    channel: u8,
     endpoint_time: u32,
     endpoint_address: u8,
     endpoint_direction: UsbDirection,
@@ -208,7 +200,7 @@ pub fn register_interrupt_endpoint(
         device_speed: device.speed,
         buffer_length: 8,
         buffer: core::ptr::null_mut(),
-        channel: channel,
+        channel: 0,
         timeout: timeout,
     };
 
