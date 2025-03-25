@@ -7,6 +7,7 @@ pub mod types;
 pub mod usbd;
 
 use crate::device::usb::device::hid::keyboard::Key;
+use crate::device::usb::device::hid::mouse::Mouse;
 use crate::device::usb::device::net::NetSendPacket;
 use crate::device::usb::device::net::RegisterNetReceiveCallback;
 use alloc::vec::Vec;
@@ -35,6 +36,10 @@ pub fn usb_check_for_change(_bus: &mut UsbBus) {
 
 pub fn usb_retrieve_keys() -> Vec<Key> {
     return device::hid::keyboard::KeyboardBuffer.lock().clone();
+}
+
+pub fn usb_retrieve_mouse() -> Mouse {
+    return device::hid::mouse::MouseActions.lock().clone();
 }
 
 pub fn usb_register_net_callback(callback: fn(*mut u8, u32)) {

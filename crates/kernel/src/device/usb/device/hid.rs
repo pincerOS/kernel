@@ -18,17 +18,20 @@
 ******************************************************************************/
 
 pub mod keyboard;
+pub mod mouse;
 
 use super::super::usbd::descriptors::*;
 use super::super::usbd::device::*;
 use super::super::usbd::usbd::*;
 
 use crate::device::usb::device::hid::keyboard::*;
+use crate::device::usb::device::hid::mouse::*;
 use crate::device::usb::types::*;
 use crate::device::usb::usbd::endpoint::register_interrupt_endpoint;
 use crate::device::usb::usbd::endpoint::*;
 use crate::device::usb::usbd::pipe::*;
 use crate::device::usb::usbd::request::*;
+use crate::shutdown;
 use alloc::boxed::Box;
 
 pub const HidMessageTimeout: u32 = 10;
@@ -170,14 +173,24 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         return ResultCode::ErrorDevice;
     }
 
+    let driver_data = Box::new(UsbEndpointDevice::new());
+    device.driver_data = DriverData::new(driver_data);
+
+    let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
+
     if device.interfaces[interface_number as usize].subclass == 0x01 {
         if device.interfaces[interface_number as usize].protocol == 0x01 {
             println!("| HID: Keyboard detected.");
+            endpoint_device.endpoints[0] = Some(KeyboardAnalyze);
+        } else if device.interfaces[interface_number as usize].protocol == 0x02 {
+            println!("| HID: Mouse detected.");
+            endpoint_device.endpoints[0] = Some(MouseAnalyze);
         } else {
             println!(
                 "| HID: Unknown HID device detected: {:#x}",
                 device.interfaces[interface_number as usize].protocol
             );
+            shutdown();
             return ResultCode::ErrorArgument;
         }
 
@@ -202,11 +215,6 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         );
     }
 
-    let driver_data = Box::new(UsbEndpointDevice::new());
-    device.driver_data = DriverData::new(driver_data);
-
-    let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
-    endpoint_device.endpoints[0] = Some(KeyboardAnalyze);
     //TODO: Hardcoded for keyboard atm
     //https://github.com/tmk/tmk_keyboard/wiki/USB%3A-HID-Usage-Table
     register_interrupt_endpoint(
