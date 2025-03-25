@@ -200,11 +200,11 @@ pub unsafe fn HcdProcessRootHubMessage(
                         change |= ((hprt & HPRT_PRTENCHNG) >> 3) << 1;
                         change |= ((hprt & HPRT_PRTOVRCURRCHNG) >> 5) << 3;
                         change |= 1 << 4;
-                        //Don't even ask about this code, I hope its write
-                        println!(
-                            "| HCD.Hub: HPRT: {:#x} Status: {:#x} Change: {:#x}",
-                            hprt, status, change
-                        );
+                        //Don't even ask about this code, I hope its right
+                        // println!(
+                        //     "| HCD.Hub: HPRT: {:#x} Status: {:#x} Change: {:#x}",
+                        //     hprt, status, change
+                        // );
                         (*stat_buff).Status = HubPortStatus::from_bits_truncate(status as u16);
                         (*stat_buff).Change =
                             HubPortStatusChange::from_bits_truncate(change as u16);

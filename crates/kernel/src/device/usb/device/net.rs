@@ -27,12 +27,12 @@ pub fn NetLoad(bus: &mut UsbBus) {
 }
 
 pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
-    println!(
-        "| Net: Subclass: {:x}, Protocol: {:x}",
-        device.interfaces[interface_number as usize].subclass,
-        device.interfaces[interface_number as usize].protocol
-    );
-
+    // println!(
+    //     "| Net: Subclass: {:x}, Protocol: {:x}",
+    //     device.interfaces[interface_number as usize].subclass,
+    //     device.interfaces[interface_number as usize].protocol
+    // );
+    println!("| Net: Usb Hub Detected");
     rndis_initialize_msg(device);
 
     let mut buffer = [0u8; 52];
@@ -63,15 +63,14 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     endpoint_device.endpoints[1] = Some(NetSend);
     endpoint_device.endpoints[2] = Some(NetReceive);
 
-    // println!("Device interface number: {:?}", device.interface_number);
-    println!(
-        "Device interface number: {:?}",
-        device.endpoints[interface_number as usize][0 as usize].endpoint_address
-    );
-    println!(
-        "Device endpoint interval: {:?}",
-        device.endpoints[interface_number as usize][0 as usize].interval
-    );
+    // println!(
+    //     "Device interface number: {:?}",
+    //     device.endpoints[interface_number as usize][0 as usize].endpoint_address
+    // );
+    // println!(
+    //     "Device endpoint interval: {:?}",
+    //     device.endpoints[interface_number as usize][0 as usize].interval
+    // );
 
     register_interrupt_endpoint(
         device,
@@ -117,7 +116,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // UDP Data (Example Payload)
     buffer[42..46].copy_from_slice(b"PING");
 
-    println!("Ethernet Frame: {:02X?}", &buffer[..46]);
+    // println!("Ethernet Frame: {:02X?}", &buffer[..46]);
 
     unsafe {
         NET_DEVICE.device = Some(device);

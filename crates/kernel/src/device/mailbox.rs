@@ -15,6 +15,9 @@ use crate::{
     sync::Volatile,
 };
 
+unsafe impl Sync for VideoCoreMailbox {}
+unsafe impl Send for VideoCoreMailbox {}
+
 pub struct VideoCoreMailbox {
     base: *mut u32,
 }

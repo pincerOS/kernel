@@ -10,6 +10,7 @@ profile := "release"
 qemu_target := "-M raspi4b -dtb bcm2711-rpi-4-b.dtb"
 qemu_debug := "mmu,guest_errors"
 qemu_display := "none"
+qemu_device := ""
 debug_args := "-s"
 min_rust_version := "1.84.0"
 llvmbox_dir := ".llvmbox"
@@ -185,7 +186,7 @@ clean:
 build-debug example=example target=target: (build example "dev" target)
 
 # Run the kernel in QEMU
-run qemu_target=qemu_target qemu_debug=qemu_debug qemu_display=qemu_display debug_args=debug_args:
+run qemu_target=qemu_target qemu_debug=qemu_debug qemu_display=qemu_display debug_args=debug_args qemu_device=qemu_device:
     #!/usr/bin/env bash
     set -e
 
@@ -213,12 +214,12 @@ run qemu_target=qemu_target qemu_debug=qemu_debug qemu_display=qemu_display debu
         -serial stdio \
         -serial "${SERIAL_ALT}" \
         -display "{{qemu_display}}" \
-        -usb \
-        -device usb-kbd \
-        -device usb-net,netdev=net0 \
-        -netdev user,id=net0,hostfwd=tcp::2222-:22 \
+        {{qemu_device}} \
         ${QEMU_DEBUG_PFX} "{{qemu_debug}}" \
         {{debug_args}}
+
+# Run with USB devices
+run-usb: (run qemu_target qemu_debug "default" debug_args "-usb -device usb-mouse -device usb-kbd -device usb-net,netdev=net0 -netdev user,id=net0,hostfwd=tcp::2222-:22")
 
 # Run with UI display
 run-ui: (run qemu_target qemu_debug "default" debug_args)

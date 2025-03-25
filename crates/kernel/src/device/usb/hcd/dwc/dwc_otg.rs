@@ -21,12 +21,11 @@ use crate::device::usb::usbd::pipe::UsbPipeAddress;
 use crate::device::usb::usbd::request::UsbDeviceRequest;
 
 use crate::device::gic;
-use crate::device::mailbox;
 use crate::device::mailbox::PropSetPowerState;
 use crate::device::system_timer::micro_delay;
 use crate::device::usb::usbd::endpoint::endpoint_descriptor;
+use crate::device::MAILBOX;
 use crate::event::context::Context;
-use crate::memory;
 use crate::shutdown;
 use crate::SpinLock;
 use core::ptr;
@@ -421,7 +420,7 @@ pub fn HcdChannelSendWaitOne(
                     timeout = 0;
                     loop {
                         if timeout == RequestTimeout {
-                            println!("HCD: Request split completion to ss has timed out.\n");
+                            println!("| HCD: Request split completion to ss has timed out.\n");
                             device.error = UsbTransferError::ConnectionError;
                             return ResultCode::ErrorTimeout;
                         }
@@ -527,7 +526,7 @@ pub fn HcdChannelSendWaitOne(
     }
 
     if globalTries == 3 || actualTries == 10 {
-        println!("HCD: Request to s has failed 3 times.\n");
+        println!("| HCD: Request to s has failed 3 times.\n");
         result = HcdChannelInterruptToError(
             device,
             hcint,
@@ -546,7 +545,7 @@ pub fn HcdChannelSendWaitOne(
             //     *((request as *const u8).offset(6)),
             //     *((request as *const u8).offset(7)),
             // );
-            println!("HCD: Request to failed.\n");
+            println!("| HCD: Request to failed.\n");
             return result;
         }
         device.error = UsbTransferError::ConnectionError;
@@ -1099,7 +1098,7 @@ pub unsafe fn HcdSubmitControlMessage(
         PacketId::Data1,
     );
     if result != ResultCode::OK {
-        println!("| HCD: Could not send STATUS to device.");
+        // println!("| HCD: Could not send STATUS to device.");
         // return result;
     }
 
@@ -1121,26 +1120,11 @@ fn mbox_set_power_on() -> ResultCode {
         state: 1 | (1 << 1),
     };
 
-    // let msg_get = PropGetPowerState {
-    //     device_id: 0x03,
-    // };
-
-    let mailbox_base = unsafe { memory::map_device(0xfe00b880) }.as_ptr();
-    let mut mailbox = unsafe { mailbox::VideoCoreMailbox::init(mailbox_base) };
-    //TODO: FIX THIS
-
-    // let check = unsafe { mailbox.get_property::<PropGetPowerState>(msg_get) };
-    // match check {
-    //     Ok(output) => {
-    //         println!("| HCD: Power state is {}", output.state);
-    //     },
-    //     Err(e) => {
-    //         println!("| HCD ERROR: Power state check failed");
-    //         return ResultCode::ErrorDevice;
-    //     }
-    // }
-
-    let resp = unsafe { mailbox.get_property::<PropSetPowerState>(msg) };
+    let resp;
+    {
+        let mut mailbox = MAILBOX.get().lock();
+        resp = unsafe { mailbox.get_property::<PropSetPowerState>(msg) };
+    }
 
     //TODO: Ignore on QEMU for now
     match resp {
@@ -1257,7 +1241,7 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
         }
     }
 
-    println!("| HCD: Starting");
+    // println!("| HCD: Starting");
 
     write_volatile(DOTG_DCTL, 1 << 1);
     micro_delay(1000);
@@ -1336,12 +1320,14 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     let cfg4 = read_volatile(DOTG_GHWCFG4);
     let c_dmad = cfg4 & (1 << 31);
     let gsnpsid = read_volatile(DOTG_GSNPSID);
+
     println!(
         "| HCD: DMA enabled: {}, DMA description: {}, GSNPSID: {:#x}",
         h_dmaen,
         c_dmad,
         gsnpsid & 0xfff
     );
+
     // if (Host->Config.EnableDmaDescriptor ==
     // 	Core->Hardware.DmaDescription &&
     // 	(Core->VendorId & 0xfff) >= 0x90a) {
@@ -1353,7 +1339,7 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     let cfg3 = read_volatile(DOTG_GHWCFG3);
     let fifo_size = cfg3 >> 16; //?
 
-    println!("| HCD: fifo size: {}", fifo_size);
+    // println!("| HCD: fifo size: {}", fifo_size);
 
     write_volatile(DOTG_GRXFSIZ, fifo_size);
     write_volatile(DOTG_GNPTXFSIZ, fifo_size | (fifo_size << 16));
@@ -1429,7 +1415,7 @@ pub fn HcdInitialize(_bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
         dwc_otg_driver = DWC_OTG::init(base_addr);
     }
 
-    println!("| HCD: Initializing");
+    // println!("| HCD: Initializing");
 
     let vendor_id = read_volatile(DOTG_GSNPSID);
     let user_id = read_volatile(DOTG_GUID);

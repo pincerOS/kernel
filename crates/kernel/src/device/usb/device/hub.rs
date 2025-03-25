@@ -50,11 +50,11 @@ fn HubReadDescriptor(device: &mut UsbDevice) -> ResultCode {
 
     let hub = device.driver_data.downcast::<HubDevice>().unwrap();
     if hub.Descriptor.is_none() {
-        println!(
-            "| HUB: allocating descriptor of size {} with HubDescriptor {}",
-            header.descriptor_length,
-            size_of::<HubDescriptor>()
-        );
+        // println!(
+        //     "| HUB: allocating descriptor of size {} with HubDescriptor {}",
+        //     header.descriptor_length,
+        //     size_of::<HubDescriptor>()
+        // );
         hub.Descriptor = Some(Box::new(HubDescriptor::default()));
 
         //TODO: Update this creation as well
@@ -309,7 +309,7 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
         return result;
     }
 
-    println!("| HUB: port {} status: {:#x}", port + 1, 10);
+    // println!("| HUB: port {} status: {:#x}", port + 1, 10);
 
     result = HubChangePortFeature(device, HubPortFeature::FeatureConnectionChange, port, false);
 
@@ -355,7 +355,7 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
 
     let data = device.driver_data.downcast::<HubDevice>().unwrap();
     let child_dev = unsafe { &mut *(data.Children[port as usize]) };
-    println!("| HUB: allocated new device {}", child_dev.number);
+    // println!("| HUB: allocated new device {}", child_dev.number);
     let port_status = data.PortStatus[port as usize].Status;
     if port_status.contains(HubPortStatus::LowSpeedAttached) {
         child_dev.speed = UsbSpeed::Low;
@@ -384,10 +384,10 @@ fn HubCheckConnection(device: &mut UsbDevice, port: u8) -> ResultCode {
     let prevConnected = prevHubStatus.contains(HubPortStatus::Connected);
     let result = HubPortGetStatus(device, port);
 
-    println!(
-        "| HUB: HubCheckConnection for device {} port {}",
-        device.number, port
-    );
+    // println!(
+    //     "| HUB: HubCheckConnection for device {} port {}",
+    //     device.number, port
+    // );
 
     if result != ResultCode::OK {
         println!("| HUB: failed to get status (1) for port {}", port + 1);
@@ -405,7 +405,7 @@ fn HubCheckConnection(device: &mut UsbDevice, port: u8) -> ResultCode {
     }
 
     if port_change.contains(HubPortStatusChange::ConnectedChanged) {
-        println!("| HUB: Port {} connected changed", port + 1);
+        // println!("| HUB: Port {} connected changed", port + 1);
         HubPortConnectionChanged(device, port);
     }
 
@@ -553,7 +553,7 @@ fn HubAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     device.driver_data = DriverData::new(boxed);
 
     let hub = device.driver_data.downcast::<HubDevice>().unwrap();
-    println!("| HUB: Driver Data instantiated");
+    // println!("| HUB: Driver Data instantiated");
 
     hub.Header.data_size = size_of::<HubDevice>() as u32;
     hub.Header.device_driver = DeviceDriverHub;
@@ -562,7 +562,7 @@ fn HubAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     for i in 0..MAX_CHILDREN_PER_DEVICE {
         hub.Children[i] = core::ptr::null_mut();
     }
-    println!("| Hub Read Descriptor");
+    // println!("| Hub Read Descriptor");
     let mut result = HubReadDescriptor(device);
     if result != ResultCode::OK {
         return result;
@@ -579,7 +579,7 @@ fn HubAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     }
 
     //TODO: Hope HubDescriptor.Attributes is correct
-    println!("| HUB: hub has {} children", hub.MaxChildren);
+    // println!("| HUB: hub has {} children", hub.MaxChildren);
 
     result = HubGetStatus(device);
     if result != ResultCode::OK {

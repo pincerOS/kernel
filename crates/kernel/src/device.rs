@@ -10,6 +10,10 @@ pub mod system_timer;
 pub mod usb;
 pub mod watchdog;
 
+use crate::memory;
+use crate::memory::{map_device, map_device_block};
+use crate::sync::UnsafeInit;
+use crate::SpinLock;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use device_tree::format::StructEntry;
@@ -17,9 +21,7 @@ use device_tree::util::MappingIterator;
 use device_tree::DeviceTree;
 use usb::usbd::endpoint::endpoint_descriptor;
 
-use crate::memory::{map_device, map_device_block};
-use crate::sync::UnsafeInit;
-use crate::SpinLock;
+const ENABLE_USB: bool = true;
 
 // TODO: a non-O(n²) approach to device discovery and registration
 pub fn discover_compatible<'a, 'b>(
@@ -96,6 +98,8 @@ type InitTask = Box<dyn Fn() + Send + Sync>;
 pub static PER_CORE_INIT: UnsafeInit<Vec<InitTask>> = unsafe { UnsafeInit::uninit() };
 
 pub static GPIO: UnsafeInit<SpinLock<gpio::bcm2711_gpio_driver>> = unsafe { UnsafeInit::uninit() };
+pub static MAILBOX: UnsafeInit<SpinLock<mailbox::VideoCoreMailbox>> =
+    unsafe { UnsafeInit::uninit() };
 
 pub fn init_devices(tree: &DeviceTree<'_>) {
     let mut init_fns: Vec<InitTask> = Vec::new();
@@ -134,6 +138,18 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         }
         println!("| initialized power managment watchdog");
         println!("| last reset: {:#010x}", WATCHDOG.get().lock().last_reset());
+    }
+
+    {
+        let mailbox = discover_compatible(&tree, b"brcm,bcm2835-mbox")
+            .unwrap()
+            .next()
+            .unwrap();
+        let (mailbox_addr, _) = find_device_addr(mailbox).unwrap().unwrap();
+        let mailbox_base = unsafe { memory::map_device(mailbox_addr) }.as_ptr();
+        unsafe {
+            MAILBOX.init(SpinLock::new(mailbox::VideoCoreMailbox::init(mailbox_base)));
+        }
     }
 
     if let Some(gic) = discover_compatible(tree, b"arm,gic-400").unwrap().next() {
@@ -199,7 +215,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         println!("| initialized GPIO");
     }
 
-    {
+    if ENABLE_USB {
         println!("| Initializing USB");
         let usb = discover_compatible(tree, b"brcm,bcm2708-usb")
             .unwrap()
@@ -210,8 +226,6 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let usb_base = unsafe { map_device_block(usb_addr, 0x11000) }.as_ptr(); //size is from core gloabl to dev ep 15
 
         let _bus = usb::usb_init(usb_base);
-
-        // usb::usb_check_for_change(&mut bus);
     }
 
     // Set up the interrupt controllers to preempt on the arm generic

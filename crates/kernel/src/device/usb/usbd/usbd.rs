@@ -180,7 +180,7 @@ pub unsafe fn UsbGetDescriptor(
     recipient: u8,
 ) -> ResultCode {
     let result;
-    println!("| USBD: Getting descriptor at device {}", device.number);
+    // println!("| USBD: Getting descriptor at device {}", device.number);
     result = unsafe {
         UsbControlMessage(
             device,
@@ -308,7 +308,7 @@ fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
 }
 
 fn UsbSetAddress(device: &mut UsbDevice, address: u8) -> ResultCode {
-    println!("| USBD: Set device address to {}", address);
+    // println!("| USBD: Set device address to {}", address);
     if device.status != UsbDeviceStatus::Default {
         println!("| USBD: Device not in default state");
         return ResultCode::ErrorDevice;
@@ -418,20 +418,20 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         return result;
     }
 
-    let configuration_dev = &mut device.configuration;
-    println!(
-        "| USBD: Configuration descriptor:\n {:#?}",
-        configuration_dev
-    );
+    // let configuration_dev = &mut device.configuration;
+    // println!(
+    //     "| USBD: Configuration descriptor:\n {:#?}",
+    //     configuration_dev
+    // );
 
     //TODO TODO: if ((fullDescriptor = MemoryAllocate(device->Configuration.TotalLength)) == NULL) {
     // LOG("USBD: Failed to allocate space for descriptor.\n");
     // return ErrorMemory;
     let config_total_length = device.configuration.total_length;
-    println!(
-        "| USBD: Configuration descriptor length: {}",
-        config_total_length
-    );
+    // println!(
+    //     "| USBD: Configuration descriptor length: {}",
+    //     config_total_length
+    // );
     let mut fullDescriptor_vec = vec![0; config_total_length as usize].into_boxed_slice();
     let fullDescriptor = fullDescriptor_vec.as_mut_ptr() as *mut u8;
 
@@ -525,14 +525,14 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
 pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
     let bus = unsafe { &mut *(device.bus) };
 
-    println!("| USBD: Attaching device {}", device.number);
+    // println!("| USBD: Attaching device {}", device.number);
 
     let address = device.number;
     device.number = 0;
 
     let mut result = UsbReadDeviceDescriptor(device);
     //print USB device descriptor
-    println!("| USBD: Device descriptor:\n {:#?}", device.descriptor);
+    // println!("| USBD: Device descriptor:\n {:#?}", device.descriptor);
     if result != ResultCode::OK {
         println!("| USBD: Failed to read device descriptor");
         return result;
@@ -550,7 +550,7 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
             }
         }
     } else {
-        println!("| USBD: No parent device");
+        // println!("| USBD: No parent device");
     }
 
     result = UsbSetAddress(device, address as u8);
@@ -566,7 +566,7 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
         println!("| USBD: Failed to read device descriptor");
         return result;
     }
-    println!("| USBD: Device descriptor:\n {:#?}", device.descriptor);
+    // println!("| USBD: Device descriptor:\n {:#?}", device.descriptor);
 
     let vendor_id = device.descriptor.vendor_id;
     let product_id = device.descriptor.product_id;
@@ -581,24 +581,24 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
         return result;
     }
 
-    println!(
-        "\n Device interface class: {} at device number {}\n",
-        device.interfaces[0].class as u16, device.number
-    );
+    // println!(
+    //     "\n Device interface class: {} at device number {}\n",
+    //     device.interfaces[0].class as u16, device.number
+    // );
 
     if (device.interfaces[0].class as usize) < INTERFACE_CLASS_ATTACH_COUNT {
-        for j in 0..device.configuration.interface_count {
-            println!(
-                "| USBD: Device interface {}:\n {:?}",
-                j, device.interfaces[j as usize]
-            );
-            for i in 0..device.interfaces[j as usize].endpoint_count {
-                println!(
-                    "| USBD: Endpoint descriptor {} {}:\n {:#?}",
-                    j, i, device.endpoints[j as usize][i as usize]
-                );
-            }
-        }
+        // for j in 0..device.configuration.interface_count {
+        //     println!(
+        //         "| USBD: Device interface {}:\n {:?}",
+        //         j, device.interfaces[j as usize]
+        //     );
+        //     for i in 0..device.interfaces[j as usize].endpoint_count {
+        //         println!(
+        //             "| USBD: Endpoint descriptor {} {}:\n {:#?}",
+        //             j, i, device.endpoints[j as usize][i as usize]
+        //         );
+        //     }
+        // }
 
         if let Some(class_attach) = bus.interface_class_attach[device.interfaces[0].class as usize]
         {
@@ -628,7 +628,7 @@ pub fn UsbAllocateDevice(devices: &mut Box<UsbDevice>) -> ResultCode {
 
     for number in 0..MaximumDevices {
         if bus.devices[number].is_none() {
-            println!("| USBD: Allocating device {}", number);
+            // println!("| USBD: Allocating device {}", number);
             device.number = number as u32 + 1;
             bus.devices[number] = Some(devices);
             break;

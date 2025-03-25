@@ -6,6 +6,7 @@ QEMU_TARGET_HARDWARE=${QEMU_TARGET_HARDWARE-"-M raspi4b -dtb bcm2711-rpi-4-b.dtb
 QEMU_DEBUG=${QEMU_DEBUG-"mmu,guest_errors"}
 QEMU_DISPLAY=${QEMU_DISPLAY-"none"}
 DEBUG_ARGS=${DEBUG_ARGS-"-s"}
+QEMU_DEVICES=${QEMU_DEVICES-""}
 
 # DEBUG_ARGS="-s -S"  (wait until connected)
 # DEBUG_ARGS="-s"     (run, attach debugger later)
@@ -41,11 +42,7 @@ qemu-system-aarch64 \
     -serial "${SERIAL_ALT}" \
     -display "${QEMU_DISPLAY}" \
     "${QEMU_DEBUG_PFX}" "${QEMU_DEBUG}" \
-    -usb \
-    -device usb-kbd \
-    -device usb-net,netdev=net0 \
-    -netdev user,id=net0,hostfwd=tcp::2222-:22 \
-    -object filter-dump,id=f1,netdev=net0,file=net0.pcap \
+    ${QEMU_DEVICES} \
     ${DEBUG_ARGS}
 
 # -device usb-kbd \

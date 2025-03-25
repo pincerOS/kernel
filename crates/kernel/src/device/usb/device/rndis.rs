@@ -97,40 +97,40 @@ pub fn rndis_initialize_msg(device: &mut UsbDevice) -> ResultCode {
         return ResultCode::ErrorDevice;
     }
 
-    //TODO: check if the message is correct
-    //TODO: transfer this knowledge to the net module
-    let buffer_req32 = buffer_req.as_mut_ptr() as *mut u32;
-    println!("| RNDIS: Message Type: {:x}", unsafe { *buffer_req32 });
-    println!("| RNDIS: Message Length: {}", unsafe {
-        *buffer_req32.add(1)
-    });
-    println!("| RNDIS: Request ID: {:x}", unsafe { *buffer_req32.add(2) });
-    println!("| RNDIS: Status: {:x}", unsafe { *buffer_req32.add(3) });
-    println!("| RNDIS: Major Version: {:x}", unsafe {
-        *buffer_req32.add(4)
-    });
-    println!("| RNDIS: Minor Version: {:x}", unsafe {
-        *buffer_req32.add(5)
-    });
-    println!("| RNDIS: Device Flags: {:x}", unsafe {
-        *buffer_req32.add(6)
-    });
-    println!("| RNDIS: Medium: {:x}", unsafe { *buffer_req32.add(7) });
-    println!("| RNDIS: Max PacketsPerMessage: {:x}", unsafe {
-        *buffer_req32.add(8)
-    });
-    println!("| RNDIS: Max TransferSize: {}", unsafe {
-        *buffer_req32.add(9)
-    });
-    println!("| RNDIS: PacketAlignmentFactor: {:x}", unsafe {
-        *buffer_req32.add(10)
-    });
-    println!("| RNDIS: AFListOffset: {:x}", unsafe {
-        *buffer_req32.add(11)
-    });
-    println!("| RNDIS: AFListSize: {:x}", unsafe {
-        *buffer_req32.add(12)
-    });
+    // //TODO: check if the message is correct
+    // //TODO: transfer this knowledge to the net module
+    // let buffer_req32 = buffer_req.as_mut_ptr() as *mut u32;
+    // println!("| RNDIS: Message Type: {:x}", unsafe { *buffer_req32 });
+    // println!("| RNDIS: Message Length: {}", unsafe {
+    //     *buffer_req32.add(1)
+    // });
+    // println!("| RNDIS: Request ID: {:x}", unsafe { *buffer_req32.add(2) });
+    // println!("| RNDIS: Status: {:x}", unsafe { *buffer_req32.add(3) });
+    // println!("| RNDIS: Major Version: {:x}", unsafe {
+    //     *buffer_req32.add(4)
+    // });
+    // println!("| RNDIS: Minor Version: {:x}", unsafe {
+    //     *buffer_req32.add(5)
+    // });
+    // println!("| RNDIS: Device Flags: {:x}", unsafe {
+    //     *buffer_req32.add(6)
+    // });
+    // println!("| RNDIS: Medium: {:x}", unsafe { *buffer_req32.add(7) });
+    // println!("| RNDIS: Max PacketsPerMessage: {:x}", unsafe {
+    //     *buffer_req32.add(8)
+    // });
+    // println!("| RNDIS: Max TransferSize: {}", unsafe {
+    //     *buffer_req32.add(9)
+    // });
+    // println!("| RNDIS: PacketAlignmentFactor: {:x}", unsafe {
+    //     *buffer_req32.add(10)
+    // });
+    // println!("| RNDIS: AFListOffset: {:x}", unsafe {
+    //     *buffer_req32.add(11)
+    // });
+    // println!("| RNDIS: AFListSize: {:x}", unsafe {
+    //     *buffer_req32.add(12)
+    // });
 
     return ResultCode::OK;
 }
@@ -219,37 +219,37 @@ pub unsafe fn rndis_query_msg(
         print!("| RNDIS: Failed to receive query message.\n");
         return ResultCode::ErrorDevice;
     }
-    println!("| RNDIS: Received query message.");
+    // println!("| RNDIS: Received query message.");
 
-    let buffer_req32 = buffer_req as *mut u32;
-    println!("| RNDIS: Message Type: {:x}", unsafe { *buffer_req32 });
-    println!("| RNDIS: Message Length: {}", unsafe {
-        *buffer_req32.add(1)
-    });
-    println!("| RNDIS: Request ID: {:x}", unsafe { *buffer_req32.add(2) });
-    println!("| RNDIS: Status: {:x}", unsafe { *buffer_req32.add(3) });
-    println!("| RNDIS: Information Buffer Length: {}", unsafe {
-        *buffer_req32.add(4)
-    });
-    println!("| RNDIS: Information Buffer Offset: {:x}", unsafe {
-        *buffer_req32.add(5)
-    });
-    println!("| RNDIS: Start of buffer: {:x}", unsafe {
-        *buffer_req32.add(6)
-    });
+    // let buffer_req32 = buffer_req as *mut u32;
+    // println!("| RNDIS: Message Type: {:x}", unsafe { *buffer_req32 });
+    // println!("| RNDIS: Message Length: {}", unsafe {
+    //     *buffer_req32.add(1)
+    // });
+    // println!("| RNDIS: Request ID: {:x}", unsafe { *buffer_req32.add(2) });
+    // println!("| RNDIS: Status: {:x}", unsafe { *buffer_req32.add(3) });
+    // println!("| RNDIS: Information Buffer Length: {}", unsafe {
+    //     *buffer_req32.add(4)
+    // });
+    // println!("| RNDIS: Information Buffer Offset: {:x}", unsafe {
+    //     *buffer_req32.add(5)
+    // });
+    // println!("| RNDIS: Start of buffer: {:x}", unsafe {
+    //     *buffer_req32.add(6)
+    // });
 
-    //start reading from request id + buffer offset to request id + buffer offset + buffer length
-    let buffer_length = unsafe { *buffer_req32.add(4) };
-    let buffer_offset = unsafe { *buffer_req32.add(5) };
-    let buffer = unsafe { buffer_req.offset(24) as *mut u8 };
+    // //start reading from request id + buffer offset to request id + buffer offset + buffer length
+    // let buffer_length = unsafe { *buffer_req32.add(4) };
+    // let buffer_offset = unsafe { *buffer_req32.add(5) };
+    // let buffer = unsafe { buffer_req.offset(24) as *mut u8 };
 
-    println!("| RNDIS: Buffer Length: {}", buffer_length);
-    println!("| RNDIS: Buffer Offset: {:x}", buffer_offset);
+    // println!("| RNDIS: Buffer Length: {}", buffer_length);
+    // println!("| RNDIS: Buffer Offset: {:x}", buffer_offset);
 
-    for i in 0..buffer_length {
-        let byte = unsafe { *buffer.offset(i as isize) };
-        print!("{:x} ", byte);
-    }
+    // for i in 0..buffer_length {
+    //     let byte = unsafe { *buffer.offset(i as isize) };
+    //     print!("{:x} ", byte);
+    // }
 
     return ResultCode::OK;
 }
@@ -332,15 +332,15 @@ pub fn rndis_set_msg(device: &mut UsbDevice, oid: OID, value: u32) {
     }
 
     // let msg_cmplt = unsafe { &*(buffer.as_mut_ptr() as *mut RndisSetMsgCmplt) };
-    let message_type = buffer.message_type;
-    let message_length = buffer.message_length;
-    let request_id = buffer.request_id;
-    let status = buffer.status;
+    // let message_type = buffer.message_type;
+    // let message_length = buffer.message_length;
+    // let request_id = buffer.request_id;
+    // let status = buffer.status;
 
-    println!("| RNDIS: Message Type: {:x}", message_type);
-    println!("| RNDIS: Message Length: {}", message_length);
-    println!("| RNDIS: Request ID: {:x}", request_id);
-    println!("| RNDIS: Status: {:#?}", status);
+    // println!("| RNDIS: Message Type: {:x}", message_type);
+    // println!("| RNDIS: Message Length: {}", message_length);
+    // println!("| RNDIS: Request ID: {:x}", request_id);
+    // println!("| RNDIS: Status: {:#?}", status);
 }
 
 pub unsafe fn rndis_send_packet(

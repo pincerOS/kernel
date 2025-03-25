@@ -152,31 +152,3 @@ pub fn size_to_number(packet_size: UsbPacketSize) -> u16 {
         UsbPacketSize::Bits64 => 64,
     }
 }
-
-/// Returns the minimum of two values.
-#[macro_export]
-macro_rules! min {
-    ($x:expr, $y:expr) => {{
-        let x = $x;
-        let y = $y;
-        if x < y {
-            x
-        } else {
-            y
-        }
-    }};
-}
-
-/// Returns the maximum of two values.
-#[macro_export]
-macro_rules! max {
-    ($x:expr, $y:expr) => {{
-        let x = $x;
-        let y = $y;
-        if x > y {
-            x
-        } else {
-            y
-        }
-    }};
-}

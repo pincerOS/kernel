@@ -113,7 +113,7 @@ fn HidGetReport(
 }
 
 pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
-    println!("| HID: Attaching to interface {}.", interface_number);
+    // println!("| HID: Attaching to interface {}.", interface_number);
     let result;
 
     if device.interfaces[interface_number as usize].class != InterfaceClass::InterfaceClassHid {
@@ -132,23 +132,24 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // if device.endpoints[interface_number as usize][0].endpoint_address
 
     //print Subclass and Protocol
-    println!(
-        "| HID: Subclass: {:x}, Protocol: {:x}",
-        device.interfaces[interface_number as usize].subclass,
-        device.interfaces[interface_number as usize].protocol
-    );
 
-    println!(
-        "| HID information:\n{:#?}",
-        device.interfaces[interface_number as usize]
-    );
+    // println!(
+    //     "| HID: Subclass: {:x}, Protocol: {:x}",
+    //     device.interfaces[interface_number as usize].subclass,
+    //     device.interfaces[interface_number as usize].protocol
+    // );
 
-    for i in 0..device.interfaces[interface_number as usize].endpoint_count {
-        println!(
-            "| HID: Endpoint {} information:\n{:#?}",
-            i, device.endpoints[interface_number as usize][i as usize]
-        );
-    }
+    // println!(
+    //     "| HID information:\n{:#?}",
+    //     device.interfaces[interface_number as usize]
+    // );
+
+    // for i in 0..device.interfaces[interface_number as usize].endpoint_count {
+    //     println!(
+    //         "| HID: Endpoint {} information:\n{:#?}",
+    //         i, device.endpoints[interface_number as usize][i as usize]
+    //     );
+    // }
 
     //TODO: ignore for now
     // if (device->Endpoints[interfaceNumber][0].EndpointAddress.Direction != In ||
