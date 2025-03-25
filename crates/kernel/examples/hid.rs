@@ -12,19 +12,18 @@ use kernel::*;
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
 
-    //Basic mouse test
+    //Basic mouse & keyboard test
     let mut cur_x = 0;
     let mut cur_y = 0;
-    let mut cur_buttons = 0;
-    let mut cur_wheel = 0;
+
+    let mut list = device::usb::usb_retrieve_keys();
 
     loop {
         let mouse = device::usb::usb_retrieve_mouse();
+        let new_list = device::usb::usb_retrieve_keys();
         if mouse.x != 0 || mouse.y != 0 || mouse.buttons != 0 || mouse.wheel != 0 {
             cur_x += mouse.x as i32;
             cur_y += mouse.y as i32;
-            cur_buttons = mouse.buttons;
-            cur_wheel = mouse.wheel;
 
             if mouse.x != 0 || mouse.y != 0 {
                 println!("| Mouse moved: x: {}, y: {}", cur_x, cur_y);
@@ -46,14 +45,25 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
                 }
                 if mouse.buttons & 0x10 != 0 {
                     print!("Mouse-4 ");
-                }   
+                }
                 println!();
             }
 
             if mouse.wheel != 0 {
-                println!("| Mouse wheel: {}", cur_wheel);
+                println!("| Mouse wheel: {}", mouse.wheel);
             }
         }
+
+        for key in new_list.iter() {
+            if !list.contains(key) {
+                if *key == Key::Return {
+                    println!();
+                } else {
+                    print!("{:?} ", key);
+                }
+            }
+        }
+        list = new_list;
         micro_delay(10000);
     }
 }

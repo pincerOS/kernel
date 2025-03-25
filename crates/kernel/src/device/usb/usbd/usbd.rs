@@ -72,7 +72,6 @@ pub fn UsbInitialise(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
 
 pub unsafe fn UsbBulkMessage(
     device: &mut UsbDevice,
-    channel: u8,
     pipe: UsbPipeAddress,
     buffer: *mut u8,
     buffer_length: u32,
@@ -80,32 +79,47 @@ pub unsafe fn UsbBulkMessage(
     device_endpoint_number: u8,
     timeout_: u32,
 ) -> ResultCode {
+    let mut available_channel = dwc_otg_get_active_channel();
+    while available_channel == ChannelCount as u8 {
+        available_channel = dwc_otg_get_active_channel();
+    } //TODO: Make a queue system instead of busy waiting
+
     unsafe {
-        DWC_CHANNEL_CALLBACK.endpoint_descriptors[channel as usize] = Some(endpoint_descriptor {
-            endpoint_address: pipe.end_point,
-            endpoint_direction: pipe.direction,
-            endpoint_type: pipe.transfer_type,
-            max_packet_size: pipe.max_size,
-            device_endpoint_number: device_endpoint_number,
-            device: device,
-            device_number: device.number,
-            device_speed: device.speed,
-            buffer_length: buffer_length,
-            buffer: buffer,
-            channel: channel,
-            timeout: timeout_,
-        });
+        DWC_CHANNEL_CALLBACK.endpoint_descriptors[available_channel as usize] =
+            Some(endpoint_descriptor {
+                endpoint_address: pipe.end_point,
+                endpoint_direction: pipe.direction,
+                endpoint_type: pipe.transfer_type,
+                max_packet_size: pipe.max_size,
+                device_endpoint_number: device_endpoint_number,
+                device: device,
+                device_number: device.number,
+                device_speed: device.speed,
+                buffer_length: buffer_length,
+                buffer: buffer,
+                channel: available_channel,
+                timeout: timeout_,
+            });
+
         if pipe.direction == UsbDirection::Out {
-            DWC_CHANNEL_CALLBACK.callback[channel as usize] =
+            DWC_CHANNEL_CALLBACK.callback[available_channel as usize] =
                 Some(finish_bulk_endpoint_callback_out);
         } else {
-            DWC_CHANNEL_CALLBACK.callback[channel as usize] =
+            DWC_CHANNEL_CALLBACK.callback[available_channel as usize] =
                 Some(finish_bulk_endpoint_callback_in);
         }
     }
 
-    let result =
-        unsafe { HcdSubmitBulkMessage(device, channel, pipe, buffer, buffer_length, packet_id) };
+    let result = unsafe {
+        HcdSubmitBulkMessage(
+            device,
+            available_channel,
+            pipe,
+            buffer,
+            buffer_length,
+            packet_id,
+        )
+    };
 
     if result != ResultCode::OK {
         println!("| USBD: Failed to send bulk message: {:?}", result);
@@ -117,15 +131,38 @@ pub unsafe fn UsbBulkMessage(
 
 pub unsafe fn UsbInterruptMessage(
     device: &mut UsbDevice,
-    channel: u8,
     pipe: UsbPipeAddress,
     buffer: *mut u8,
     buffer_length: u32,
     packet_id: PacketId,
     _timeout_: u32,
+    callback: fn(endpoint_descriptor, u32),
+    endpoint: endpoint_descriptor,
 ) -> ResultCode {
+    let mut available_channel = dwc_otg_get_active_channel();
+    while available_channel == ChannelCount as u8 {
+        available_channel = dwc_otg_get_active_channel();
+    } //TODO: Make a queue system instead of busy waiting
+
+    let new_endpoint = endpoint_descriptor {
+        channel: available_channel,
+        ..endpoint
+    }; //TODO: make a better way to do edit endpoint
+
+    unsafe {
+        DWC_CHANNEL_CALLBACK.callback[available_channel as usize] = Some(callback);
+        DWC_CHANNEL_CALLBACK.endpoint_descriptors[available_channel as usize] = Some(new_endpoint);
+    }
+
     let result = unsafe {
-        HcdSubmitInterruptMessage(device, channel, pipe, buffer, buffer_length, packet_id)
+        HcdSubmitInterruptMessage(
+            device,
+            available_channel,
+            pipe,
+            buffer,
+            buffer_length,
+            packet_id,
+        )
     };
 
     if result != ResultCode::OK {

@@ -385,7 +385,6 @@ pub unsafe fn rndis_send_packet(
     let result = unsafe {
         UsbBulkMessage(
             device,
-            2,
             UsbPipeAddress {
                 transfer_type: UsbTransfer::Bulk,
                 speed: device.speed,
@@ -419,7 +418,6 @@ pub unsafe fn rndis_receive_packet(
     let result = unsafe {
         UsbBulkMessage(
             device,
-            3,
             UsbPipeAddress {
                 transfer_type: UsbTransfer::Bulk,
                 speed: device.speed,
