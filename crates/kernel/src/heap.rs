@@ -38,24 +38,22 @@ unsafe impl GlobalAlloc for BumpAllocator {
         assert!(!base.is_null());
 
         let mut cur = self.offset.load(Ordering::Relaxed);
+        let max = self.max.load(Ordering::Relaxed);
 
         let start = loop {
-            let res = self.offset.compare_exchange(
-                cur,
-                cur.next_multiple_of(align) + size,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            );
+            let new = (|| {
+                let aligned = cur.checked_next_multiple_of(align)?;
+                let end = aligned.checked_add(size)?;
+                (end < max).then_some(end)
+            })();
+            let new = new.unwrap_or_else(|| handle_alloc_error(layout));
+            let ord = Ordering::Relaxed;
+            let res = self.offset.compare_exchange(cur, new, ord, ord);
             match res {
                 Ok(start) => break start,
                 Err(new) => cur = new,
             }
         };
-
-        let max = self.max.load(Ordering::SeqCst);
-        if start.next_multiple_of(align) + size >= max {
-            handle_alloc_error(layout);
-        }
 
         let alloc_offset = start.next_multiple_of(align);
         unsafe { base.byte_add(alloc_offset) }

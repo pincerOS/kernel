@@ -46,13 +46,20 @@ kernel_entry:
     b.ne 1b
 
 
-    // set kernel 2mb mapping
+    // fill initial page table with 16 2mb pages for the kernel
+    ldr x6, ={TRANSLATION_ENTRY}
     adr x5, kernel_entry
     bfc x5, 0, 21 // clears low bits to mask entry to 2MB page boundary
-    ldr x6, ={TRANSLATION_ENTRY}
     orr x5, x5, x6 // apply rounded physical address to the translation entry
-    adr x6, KERNEL_TRANSLATION_TABLE
-    str x5, [x6]
+    adrl x6, KERNEL_TRANSLATION_TABLE
+    add x7, x6, #16 * 8
+
+    str x5, [x6], #8
+
+1:  add x5, x5, #1 << 21
+    str x5, [x6], #8
+    cmp x6, x7
+    b.ne 1b
 
     ldr w4, [x0, 4] // load size of DTB (as big-endian u32) into register for memory mapping in rust code
 
@@ -92,7 +99,7 @@ drop_to_el1:
     msr SCTLR_EL1, x5
     ldr x5, ={TCR_EL1}
     msr TCR_EL1, x5
-    adr x5, KERNEL_TRANSLATION_TABLE
+    adrl x5, KERNEL_TRANSLATION_TABLE
     msr TTBR1_EL1, x5
     ldr x5, =0b010001000000000011111111 // Entry 0 is normal memory, entry 1 is device memory, 2 = normal noncacheable memory
     msr MAIR_EL1, x5

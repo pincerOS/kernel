@@ -1,4 +1,5 @@
 pub mod machine;
+pub mod palloc;
 pub mod vmm;
 
 use core::arch::asm;

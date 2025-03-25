@@ -1,15 +1,13 @@
-use crate::sync::UnsafeInit;
 use alloc::boxed::Box;
 use core::{
     arch::asm,
     fmt::{Display, Formatter},
-    mem::MaybeUninit,
-    ptr::{self, addr_of, NonNull},
-    sync::atomic::{AtomicUsize, Ordering},
+    ptr::{addr_of, NonNull},
 };
 
 use super::{
     machine::{LeafDescriptor, TableDescriptor, TranslationDescriptor},
+    palloc::{PAddr, PhysicalPage, PAGE_ALLOCATOR},
     physical_addr,
 };
 
@@ -32,72 +30,28 @@ pub struct UserTranslationTable(pub [TranslationDescriptor; 16]);
 #[repr(C, align(4096))]
 pub struct UserLeafTable(pub [LeafDescriptor; USER_LEAF_TABLE_SIZE]);
 
-fn virt_addr_base() -> NonNull<()> {
-    NonNull::new(ptr::with_exposed_provenance_mut(0xFFFF_FFFF_FE00_0000)).unwrap()
-}
-
 #[allow(improper_ctypes)]
 unsafe extern "C" {
-    static __rpi_phys_binary_end_addr: ();
+    pub static mut __rpi_virt_base: ();
+    pub static mut __rpi_phys_binary_start_addr: ();
+    pub static mut __rpi_virt_binary_start_addr: ();
+    pub static mut __rpi_phys_binary_end_addr: ();
+    pub static mut __rpi_virt_binary_end_addr: ();
 }
 
-//1000 pages
-#[repr(C, align(4096))]
-struct BigTable([u8; PG_SZ * 1000]);
-
-//Logic for current frame allocator:
-//va to pa: va - page allocator va + page allocator pa
-//pa to va: pa - page allocator pa + page allocator va
-//This is the logic for the current intermediate page allocator
-struct PageAlloc {
-    table_va: usize,
-    table_pa: usize,
-    alloc_offset: AtomicUsize,
-}
-
-impl PageAlloc {
-    fn new(ptr_to_table: *const BigTable) -> PageAlloc {
-        PageAlloc {
-            table_va: ptr_to_table as usize,
-            table_pa: physical_addr(ptr_to_table.addr()).unwrap() as usize,
-            alloc_offset: AtomicUsize::new(0),
-        }
-    }
-
-    /// Allocates a page of memory to be used for page tables
-    /// Returns a tuple, where the first value is the virtual address of the page and the second is
-    /// the physical address of the page
-    fn alloc_frame(&self) -> (usize, usize) {
-        let va: usize = self.table_va + self.alloc_offset.fetch_add(PG_SZ, Ordering::Relaxed);
-        let pa: usize = va - self.table_va + self.table_pa;
-        (va, pa)
-    }
-}
-
-unsafe fn kernel_paddr_to_vaddr(paddr: usize) -> *mut () {
-    core::ptr::with_exposed_provenance_mut(paddr + (virt_addr_base().as_ptr() as usize))
-}
-
-static PAGE_ALLOCATOR: UnsafeInit<PageAlloc> = unsafe { UnsafeInit::uninit() };
-
-static PHYSICAL_ALLOC_BASE: AtomicUsize = AtomicUsize::new(0);
-
-unsafe fn init_page_allocator() {
-    let mut data_box: Box<MaybeUninit<BigTable>> = Box::new_uninit();
-    unsafe { core::ptr::write_bytes(data_box.as_mut_ptr(), 0, 1) }; // zero the region
-    let data_ptr: *const BigTable = Box::into_raw(data_box).cast::<BigTable>();
-    unsafe { PAGE_ALLOCATOR.init(PageAlloc::new(data_ptr)) };
+fn virt_addr_base() -> NonNull<()> {
+    NonNull::new(&raw mut __rpi_virt_base).unwrap()
 }
 
 pub unsafe fn init_physical_alloc() {
     // TODO: proper physical memory layout documentation
+    // Assume 1 GiB available; TODO: discover memory topology
     let base = 0x20_0000 * 16;
-    PHYSICAL_ALLOC_BASE.store(base, Ordering::SeqCst);
-
-    unsafe { init_page_allocator() };
+    let end = 1 << 30;
+    unsafe { super::palloc::init_physical_alloc(base, end) };
 }
 
-pub fn create_user_table(phys_base: usize) -> alloc::boxed::Box<UserTranslationTable> {
+pub fn create_user_table(phys_base: PAddr) -> alloc::boxed::Box<UserTranslationTable> {
     let mut table = alloc::boxed::Box::new(UserTranslationTable(
         [TranslationDescriptor {
             table: TableDescriptor::empty(),
@@ -105,7 +59,7 @@ pub fn create_user_table(phys_base: usize) -> alloc::boxed::Box<UserTranslationT
     ));
     let root_region_size = 0x20_0000; // 2 MiB
     for (i, desc) in table.0[1..8].iter_mut().enumerate() {
-        let phys_frame = phys_base + root_region_size * i;
+        let phys_frame = phys_base.0 + root_region_size * i;
         let leaf = LeafDescriptor::new(phys_frame)
             // .clear_pxn()
             .union(LeafDescriptor::UNPRIVILEGED_ACCESS)
@@ -126,7 +80,7 @@ pub unsafe fn create_user_region() -> (*mut [u8], Box<UserTranslationTable>) {
     let virt_region_base = 0x20_0000;
     let region_size = 0x20_0000 * 7;
 
-    let phys_base = PHYSICAL_ALLOC_BASE.fetch_add(region_size, Ordering::Relaxed);
+    let (phys_base, _) = PAGE_ALLOCATOR.get().alloc_range(region_size, 0x20_0000);
 
     let user_table = create_user_table(phys_base);
     let user_table_vaddr = (&*user_table as *const UserTranslationTable).addr();
@@ -259,8 +213,11 @@ pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> Result<(), MappingErr
 //TODO: in the future, change this to take in a mutable reference to the user translation table
 //instead of just ttrb0
 pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result<(), MappingError> {
-    let translation_table: &mut UserTranslationTable =
-        unsafe { &mut *kernel_paddr_to_vaddr(ttbr0_pa).cast::<UserTranslationTable>() };
+    let translation_table = PAGE_ALLOCATOR
+        .get()
+        .get_mapped_frame(PhysicalPage::new(PAddr(ttbr0_pa)))
+        .cast::<UserTranslationTable>();
+    let translation_table = unsafe { &mut *translation_table };
 
     //TODO: stop using these constants
     let mut index_bits = 25 - 21; //mildly redundant
@@ -271,9 +228,9 @@ pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result
 
     //Need to insert new page table
     if !table_descriptor.is_valid() {
-        let (_pt_va, pt_pa) = PAGE_ALLOCATOR.get().alloc_frame();
+        let frame = PAGE_ALLOCATOR.get().alloc_mapped_frame();
         translation_table.0[table_index] = TranslationDescriptor {
-            table: TableDescriptor::new(pt_pa),
+            table: TableDescriptor::new(frame.paddr),
         };
         //Need to update table descriptor being used so that leaf insertion can occur
         table_descriptor = unsafe { translation_table.0[table_index].table };
@@ -284,8 +241,10 @@ pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result
 
     //Regular page case
     let lvl3_pa: usize = table_descriptor.get_pa() << 12;
-    let lvl3_va: usize = lvl3_pa - PAGE_ALLOCATOR.get().table_pa + PAGE_ALLOCATOR.get().table_va;
-    let lvl3_table_ptr: *mut [LeafDescriptor; PG_SZ] = lvl3_va as *mut [LeafDescriptor; PG_SZ];
+    let lvl3_table_ptr = PAGE_ALLOCATOR
+        .get()
+        .get_mapped_frame(PhysicalPage::new(PAddr(lvl3_pa)))
+        .cast::<[LeafDescriptor; PG_SZ / size_of::<LeafDescriptor>()]>();
 
     index_bits = 21 - 12;
     mask = (1 << index_bits) - 1;

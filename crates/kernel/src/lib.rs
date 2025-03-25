@@ -46,8 +46,11 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     let id = arch::core_id() & 3;
 
     // TODO: proper heap allocator, and physical memory allocation for heap space
-    let heap_base = 0xFFFF_FFFF_FE20_0000 as *mut ();
-    unsafe { heap::ALLOCATOR.init(heap_base, 0x20_0000 * 13) };
+    let heap_base = &raw mut arch::memory::vmm::__rpi_virt_binary_end_addr;
+    let heap_end = (&raw mut arch::memory::vmm::__rpi_virt_base).wrapping_byte_add(0x20_0000 * 14);
+    let heap_size = unsafe { heap_end.byte_offset_from(heap_base) };
+
+    unsafe { heap::ALLOCATOR.init(heap_base, heap_size as usize) };
 
     let device_tree_base = unsafe { memory::map_physical(x0 as usize, u32::from_be(x4) as usize) };
     let device_tree_base = device_tree_base.as_ptr().cast_const().cast();

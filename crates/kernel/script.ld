@@ -49,7 +49,7 @@ SECTIONS {
 
     __data_start = .;
     .rodata : ALIGN(8) { *(.rodata*) } :segment_data
-    .dataaa : ALIGN(8) {
+    .data : ALIGN(8) {
         *(.data)
         *(.data.*)
     } :segment_data
