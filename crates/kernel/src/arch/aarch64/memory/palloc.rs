@@ -319,7 +319,7 @@ impl BuddyAllocator {
     }
 
     fn level_for_size(&self, size: usize) -> Option<usize> {
-        let alloc_size = size.next_power_of_two().min(self.min_size);
+        let alloc_size = size.next_power_of_two().clamp(self.min_size, usize::MAX);
         self.size_log2.checked_sub(alloc_size.ilog2() as usize)
     }
 
@@ -417,7 +417,7 @@ impl BuddyAllocator {
     }
 
     pub fn alloc(&mut self, size: usize, align: usize) -> Option<usize> {
-        let size = size.min(align); // TODO: ensure base is aligned
+        let size = size.clamp(align, usize::MAX);
         let level = self.level_for_size(size)?;
         let idx = self.alloc_at_level(level)?;
         let ptr = self.idx_addr(idx, level);
@@ -425,7 +425,7 @@ impl BuddyAllocator {
     }
 
     pub fn free(&mut self, ptr: usize, size: usize, align: usize) {
-        let size = size.min(align);
+        let size = size.clamp(align, usize::MAX);
         let level = self.level_for_size(size).unwrap();
         let idx = self.addr_idx(ptr, level);
         self.free_block(idx);
