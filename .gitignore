@@ -1,6 +1,8 @@
 /target
 kernel.bin
 kernel.elf
+mmapTest.bin
+mmapTest.elf
 .gdb_history
 .vscode
 .idea

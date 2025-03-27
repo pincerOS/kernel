@@ -41,6 +41,10 @@ jobs:
       - name: build init
         working-directory: ./crates/init
         run: ./build.sh
+      
+      - name: build mmapTest
+        working-directory: ./crates/mmapTest
+        run: ./build.sh
 
       - name: cargo check
         run: cargo hack check --workspace --tests --examples --target=aarch64-unknown-linux-gnu

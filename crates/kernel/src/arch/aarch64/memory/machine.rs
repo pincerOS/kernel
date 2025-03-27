@@ -339,6 +339,10 @@ impl TableDescriptor {
         self.contains(Self::VALID)
     }
 
+    pub fn set_valid(&mut self, valid: bool) -> () {
+        self.set(Self::VALID, valid);
+    }
+
     // temporary, should be moved to more proper location
     pub const fn is_table_descriptor(self) -> bool {
         self.contains(Self::IS_TABLE_DESCRIPTOR)
@@ -371,12 +375,25 @@ impl LeafDescriptor {
             .union(Self::from_bits_retain(pa as u64))
     }
 
+    //usize or u64
+    pub const fn get_pa(self) -> usize {
+        return ((self.bits() >> 12) & ((1 << 36) - 1)) as usize;
+    }
+
     pub const fn clear_pxn(self) -> Self {
         self.difference(Self::PXN)
     }
 
     pub const fn is_valid(self) -> bool {
         self.contains(Self::VALID)
+    }
+
+    pub fn set_valid(&mut self, valid: bool) -> () {
+        self.set(Self::VALID, valid);
+    }
+
+    pub fn set_user_permissions(&mut self, val: bool) -> () {
+        self.set(Self::UNPRIVILEGED_ACCESS, val);
     }
 
     pub const fn set_mair(self, mair: u8) -> Self {

@@ -74,6 +74,15 @@ name = "lz4"
 version = "0.1.0"
 
 [[package]]
+name = "mmapTest"
+version = "0.1.0"
+dependencies = [
+ "elf",
+ "initfs",
+ "ulib",
+]
+
+[[package]]
 name = "smallbox"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
