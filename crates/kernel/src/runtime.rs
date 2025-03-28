@@ -1,5 +1,5 @@
-#[cfg(not(test))]
-#[panic_handler]
+#[cfg_attr(not(any(test, doc)), panic_handler)]
+#[allow(dead_code)]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     use crate::arch::halt;
     use crate::uart;
@@ -21,6 +21,12 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
             info.message()
         );
     }
+
     // TODO: write error message to a fixed location in memory and reset?
+    {
+        // Shut down the system
+        let mut watchdog = crate::device::WATCHDOG.get().lock();
+        unsafe { watchdog.reset(63) };
+    }
     halt();
 }

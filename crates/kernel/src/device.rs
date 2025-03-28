@@ -94,13 +94,24 @@ pub static WATCHDOG: UnsafeInit<SpinLock<watchdog::bcm2835_wdt_driver>> =
 type InitTask = Box<dyn Fn() + Send + Sync>;
 pub static PER_CORE_INIT: UnsafeInit<Vec<InitTask>> = unsafe { UnsafeInit::uninit() };
 
+pub static MAILBOX: UnsafeInit<SpinLock<mailbox::VideoCoreMailbox>> = unsafe { UnsafeInit::uninit() };
+
 pub static GPIO: UnsafeInit<SpinLock<gpio::bcm2711_gpio_driver>> = unsafe { UnsafeInit::uninit() };
 
-pub static SD: UnsafeInit<SpinLock<sdcard::bcm2711_sdhci_driver>> = unsafe { UnsafeInit::uninit() };
+pub static SD: UnsafeInit<SpinLock<sdcard::bcm2711_emmc2_driver>> = unsafe { UnsafeInit::uninit() };
 
 pub fn init_devices(tree: &DeviceTree<'_>) {
     let mut init_fns: Vec<InitTask> = Vec::new();
-
+    {
+        let mailbox = discover_compatible(&tree, b"brcm,bcm2835-mbox")
+            .unwrap()
+            .next()
+            .unwrap();
+        let (mailbox_addr, _) = find_device_addr(mailbox).unwrap().unwrap();
+        let mailbox_base = unsafe { map_device(mailbox_addr) }.as_ptr();
+        let mut mailbox = unsafe { mailbox::VideoCoreMailbox::init(mailbox_base) };
+        unsafe { MAILBOX.init(SpinLock::new(mailbox)) };
+    }
     let mut uarts = discover_compatible(tree, b"arm,pl011").unwrap();
     {
         let uart = uarts.next().unwrap();
@@ -205,7 +216,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let sdcard_base = unsafe { map_device(sdcard_addr) }.as_ptr();
         println!("| SD Card controller addr: {:#010x}", sdcard_addr as usize);
         println!("| SD Card controller base: {:#010x}", sdcard_base as usize);
-        let sdcard = unsafe { sdcard::bcm2711_sdhci_driver::init(sdcard_base) };
+        let sdcard = unsafe { sdcard::bcm2711_emmc2_driver::init(sdcard_base) };
         unsafe { SD.init(SpinLock::new(sdcard)) };
         println!("| initialized SD Card");
     }

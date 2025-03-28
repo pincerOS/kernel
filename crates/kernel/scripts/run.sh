@@ -4,9 +4,9 @@ set -e
 
 # Check if sdcard.img exists, create it if not
 if [ ! -f sdcard.img ]; then
-    echo "Creating SD card image (64MB)"
-    dd if=/dev/zero of=sdcard.img bs=1M count=64
-    mkfs.vfat sdcard.img
+    echo "Creating SD card image"
+    dd if=/dev/zero of=sdcard.img bs=1M count=4096
+    mkfs.fat -F 32 sdcard.img
     echo "SD card image created."
 fi
 
@@ -45,8 +45,10 @@ fi
 qemu-system-aarch64 \
     ${QEMU_TARGET_HARDWARE} \
     -kernel kernel.bin \
-    -serial stdio \
+    # -serial stdio \
     -display "${QEMU_DISPLAY}" \
+    -sd sdcard.img \
+    -monitor stdio \
     "${QEMU_DEBUG_PFX}" "${QEMU_DEBUG}" \
-    ${DEBUG_ARGS} \
-    -drive file=sdcard.img,format=raw,if=sd
+    ${DEBUG_ARGS}
+    

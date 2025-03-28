@@ -155,8 +155,8 @@ impl bcm2711_gpio_driver {
             val &= !(0b111 << shift); // Clear current function bits
             val |= (function as u32) << shift;
             reg_fsel.write(val);
-            #[cfg(debug_assertions)]
-            print!("| GPIO -- Wrote {:#010b}, to register GPFSEL{index}, function: {:?} for pin {pin}\n", val, function);
+            // #[cfg(debug_assertions)]
+            // print!("| GPIO -- Wrote {:#010b}, to register GPFSEL{index}, function: {:?} for pin {pin}\n", val, function);
         }
     }
 

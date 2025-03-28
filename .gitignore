@@ -6,3 +6,4 @@ kernel.elf
 .DS_Store
 *.tmp.*
 sdcard.img
+sdcard.dd
