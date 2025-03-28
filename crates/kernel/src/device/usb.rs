@@ -7,8 +7,8 @@ pub mod types;
 pub mod usbd;
 
 pub use device::hid::keyboard;
+pub use device::hid::mouse;
 
-use device::hid::mouse::Mouse;
 use device::net::NetSendPacket;
 use device::net::RegisterNetReceiveCallback;
 
@@ -32,10 +32,6 @@ pub fn usb_init(base_addr: *mut ()) -> UsbBus {
 
 pub fn usb_check_for_change(_bus: &mut UsbBus) {
     // UsbCheckForChange(bus);
-}
-
-pub fn usb_retrieve_mouse() -> Mouse {
-    return device::hid::mouse::MouseActions.lock().clone();
 }
 
 pub fn usb_register_net_callback(callback: fn(*mut u8, u32)) {
