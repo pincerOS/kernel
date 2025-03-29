@@ -286,8 +286,8 @@ impl VideoCoreMailbox {
 
         // let width = 640;
         // let height = 480;
-        let width = 1280;
-        let height = 720;
+        let width = 1920;
+        let height = 1080;
 
         const BUFFER_WORDS: usize = 64;
         let mut buffer = [0u128; BUFFER_WORDS / 4];
@@ -338,7 +338,21 @@ impl VideoCoreMailbox {
 
         let words: &[u32; BUFFER_WORDS] =
             bytemuck::cast_slice::<_, u32>(&buffer).try_into().unwrap();
-        // println!("{:?}", words);
+
+        println!("{:?}", words);
+        let mut tag_start = 2;
+        loop {
+            let tag = words[tag_start];
+            println!("Tag: {:#x}", tag);
+            if tag == 0 {
+                break;
+            }
+            let buf_size = words[tag_start + 1];
+            let code = words[tag_start + 2];
+            println!("Code: {:#x}", code);
+            println!("Size: {:#x}", buf_size);
+            tag_start = tag_start + 3 + (buf_size as usize).div_ceil(4);
+        }
 
         let response = words[1];
 
@@ -451,10 +465,10 @@ impl Surface {
         // Force writes to go through
         core::hint::black_box(&mut *self.buffer);
     }
-    pub fn wait_for_frame(&self) {
+    pub async fn wait_for_frame(&self) {
         // TODO: proper vsync IRQs?
         let now = crate::sync::get_time();
-        crate::sync::spin_sleep_until(now.next_multiple_of(self.time_step));
+        crate::sync::time::sleep_until(now.next_multiple_of(self.time_step) as u64).await;
     }
 }
 

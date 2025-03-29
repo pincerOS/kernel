@@ -19,14 +19,13 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
             let b: alloc::sync::Arc<sync::Barrier> = barrier.clone();
             task::spawn_async(async move {
                 println!("Starting thread {i}");
-                // TODO: non-spinning sleep
-                sync::spin_sleep(500_000);
+                sync::time::sleep(500_000).await;
                 println!("Ending thread {i}");
                 b.sync().await;
             });
         }
         barrier.sync().await;
-        println!("End of preemption test");
+        println!("End of async sleep scheduling test");
         shutdown();
     });
 

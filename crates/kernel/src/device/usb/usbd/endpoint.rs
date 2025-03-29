@@ -10,7 +10,7 @@ use super::super::types::*;
 use super::device::*;
 use super::pipe::*;
 
-use crate::device::system_timer::*;
+use crate::device::system_timer::timer_scheduler_add_timer_event;
 use crate::device::usb::dwc_hub;
 use crate::device::usb::hcd::dwc::dwc_otg::HcdUpdateTransferSize;
 use crate::device::usb::hcd::dwc::dwc_otgreg::HCINT_CHHLTD;
@@ -18,6 +18,7 @@ use crate::device::usb::hcd::dwc::dwc_otgreg::HCINT_NAK;
 use crate::device::usb::hcd::dwc::dwc_otgreg::HCINT_XFERCOMPL;
 use crate::device::usb::PacketId;
 use crate::device::usb::UsbInterruptMessage;
+use crate::event::schedule;
 use crate::event::schedule_rt;
 use crate::shutdown;
 use alloc::boxed::Box;
@@ -146,10 +147,6 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
     }
 }
 
-pub fn schedule_interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
-    schedule_rt(move || interrupt_endpoint_callback(endpoint));
-}
-
 pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
     let device = unsafe { &mut *endpoint.device };
     let pipe = UsbPipeAddress {
@@ -219,11 +216,24 @@ pub fn register_interrupt_endpoint(
         timeout: timeout,
     };
 
-    timer_scheduler_add_timer_event(
-        endpoint_time,
-        schedule_interrupt_endpoint_callback,
-        endpoint,
-    );
+    // fn schedule_interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
+    //     schedule(move || {
+    //         interrupt_endpoint_callback(endpoint)
+    //     });
+    // }
+
+    // timer_scheduler_add_timer_event(
+    //     endpoint_time,
+    //     schedule_interrupt_endpoint_callback,
+    //     endpoint,
+    // );
+
+    crate::event::task::spawn_async(async move {
+        let mut interval = crate::sync::time::SCHEDULER.interval(endpoint_time as u64 * 1000);
+        while interval.tick().await {
+            interrupt_endpoint_callback(endpoint);
+        }
+    });
 }
 
 #[derive(Copy, Clone)]
