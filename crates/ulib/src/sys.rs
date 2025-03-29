@@ -121,6 +121,10 @@ unsafe extern "C" {
 
 syscall!(25 => pub fn sys_poll_key_event() -> isize);
 
+syscall!(26 => pub fn sys_sem_create(value: usize) -> isize);
+syscall!(27 => pub fn sys_sem_up(fd: usize) -> isize);
+syscall!(28 => pub fn sys_sem_down(fd: usize) -> isize);
+
 /* * * * * * * * * * * * * * * * * * * */
 /* Syscall wrappers                    */
 /* * * * * * * * * * * * * * * * * * * */
@@ -282,4 +286,17 @@ pub unsafe fn mmap(
 pub unsafe fn munmap(addr: *mut ()) -> Result<usize, usize> {
     let res = unsafe { sys_munmap(addr.addr()) };
     int_to_error(res)
+}
+
+pub fn sem_create(value: usize) -> Result<FileDesc, usize> {
+    let res = unsafe { sys_sem_create(value) };
+    int_to_error(res).map(|f| f as FileDesc)
+}
+pub fn sem_up(fd: FileDesc) -> Result<(), usize> {
+    let res = unsafe { sys_sem_up(fd as usize) };
+    int_to_error(res).map(|_| ())
+}
+pub fn sem_down(fd: FileDesc) -> Result<(), usize> {
+    let res = unsafe { sys_sem_down(fd as usize) };
+    int_to_error(res).map(|_| ())
 }
