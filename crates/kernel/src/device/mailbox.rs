@@ -451,10 +451,10 @@ impl Surface {
         // Force writes to go through
         core::hint::black_box(&mut *self.buffer);
     }
-    pub fn wait_for_frame(&self) {
+    pub async fn wait_for_frame(&self) {
         // TODO: proper vsync IRQs?
         let now = crate::sync::get_time();
-        crate::sync::spin_sleep_until(now.next_multiple_of(self.time_step));
+        crate::sync::time::sleep_until(now.next_multiple_of(self.time_step) as u64).await;
     }
 }
 

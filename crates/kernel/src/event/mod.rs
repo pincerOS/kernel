@@ -77,6 +77,24 @@ pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
     //    - return to running the event loop
     // - otherwise, do nothing
 
+    if crate::sync::time::TIMER_SCHEDULER.is_ready() {
+        // TODO: wait-free schedule here?
+        // TODO: guarantee no allocation at compile time
+
+        const fn guarantee_zst<T>(t: T) -> T {
+            assert!(size_of::<T>() == 0);
+            t
+        }
+        let callback = const {
+            guarantee_zst(|| {
+                crate::sync::time::TIMER_SCHEDULER.run();
+            })
+        };
+        let callback = Box::new(callback);
+        assert_eq!(size_of_val(&*callback), 0);
+        SCHEDULER.add_task(Event::Function(callback));
+    }
+
     let thread = CORES.with_current(|core| core.thread.take());
 
     let Some(mut thread) = thread else {

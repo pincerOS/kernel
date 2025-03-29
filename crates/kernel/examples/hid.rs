@@ -5,14 +5,20 @@ extern crate alloc;
 extern crate kernel;
 
 use device::usb::mouse::{MouseEvent, MOUSE_EVENTS};
-use kernel::device::system_timer::micro_delay;
 use kernel::device::usb::keyboard::Key;
 use kernel::*;
+use sync::time::sleep;
 
 #[no_mangle]
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
+    crate::event::task::spawn_async(async move {
+        main().await;
+    });
+    crate::event::thread::stop();
+}
 
+async fn main() {
     //Basic mouse & keyboard test
     let mut cur_x = 0;
     let mut cur_y = 0;
@@ -51,6 +57,6 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
                 }
             }
         }
-        micro_delay(10000);
+        sleep(10000).await;
     }
 }
