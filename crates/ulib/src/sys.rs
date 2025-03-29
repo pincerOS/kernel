@@ -121,6 +121,10 @@ unsafe extern "C" {
 
 syscall!(25 => pub fn sys_poll_key_event() -> isize);
 
+syscall!(26 => pub fn sys_sem_create(value: usize) -> isize);
+syscall!(27 => pub fn sys_sem_down(fd: usize) -> isize);
+syscall!(28 => pub fn sys_sem_up(fd: usize) -> isize);
+
 /* * * * * * * * * * * * * * * * * * * */
 /* Syscall wrappers                    */
 /* * * * * * * * * * * * * * * * * * * */

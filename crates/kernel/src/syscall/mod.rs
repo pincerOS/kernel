@@ -7,6 +7,7 @@ pub mod file;
 pub mod mmap;
 pub mod pipe;
 pub mod proc;
+pub mod semaphore;
 pub mod sync;
 pub mod time;
 
@@ -37,5 +38,9 @@ pub unsafe fn register_syscalls() {
 
         register_syscall_handler(23, fb_hack::sys_acquire_fb);
         register_syscall_handler(25, fb_hack::sys_poll_key_event);
+
+        register_syscall_handler(26, semaphore::sys_sem_create);
+        register_syscall_handler(27, semaphore::sys_sem_up);
+        register_syscall_handler(28, semaphore::sys_sem_down);
     }
 }

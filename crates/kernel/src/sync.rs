@@ -6,6 +6,7 @@ pub mod init;
 pub mod lock;
 pub mod once_cell;
 pub mod per_core;
+pub mod semaphore;
 pub mod time;
 
 pub use crate::arch::interrupts;
