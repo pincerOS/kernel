@@ -103,10 +103,10 @@ pub unsafe fn UsbBulkMessage(
 
         if pipe.direction == UsbDirection::Out {
             DWC_CHANNEL_CALLBACK.callback[available_channel as usize] =
-                Some(finish_bulk_endpoint_callback_out);
+                Some(schedule_finish_bulk_endpoint_callback_out);
         } else {
             DWC_CHANNEL_CALLBACK.callback[available_channel as usize] =
-                Some(finish_bulk_endpoint_callback_in);
+                Some(schedule_finish_bulk_endpoint_callback_in);
         }
     }
 

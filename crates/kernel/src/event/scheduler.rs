@@ -4,14 +4,21 @@ use crate::arch::{sev, wfe};
 use crate::sync::InterruptSpinLock;
 
 pub struct Scheduler<E> {
+    rt_queue: Queue<E>,
     queue: Queue<E>,
 }
 
 impl<E> Scheduler<E> {
     pub const fn new() -> Self {
         Scheduler {
+            rt_queue: Queue::new(),
             queue: Queue::new(),
         }
+    }
+    pub fn add_rt_task(&self, event: E) {
+        self.rt_queue.add(event);
+        // unblock WFEs on other cores
+        unsafe { sev() };
     }
     pub fn add_task(&self, event: E) {
         self.queue.add(event);
@@ -24,6 +31,9 @@ impl<E> Scheduler<E> {
 
     pub fn wait_for_task(&self) -> E {
         loop {
+            if let Some(c) = self.rt_queue.pop() {
+                break c;
+            }
             if let Some(c) = self.queue.pop() {
                 break c;
             }

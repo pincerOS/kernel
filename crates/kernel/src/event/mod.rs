@@ -26,6 +26,14 @@ where
     SCHEDULER.add_task(ev);
 }
 
+pub fn schedule_rt<F>(f: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    let ev = Event::Function(Box::new(f));
+    SCHEDULER.add_rt_task(ev);
+}
+
 pub unsafe extern "C" fn run_event_loop() -> ! {
     loop {
         let ev = SCHEDULER.wait_for_task();
