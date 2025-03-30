@@ -22,14 +22,6 @@ use crate::event::schedule_rt;
 use crate::shutdown;
 use alloc::boxed::Box;
 
-pub fn schedule_finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u32) {
-    schedule_rt(move || finish_bulk_endpoint_callback_in(endpoint, hcint));
-}
-
-pub fn schedule_finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u32) {
-    schedule_rt(move || finish_bulk_endpoint_callback_out(endpoint, hcint));
-}
-
 pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u32) {
     let device = unsafe { &mut *endpoint.device };
 
@@ -96,10 +88,6 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
     }
 
     //Good to go
-}
-
-pub fn schedule_finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: u32) {
-    schedule_rt(move || finish_interrupt_endpoint_callback(endpoint, hcint));
 }
 
 pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: u32) {
@@ -184,7 +172,7 @@ pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
             8,
             PacketId::Data0,
             endpoint.timeout,
-            schedule_finish_interrupt_endpoint_callback,
+            finish_interrupt_endpoint_callback,
             endpoint,
         )
     };
