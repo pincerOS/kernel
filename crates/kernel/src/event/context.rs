@@ -336,7 +336,7 @@ fn context_switch_inner(thread: Option<Box<Thread>>, action: SwitchAction<'_>) -
         match action {
             SwitchAction::Yield => {
                 // Re-schedule the thread
-                SCHEDULER.add_task(Event::ScheduleThread(thread))
+                SCHEDULER.add_task(Event::schedule_thread(thread))
             }
             SwitchAction::FreeThread => {
                 // Free the thread
@@ -346,7 +346,7 @@ fn context_switch_inner(thread: Option<Box<Thread>>, action: SwitchAction<'_>) -
                 // Add the thread to a queue, then unlock the lock.
 
                 let mut queue_inner = queue.0.lock();
-                queue_inner.push_back(Event::ScheduleThread(thread));
+                queue_inner.push_back(Event::schedule_thread(thread));
                 lock.unlock();
 
                 // TODO: unlocking this is risky, as it could be owned

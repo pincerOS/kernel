@@ -5,6 +5,7 @@ use core::ptr::NonNull;
 use crate::process::ProcessRef;
 
 use super::context::{context_switch, Context, SwitchAction, CORES};
+use super::scheduler::Priority;
 use super::{Event, SCHEDULER};
 
 /// A handle for a kernel or user thread, which owns its stack, and
@@ -19,6 +20,7 @@ pub struct Thread {
     pub context: Option<Context>,
     pub user_regs: Option<UserRegs>,
     pub process: Option<crate::process::ProcessRef>,
+    pub priority: Priority,
 }
 
 pub struct UserRegs {
@@ -65,6 +67,7 @@ impl Thread {
             spsr: 0b0000, // Run in EL0
             sp_el0: sp,
         };
+        let priority = Priority::Normal;
 
         let mut thread = Box::new(Thread {
             stack: (&mut [] as &mut [u128]).into(),
@@ -76,6 +79,7 @@ impl Thread {
                 usermode: true,
             }),
             process: Some(process),
+            priority,
         });
         thread.last_context = thread.context.as_mut().unwrap().into();
         thread
@@ -107,6 +111,8 @@ impl Thread {
         };
         unsafe { core::ptr::write(context.as_ptr(), data) };
 
+        let priority = Priority::Normal;
+
         Box::new(Thread {
             stack,
             last_context: context,
@@ -114,6 +120,7 @@ impl Thread {
             context: None,
             user_regs: None,
             process: None,
+            priority,
         })
     }
 
@@ -257,7 +264,7 @@ where
     let stack = NonNull::new(Box::into_raw(stack) as *mut [u128]).unwrap();
     let thread = unsafe { Thread::from_fn(stack, f) };
 
-    SCHEDULER.add_task(Event::ScheduleThread(thread));
+    SCHEDULER.add_task(Event::schedule_thread(thread));
 }
 
 #[unsafe(no_mangle)]

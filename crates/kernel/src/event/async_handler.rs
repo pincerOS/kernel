@@ -6,6 +6,7 @@ use core::task::Poll;
 use alloc::boxed::Box;
 
 use super::context::{enter_event_loop, Context, CORES};
+use super::scheduler::Priority;
 use super::{task, thread};
 use crate::event;
 
@@ -79,7 +80,8 @@ where
     let mut future = new_handler_future(thread, handler);
 
     let task_id = task::TASKS.alloc_task_slot();
-    let waker = task::create_waker(task_id);
+    let priority = Priority::Normal;
+    let waker = task::create_waker(task_id, priority);
     let mut context = core::task::Context::from_waker(&waker);
 
     // Run the handler future until it suspends once
@@ -115,9 +117,9 @@ where
                 let thread = unsafe { &mut *future.data.thread.get() }.as_mut().unwrap();
                 unsafe { thread.save_context(ctx, thread.is_kernel_thread()) };
 
-                let woken = task::TASKS.return_task(task_id, task::Task::new(future));
+                let woken = task::TASKS.return_task(task_id, task::Task::new(future, priority));
                 if woken {
-                    event::SCHEDULER.add_task(event::Event::AsyncTask(task_id));
+                    event::SCHEDULER.add_task(event::Event::async_task(task_id, priority));
                 }
 
                 // Switch back to the event loop.
@@ -160,7 +162,7 @@ impl<'outer> HandlerContext<'outer> {
             task::yield_future().await;
         } else {
             let thread = self.cur_thread_mut().take().unwrap();
-            event::SCHEDULER.add_task(event::Event::ScheduleThread(thread));
+            event::SCHEDULER.add_task(event::Event::schedule_thread(thread));
         }
         ResumedContext(())
     }
@@ -324,7 +326,7 @@ where
         let _context = core::task::ready!(inner.poll(ctx));
         if !this.data.in_handler.get() {
             let thread = unsafe { &mut *this.data.thread.get() }.take().unwrap();
-            event::SCHEDULER.add_task(event::Event::ScheduleThread(thread));
+            event::SCHEDULER.add_task(event::Event::schedule_thread(thread));
         }
         ().into()
     }

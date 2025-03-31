@@ -137,7 +137,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
 
     let user_thread = unsafe { thread::Thread::new_user(Arc::new(process), user_sp, user_entry) };
 
-    event::SCHEDULER.add_task(event::Event::ScheduleThread(user_thread));
+    event::SCHEDULER.add_task(event::Event::schedule_thread(user_thread));
 
     thread::stop();
 }

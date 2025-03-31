@@ -1,6 +1,7 @@
 use core::future::Future;
 
 use crate::event::context::{context_switch, SwitchAction};
+use crate::event::task::event_for_waker;
 use crate::event::{scheduler::Queue, Event, SCHEDULER};
 
 use super::lock::SpinLockGuard;
@@ -153,8 +154,8 @@ impl<T> Future for WaitFuture<'_, '_, T> {
             Some(guard) => {
                 // TODO: this is a hack that only works on our executor,
                 // and will break other async libraries
-                let task = crate::event::task::task_id_from_waker(ctx.waker()).unwrap();
-                self.this.queue.add(Event::AsyncTask(task));
+                let task = event_for_waker(ctx.waker()).unwrap();
+                self.this.queue.add(task);
                 drop(guard);
                 core::task::Poll::Pending
             }

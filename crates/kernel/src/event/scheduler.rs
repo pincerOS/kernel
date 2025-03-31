@@ -3,33 +3,39 @@ use alloc::collections::VecDeque;
 use crate::arch::{sev, wfe};
 use crate::sync::InterruptSpinLock;
 
-pub struct Scheduler<E> {
-    rt_queue: Queue<E>,
-    queue: Queue<E>,
+use super::Event;
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Priority {
+    Normal,
+    Realtime,
 }
 
-impl<E> Scheduler<E> {
+pub struct Scheduler {
+    rt_queue: Queue<Event>,
+    queue: Queue<Event>,
+}
+
+impl Scheduler {
     pub const fn new() -> Self {
         Scheduler {
             rt_queue: Queue::new(),
             queue: Queue::new(),
         }
     }
-    pub fn add_rt_task(&self, event: E) {
-        self.rt_queue.add(event);
+    pub fn add_task(&self, event: Event) {
+        match event.priority {
+            Priority::Normal => self.queue.add(event),
+            Priority::Realtime => self.rt_queue.add(event),
+        }
         // unblock WFEs on other cores
         unsafe { sev() };
     }
-    pub fn add_task(&self, event: E) {
-        self.queue.add(event);
-        // unblock WFEs on other cores
-        unsafe { sev() };
-    }
-    pub fn add_all(&self, queue: &Queue<E>) {
+    pub fn add_all(&self, queue: &Queue<Event>) {
         self.queue.0.lock().append(&mut *queue.0.lock());
     }
 
-    pub fn wait_for_task(&self) -> E {
+    pub fn wait_for_task(&self) -> Event {
         loop {
             if let Some(c) = self.rt_queue.pop() {
                 break c;
@@ -62,6 +68,6 @@ impl<E> Queue<E> {
     }
 }
 
-unsafe impl<E> Sync for Scheduler<E> where E: Send {}
+unsafe impl Sync for Scheduler where Event: Send {}
 unsafe impl<E> Send for Queue<E> where E: Send {}
 unsafe impl<E> Sync for Queue<E> where E: Send {}

@@ -68,7 +68,7 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
     );
     let mut user_thread = unsafe { thread::Thread::new_user(process, user_sp, user_entry) };
     user_thread.context.as_mut().unwrap().regs[0] = user_x0;
-    event::SCHEDULER.add_task(event::Event::ScheduleThread(user_thread));
+    event::SCHEDULER.add_task(event::Event::schedule_thread(user_thread));
 
     ctx.regs[0] = wait_fd;
     ctx

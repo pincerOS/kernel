@@ -8,11 +8,37 @@ pub mod thread;
 use alloc::boxed::Box;
 
 use context::{deschedule_thread, Context, DescheduleAction, CORES};
-use scheduler::Scheduler;
+use scheduler::{Priority, Scheduler};
 
-pub static SCHEDULER: Scheduler<Event> = Scheduler::new();
+pub static SCHEDULER: Scheduler = Scheduler::new();
 
-pub enum Event {
+pub struct Event {
+    pub priority: Priority,
+    pub kind: EventKind,
+}
+
+impl Event {
+    pub fn function(f: Box<dyn FnOnce() + Send + 'static>, priority: Priority) -> Self {
+        Self {
+            priority,
+            kind: EventKind::Function(f),
+        }
+    }
+    pub fn async_task(task: task::TaskId, priority: Priority) -> Self {
+        Self {
+            priority,
+            kind: EventKind::AsyncTask(task),
+        }
+    }
+    pub fn schedule_thread(thread: Box<thread::Thread>) -> Self {
+        Self {
+            priority: thread.priority,
+            kind: EventKind::ScheduleThread(thread),
+        }
+    }
+}
+
+pub enum EventKind {
     Function(Box<dyn FnOnce() + Send + 'static>),
     AsyncTask(task::TaskId),
     ScheduleThread(Box<thread::Thread>),
@@ -22,7 +48,7 @@ pub fn schedule<F>(f: F)
 where
     F: FnOnce() + Send + 'static,
 {
-    let ev = Event::Function(Box::new(f));
+    let ev = Event::function(Box::new(f), Priority::Normal);
     SCHEDULER.add_task(ev);
 }
 
@@ -30,21 +56,21 @@ pub fn schedule_rt<F>(f: F)
 where
     F: FnOnce() + Send + 'static,
 {
-    let ev = Event::Function(Box::new(f));
-    SCHEDULER.add_rt_task(ev);
+    let ev = Event::function(Box::new(f), Priority::Realtime);
+    SCHEDULER.add_task(ev);
 }
 
 pub unsafe extern "C" fn run_event_loop() -> ! {
     loop {
         let ev = SCHEDULER.wait_for_task();
-        match ev {
-            Event::Function(func) => {
+        match ev.kind {
+            EventKind::Function(func) => {
                 func();
             }
-            Event::ScheduleThread(thread) => {
+            EventKind::ScheduleThread(thread) => {
                 unsafe { thread.enter_thread() };
             }
-            Event::AsyncTask(task_id) => {
+            EventKind::AsyncTask(task_id) => {
                 run_async_task(task_id);
             }
         }
@@ -52,10 +78,11 @@ pub unsafe extern "C" fn run_event_loop() -> ! {
 }
 
 fn run_async_task(task_id: task::TaskId) {
-    let waker = task::create_waker(task_id);
-    let mut context = core::task::Context::from_waker(&waker);
-
     if let Some(mut task) = task::TASKS.take_task(task_id) {
+        let priority = task.priority;
+        let waker = task::create_waker(task_id, priority);
+        let mut context = core::task::Context::from_waker(&waker);
+
         match task.poll(&mut context) {
             core::task::Poll::Ready(()) => {
                 task::TASKS.remove_task(task_id);
@@ -63,7 +90,7 @@ fn run_async_task(task_id: task::TaskId) {
             core::task::Poll::Pending => {
                 let woken = task::TASKS.return_task(task_id, task);
                 if woken {
-                    SCHEDULER.add_task(Event::AsyncTask(task_id));
+                    SCHEDULER.add_task(Event::async_task(task_id, priority));
                 }
             }
         }
@@ -92,7 +119,7 @@ pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
         };
         let callback = Box::new(callback);
         assert_eq!(size_of_val(&*callback), 0);
-        SCHEDULER.add_task(Event::Function(callback));
+        SCHEDULER.add_task(Event::function(callback, Priority::Realtime));
     }
 
     let thread = CORES.with_current(|core| core.thread.take());

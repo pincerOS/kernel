@@ -5,25 +5,38 @@ use core::pin::Pin;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
-use super::SCHEDULER;
+use super::scheduler::Priority;
+use super::{Event, EventKind, SCHEDULER};
 use crate::sync::SpinLock;
 
 pub fn spawn_async(future: impl Future<Output = ()> + Send + 'static) {
+    let priority = Priority::Normal;
     let task = TASKS.add_task(Task {
         future: Box::pin(future),
+        priority,
     });
-    SCHEDULER.add_task(super::Event::AsyncTask(task));
+    SCHEDULER.add_task(Event::async_task(task, priority));
+}
+
+pub fn spawn_async_rt(future: impl Future<Output = ()> + Send + 'static) {
+    let priority = Priority::Realtime;
+    let task = TASKS.add_task(Task {
+        future: Box::pin(future),
+        priority,
+    });
+    SCHEDULER.add_task(Event::async_task(task, priority));
 }
 
 pub static TASKS: TaskList = TaskList::new();
 
 pub struct Task {
     future: Pin<Box<dyn Future<Output = ()> + Send>>,
+    pub priority: Priority,
 }
 
 impl Task {
-    pub fn new(future: Pin<Box<dyn Future<Output = ()> + Send>>) -> Self {
-        Task { future }
+    pub fn new(future: Pin<Box<dyn Future<Output = ()> + Send>>, priority: Priority) -> Self {
+        Task { future, priority }
     }
     pub fn poll(&mut self, context: &mut Context) -> Poll<()> {
         self.future.as_mut().poll(context)
@@ -97,30 +110,76 @@ impl TaskList {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct TaskId(usize);
 
-fn wake_task(task: TaskId) {
-    SCHEDULER.add_task(super::Event::AsyncTask(task));
+struct WakerData(usize);
+
+impl core::fmt::Debug for WakerData {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("WakerData")
+            .field(&self.task_id())
+            .field(&self.priority())
+            .finish()
+    }
+}
+
+impl WakerData {
+    fn new(task: TaskId, priority: Priority) -> Self {
+        let id = task.0;
+        assert!(id == id & 0x00FFFFFF_FFFFFFFF);
+        let priority = match priority {
+            Priority::Normal => 1,
+            Priority::Realtime => 2,
+        };
+        Self(id | (priority << 56))
+    }
+    fn task_id(&self) -> TaskId {
+        TaskId(self.0 & 0x00FFFFFF_FFFFFFFF)
+    }
+    fn priority(&self) -> Priority {
+        match self.0 >> 56 {
+            1 => Priority::Normal,
+            2 => Priority::Realtime,
+            _ => Priority::Normal,
+        }
+    }
+    fn to_fake_ptr(self) -> *const () {
+        self.0 as *const ()
+    }
+    fn from_fake_ptr(this: *const ()) -> Self {
+        Self(this as usize)
+    }
+}
+
+fn wake_task(data: WakerData) {
+    SCHEDULER.add_task(Event {
+        priority: data.priority(),
+        kind: EventKind::AsyncTask(data.task_id()),
+    });
 }
 
 static WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
     |this_clone| RawWaker::new(this_clone, &WAKER_VTABLE),
-    |this_wake_own| wake_task(TaskId(this_wake_own as usize)),
-    |this_wake_ref| wake_task(TaskId(this_wake_ref as usize)),
+    |this_wake_own| wake_task(WakerData::from_fake_ptr(this_wake_own)),
+    |this_wake_ref| wake_task(WakerData::from_fake_ptr(this_wake_ref)),
     |_this_drop| (),
 );
 
-pub fn create_waker(task: TaskId) -> Waker {
+pub fn create_waker(task: TaskId, priority: Priority) -> Waker {
     // ... it doesn't have to actually point to memory ...
-    let data = task.0 as *const ();
-    let raw_waker = RawWaker::new(data, &WAKER_VTABLE);
+    let data = WakerData::new(task, priority);
+    let raw_waker = RawWaker::new(data.to_fake_ptr(), &WAKER_VTABLE);
     unsafe { Waker::from_raw(raw_waker) }
 }
 
-pub fn task_id_from_waker(waker: &Waker) -> Option<TaskId> {
+pub fn event_for_waker(waker: &Waker) -> Option<Event> {
     if core::ptr::eq(waker.vtable(), &WAKER_VTABLE) {
-        Some(TaskId(waker.data() as usize))
+        let data = WakerData::from_fake_ptr(waker.data());
+        Some(Event {
+            priority: data.priority(),
+            kind: EventKind::AsyncTask(data.task_id()),
+        })
     } else {
         None
     }
