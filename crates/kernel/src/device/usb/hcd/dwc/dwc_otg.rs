@@ -26,6 +26,7 @@ use crate::device::system_timer::micro_delay;
 use crate::device::usb::usbd::endpoint::endpoint_descriptor;
 use crate::device::MAILBOX;
 use crate::event::context::Context;
+use crate::event::schedule_rt;
 use crate::shutdown;
 use crate::SpinLock;
 use core::ptr;
@@ -43,7 +44,6 @@ pub fn dwc_otg_register_interrupt_handler() {
 pub fn dwc_otg_interrupt_handler(_ctx: &mut Context) {
     let mut hcint_channels = [0u32; ChannelCount];
     {
-        let _lock = DWC_LOCK.lock();
         //read interrupt status
         let status = read_volatile(DOTG_GINTSTS);
         //clear interrupt status
@@ -53,6 +53,7 @@ pub fn dwc_otg_interrupt_handler(_ctx: &mut Context) {
             let channels = read_volatile(DOTG_HAINT);
             for i in 0..ChannelCount {
                 if channels & (1 << i) != 0 {
+                    let _lock = DWC_LOCK.lock();
                     let hcint = read_volatile(DOTG_HCINT(i));
                     write_volatile(DOTG_HCINT(i), hcint);
                     hcint_channels[i] = hcint;
@@ -70,8 +71,11 @@ pub fn dwc_otg_interrupt_handler(_ctx: &mut Context) {
                     if let Some(endpoint_descriptor) = DWC_CHANNEL_CALLBACK.endpoint_descriptors[i]
                     {
                         if let Some(callback) = DWC_CHANNEL_CALLBACK.callback[i] {
-                            callback(endpoint_descriptor, hcint_channels[i]);
-                            dwc_otg_free_channel(i as u32);
+                            let hcint = hcint_channels[i];
+                            schedule_rt(move || {
+                                callback(endpoint_descriptor, hcint);
+                                dwc_otg_free_channel(i as u32);
+                            });
                         } else {
                             println!("| DWC: No callback for channel {}.\n", i);
                             shutdown();

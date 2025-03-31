@@ -18,6 +18,7 @@ use crate::device::usb::hcd::dwc::dwc_otgreg::HCINT_NAK;
 use crate::device::usb::hcd::dwc::dwc_otgreg::HCINT_XFERCOMPL;
 use crate::device::usb::PacketId;
 use crate::device::usb::UsbInterruptMessage;
+use crate::event::schedule_rt;
 use crate::shutdown;
 use alloc::boxed::Box;
 
@@ -145,6 +146,10 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
     }
 }
 
+pub fn schedule_interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
+    schedule_rt(move || interrupt_endpoint_callback(endpoint));
+}
+
 pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
     let device = unsafe { &mut *endpoint.device };
     let pipe = UsbPipeAddress {
@@ -214,7 +219,11 @@ pub fn register_interrupt_endpoint(
         timeout: timeout,
     };
 
-    timer_scheduler_add_timer_event(endpoint_time, interrupt_endpoint_callback, endpoint);
+    timer_scheduler_add_timer_event(
+        endpoint_time,
+        schedule_interrupt_endpoint_callback,
+        endpoint,
+    );
 }
 
 #[derive(Copy, Clone)]
@@ -232,6 +241,9 @@ pub struct endpoint_descriptor {
     pub channel: u8,
     pub timeout: u32,
 }
+
+unsafe impl Sync for endpoint_descriptor {}
+unsafe impl Send for endpoint_descriptor {}
 
 impl endpoint_descriptor {
     pub fn new() -> Self {
