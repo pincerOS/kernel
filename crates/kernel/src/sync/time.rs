@@ -129,6 +129,7 @@ impl TimerScheduler {
                 break;
             }
             let event = ev.index;
+            println!("Waking event with time {} (at time {})", ev.time, now);
             events.pop();
             if let Some(task) = tasks.get_mut(event.0).and_then(|o| o.take()) {
                 task.waker.wake();
@@ -181,7 +182,8 @@ impl TimerScheduler {
     }
     pub fn interval(&'static self, interval: u64) -> Interval {
         let cur_time = self.backend.get_time();
-        Interval(self.timer_future(Some(cur_time), Some(interval)))
+        println!("Interval: {interval}, time {}", cur_time);
+        Interval(self.timer_future(Some(cur_time + interval), Some(interval)))
     }
 }
 

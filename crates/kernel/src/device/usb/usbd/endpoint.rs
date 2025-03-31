@@ -1,3 +1,5 @@
+use core::sync::atomic::AtomicUsize;
+
 /**
  *
  * usbd/endpoint.rs
@@ -228,10 +230,23 @@ pub fn register_interrupt_endpoint(
     //     endpoint,
     // );
 
+    static GROUP_ID: AtomicUsize = AtomicUsize::new(0);
+    let group = GROUP_ID.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+    println!("# Starting group {group} at device {}; interval {}", endpoint.device_number, endpoint_time as u64);
+
     crate::event::task::spawn_async(async move {
         let mut interval = crate::sync::time::SCHEDULER.interval(endpoint_time as u64 * 1000);
+        let mut i = 0;
         while interval.tick().await {
-            interrupt_endpoint_callback(endpoint);
+        // loop {
+            i += 1;
+            // schedule(move || {
+                let time = crate::device::system_timer::get_time();
+                println!("# group {group} task {i} started at time {time}");
+                interrupt_endpoint_callback(endpoint);
+                let time = crate::device::system_timer::get_time();
+                println!("# group {group} task {i} ended at time {time}");
+            // });
         }
     });
 }

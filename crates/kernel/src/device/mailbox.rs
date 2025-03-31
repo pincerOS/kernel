@@ -339,20 +339,22 @@ impl VideoCoreMailbox {
         let words: &[u32; BUFFER_WORDS] =
             bytemuck::cast_slice::<_, u32>(&buffer).try_into().unwrap();
 
-        println!("{:?}", words);
-        let mut tag_start = 2;
-        loop {
-            let tag = words[tag_start];
-            println!("Tag: {:#x}", tag);
-            if tag == 0 {
-                break;
-            }
-            let buf_size = words[tag_start + 1];
-            let code = words[tag_start + 2];
-            println!("Code: {:#x}", code);
-            println!("Size: {:#x}", buf_size);
-            tag_start = tag_start + 3 + (buf_size as usize).div_ceil(4);
-        }
+        // println!("{:?}", words);
+        // let mut tag_start = 2;
+        // loop {
+        //     let tag = words[tag_start];
+        //     println!("Tag: {:#x}", tag);
+        //     if tag == 0 {
+        //         break;
+        //     }
+        //     let buf_size = words[tag_start + 1];
+        //     let code = words[tag_start + 2];
+        //     println!("Code: {:#x}", code);
+        //     println!("Size: {:#x}", buf_size);
+        //     tag_start = tag_start + 3 + (buf_size as usize).div_ceil(4);
+        // }
+
+        crate::sync::spin_sleep(10000);
 
         let response = words[1];
 
