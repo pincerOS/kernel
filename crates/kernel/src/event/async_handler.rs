@@ -76,6 +76,8 @@ where
     // TODO: only save user regs if the handler accesses them?
     unsafe { thread.save_user_regs() };
 
+    unsafe { crate::sync::enable_interrupts() };
+
     // TODO: avoid allocating in the syscall handler?
     let mut future = new_handler_future(thread, handler);
 
@@ -129,6 +131,39 @@ where
     }
 }
 
+pub fn run_event_handler<Fn>(ctx: &mut Context, handler: Fn) -> *mut Context
+where
+    Fn: for<'a> FnOnce(HandlerContext<'a>) -> ResumedContext + 'static,
+{
+    // TODO: ensure preemption/interrupts disabled before this point
+    let thread = CORES.with_current(|core| core.thread.take());
+    let mut thread = thread.expect("usermode syscall without active thread");
+    let mut ctx = core::ptr::NonNull::from(ctx);
+    thread.last_context = ctx;
+
+    // TODO: only save user regs if the handler accesses them?
+    unsafe { thread.save_user_regs() };
+
+    unsafe { crate::sync::enable_interrupts() };
+
+    let data = new_handlers(thread);
+    let handler_ctx = HandlerContext { outer_data: &data };
+
+    let _resumed = handler(handler_ctx);
+
+    let thread = unsafe { &mut *data.thread.get() }.take().unwrap();
+
+    if data.user_regs_changed.get() {
+        if let Some(regs) = &thread.user_regs {
+            unsafe { thread::Thread::restore_user_regs(regs, ctx.as_mut()) };
+        }
+    }
+
+    CORES.with_current(|core| core.thread.set(Some(thread)));
+
+    ctx.as_ptr()
+}
+
 struct OuterData {
     in_handler: core::cell::Cell<bool>,
     suspend_thread: core::cell::Cell<bool>,
@@ -141,7 +176,7 @@ pub struct HandlerContext<'a> {
 }
 
 impl<'outer> HandlerContext<'outer> {
-    pub fn cur_thread_mut(&mut self) -> &mut Option<Box<thread::Thread>> {
+    fn cur_thread_mut(&mut self) -> &mut Option<Box<thread::Thread>> {
         unsafe { &mut *self.outer_data.thread.get() }
     }
     pub fn cur_thread(&self) -> &thread::Thread {
@@ -151,6 +186,15 @@ impl<'outer> HandlerContext<'outer> {
     }
     pub fn cur_process(&self) -> Option<&alloc::sync::Arc<crate::process::Process>> {
         self.cur_thread().process.as_ref()
+    }
+
+    /// Save the current context into a stable location in the thread,
+    /// and return it; for re-scheduling a thread elsewhere.
+    pub fn detach_thread(mut self) -> Box<thread::Thread> {
+        let mut thread = self.cur_thread_mut().take().unwrap();
+        let stable = thread.is_kernel_thread();
+        unsafe { thread.save_context(thread.last_context, stable) };
+        thread
     }
 
     pub async fn resume(mut self) -> ResumedContext {
@@ -310,6 +354,15 @@ where
     let fake_context = unsafe { core::mem::transmute::<HandlerContext, HandlerContext>(context) };
     this_ref.inner.write(f.call(fake_context));
     this
+}
+
+fn new_handlers(thread: Box<thread::Thread>) -> OuterData {
+    OuterData {
+        thread: core::cell::UnsafeCell::new(Some(thread)),
+        in_handler: core::cell::Cell::new(true),
+        suspend_thread: core::cell::Cell::new(true),
+        user_regs_changed: core::cell::Cell::new(false),
+    }
 }
 
 unsafe impl<F: Send> Send for HandlerFuture<F> {}

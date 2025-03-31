@@ -259,15 +259,7 @@ switch_to_helper:
     // NOTE: fall-through
 
 restore_context:
-    // Restore ELR and SPSR
-    ldp x1, x2, [x0, #0x100]
-    msr ELR_EL1, x1
-    msr SPSR_EL1, x2
-
-    ldr x1, [x0, #0x110]
-    msr SP_EL0, x1
-
-    // Restore all registers
+    // Restore all general purpose registers
     ldp x2, x3, [x0, #0x10]
     ldp x4, x5, [x0, #0x20]
     ldp x6, x7, [x0, #0x30]
@@ -282,9 +274,24 @@ restore_context:
     ldp x24, x25, [x0, #0xC0]
     ldp x26, x27, [x0, #0xD0]
     ldp x28, x29, [x0, #0xE0]
+
+    // Mask all interrupts (ELR/SPSR are not preserved by interrupts)
+    msr DAIFSet, #0b1111
+
+    // Restore ELR and SPSR, using x1 and x30 as scratch regs
+    ldp x30, x1, [x0, #0x100]
+    msr ELR_EL1, x30
+    msr SPSR_EL1, x1
+
+    // Restore SP_EL0, with x1 as scratch
+    ldr x1, [x0, #0x110]
+    msr SP_EL0, x1
+
+    // Load the final value of x30, load sp using x1 as scratch
     ldp x30, x1, [x0, #0xF0]
     mov sp, x1
 
+    // Load final values of x0 and x1, replacing the pointer to context
     ldp x0, x1, [x0, #0x00]
 
     // Exception return; returns to the code at ELR_EL1,

@@ -28,13 +28,14 @@ use crate::device::MAILBOX;
 use crate::event::context::Context;
 use crate::event::schedule_rt;
 use crate::shutdown;
-use crate::SpinLock;
+use crate::sync::InterruptSpinLock;
+use crate::sync::SpinLock;
 use core::ptr;
 
 pub const ChannelCount: usize = 8;
 pub static mut dwc_otg_driver: DWC_OTG = DWC_OTG { base_addr: 0 };
 pub static DWC_CHANNEL_ACTIVE: SpinLock<DwcChannelActive> = SpinLock::new(DwcChannelActive::new());
-pub static DWC_LOCK: SpinLock<DwcLock> = SpinLock::new(DwcLock::new());
+pub static DWC_LOCK: InterruptSpinLock<DwcLock> = InterruptSpinLock::new(DwcLock::new());
 pub static mut DWC_CHANNEL_CALLBACK: DwcChannelCallback = DwcChannelCallback::new();
 
 pub fn dwc_otg_register_interrupt_handler() {

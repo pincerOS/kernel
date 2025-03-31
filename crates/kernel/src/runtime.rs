@@ -1,5 +1,6 @@
 #[cfg_attr(not(any(test, doc)), panic_handler)]
 #[allow(dead_code)]
+#[unsafe(no_mangle)]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     use crate::arch::halt;
     use crate::uart;
@@ -16,10 +17,21 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
         _ => ("unknown", 0, 0),
     };
     if uart::UART.is_initialized() {
-        println!(
+        use core::fmt::Write;
+        let uart = uart::UART.get();
+        // Bypass the UART lock to print the panic message; this isn't sound,
+        // but the UART struct only uses mutability to access to the MMIO,
+        // so it shouldn't cause issues (beyond the fact that it's already
+        // in a panic.)
+        let mut guard = unsafe { uart.force_acquire() };
+        writeln!(
+            &mut *guard,
             "Kernel panic at '{location}:{line}:{column}'\nmessage: {}",
             info.message()
-        );
+        )
+        .ok();
+        // Avoid unlocking the lock on drop
+        core::mem::forget(guard);
     }
 
     // TODO: write error message to a fixed location in memory and reset?

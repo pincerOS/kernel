@@ -1,11 +1,10 @@
 use alloc::sync::Arc;
 
+use crate::event::async_handler::{run_event_handler, HandlerContext};
 use crate::event::context::Context;
 use crate::process::fd;
 use crate::ringbuffer::channel;
 use crate::sync::SpinLock;
-
-use super::current_process;
 
 bitflags::bitflags! {
     struct PipeFlags: u32 {
@@ -21,19 +20,23 @@ pub unsafe fn sys_pipe(ctx: &mut Context) -> *mut Context {
         return ctx;
     };
 
-    let proc = current_process().unwrap();
+    run_event_handler(ctx, move |mut context: HandlerContext<'_>| {
+        // TODO: avoid cloning process?  (Partial borrows?)  (get thread directly, then partial)
+        let proc = context.cur_process().unwrap().clone();
 
-    let (tx, rx) = channel();
-    let tx_fd = Arc::new(PipeWriteFd(SpinLock::new(tx)));
-    let rx_fd = Arc::new(PipeReadFd(SpinLock::new(rx)));
+        let (tx, rx) = channel();
+        let tx_fd = Arc::new(PipeWriteFd(SpinLock::new(tx)));
+        let rx_fd = Arc::new(PipeReadFd(SpinLock::new(rx)));
 
-    let mut guard = proc.file_descriptors.lock();
-    let rx_fdi = guard.insert(rx_fd);
-    let tx_fdi = guard.insert(tx_fd);
+        let mut guard = proc.file_descriptors.lock();
+        let rx_fdi = guard.insert(rx_fd);
+        let tx_fdi = guard.insert(tx_fd);
 
-    ctx.regs[0] = rx_fdi;
-    ctx.regs[1] = tx_fdi;
-    ctx
+        let mut regs = context.regs();
+        regs.regs[0] = rx_fdi;
+        regs.regs[1] = tx_fdi;
+        context.resume_final()
+    })
 }
 
 const PIPE_SIZE: usize = 4096;

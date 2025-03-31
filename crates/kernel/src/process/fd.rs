@@ -117,7 +117,7 @@ impl FileDescriptor for DummyFd {
     }
 }
 
-pub struct UartFd(pub &'static crate::sync::SpinLock<crate::device::uart::UARTInner>);
+pub struct UartFd(pub &'static crate::device::uart::UARTLock);
 
 // TODO: how to handle non-zero offsets for non-seekable files?
 impl FileDescriptor for UartFd {

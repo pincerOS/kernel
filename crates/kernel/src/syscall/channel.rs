@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 
-use crate::event::async_handler::{run_async_handler, HandlerContext};
+use crate::event::async_handler::{run_async_handler, run_event_handler, HandlerContext};
 use crate::event::context::Context;
 use crate::process::fd;
 use crate::ringbuffer;
@@ -45,15 +45,18 @@ pub unsafe fn sys_channel(ctx: &mut Context) -> *mut Context {
         recv: SpinLock::new(b_rx),
     };
 
-    let proc = super::current_process().unwrap();
+    run_event_handler(ctx, move |mut context: HandlerContext<'_>| {
+        // TODO: avoid cloning process?  (Partial borrows?)  (get thread directly, then partial)
+        let proc = context.cur_process().unwrap().clone();
 
-    let mut guard = proc.file_descriptors.lock();
-    let a_fdi = guard.insert(Arc::new(a_chan));
-    let b_fdi = guard.insert(Arc::new(b_chan));
+        let mut guard = proc.file_descriptors.lock();
+        let a_fdi = guard.insert(Arc::new(a_chan));
+        let b_fdi = guard.insert(Arc::new(b_chan));
 
-    ctx.regs[0] = a_fdi;
-    ctx.regs[1] = b_fdi;
-    ctx
+        context.regs().regs[0] = a_fdi;
+        context.regs().regs[1] = b_fdi;
+        context.resume_final()
+    })
 }
 
 pub unsafe fn sys_send(ctx: &mut Context) -> *mut Context {

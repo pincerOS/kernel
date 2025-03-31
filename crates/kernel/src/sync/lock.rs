@@ -28,9 +28,19 @@ impl<T, L: LockImpl> Lock<T, L> {
             value: UnsafeCell::new(value),
         }
     }
+    pub unsafe fn get_inner(&self) -> &L {
+        &self.inner
+    }
+    pub unsafe fn force_acquire(&self) -> LockGuard<'_, T, L> {
+        LockGuard {
+            lock: self,
+            marker: PhantomData,
+        }
+    }
 }
 
 impl<T: ?Sized, L: LockImpl> Lock<T, L> {
+    #[track_caller]
     pub fn lock(&self) -> LockGuard<'_, T, L> {
         self.inner.lock();
         LockGuard {
@@ -80,7 +90,10 @@ impl SpinLockInner {
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
     }
+    #[track_caller]
     pub fn lock(&self) {
+        // crate::event::assert_non_preemptible();
+        crate::event::assert_not_in_interrupt();
         while !self.try_acquire() {
             while self.flag.load(Ordering::Relaxed) {
                 core::hint::spin_loop();
@@ -95,6 +108,7 @@ impl SpinLockInner {
 impl LockImpl for SpinLockInner {
     #[allow(clippy::declare_interior_mutable_const)]
     const DEFAULT: Self = Self::new();
+    #[track_caller]
     fn lock(&self) {
         self.lock()
     }

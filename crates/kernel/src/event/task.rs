@@ -7,7 +7,7 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use super::scheduler::Priority;
 use super::{Event, EventKind, SCHEDULER};
-use crate::sync::SpinLock;
+use crate::sync::InterruptSpinLock;
 
 pub fn spawn_async(future: impl Future<Output = ()> + Send + 'static) {
     let priority = Priority::Normal;
@@ -51,14 +51,14 @@ enum TaskState {
 pub struct TaskList {
     // TODO: generational arena
     count: AtomicUsize,
-    tasks: SpinLock<BTreeMap<TaskId, TaskState>>,
+    tasks: InterruptSpinLock<BTreeMap<TaskId, TaskState>>,
 }
 
 impl TaskList {
     pub const fn new() -> Self {
         TaskList {
             count: AtomicUsize::new(0),
-            tasks: SpinLock::new(BTreeMap::new()),
+            tasks: InterruptSpinLock::new(BTreeMap::new()),
         }
     }
 

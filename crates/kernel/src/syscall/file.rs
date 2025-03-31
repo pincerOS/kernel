@@ -1,10 +1,8 @@
 use alloc::borrow::Cow;
 
-use crate::event::async_handler::{run_async_handler, HandlerContext};
+use crate::event::async_handler::{run_async_handler, run_event_handler, HandlerContext};
 use crate::event::context::Context;
 use crate::process::fd::{ArcFd, FileKind};
-
-use super::current_process;
 
 bitflags::bitflags! {
     struct DupFlags: u32 {
@@ -22,41 +20,46 @@ pub unsafe fn sys_dup3(ctx: &mut Context) -> *mut Context {
         return ctx;
     };
 
-    let proc = current_process().unwrap();
+    run_event_handler(ctx, move |mut context: HandlerContext<'_>| {
+        // TODO: avoid cloning process?  (Partial borrows?)  (get thread directly, then partial)
+        let proc = context.cur_process().unwrap().clone();
 
-    let mut guard = proc.file_descriptors.lock();
-    let Some(old) = guard.get(old_fd).cloned() else {
-        ctx.regs[0] = i64::from(-1) as usize;
-        return ctx;
-    };
+        let mut guard = proc.file_descriptors.lock();
+        let Some(old) = guard.get(old_fd).cloned() else {
+            context.regs().regs[0] = i64::from(-1) as usize;
+            return context.resume_final();
+        };
 
-    let to_close = guard.set(new_fd, old);
+        let to_close = guard.set(new_fd, old);
 
-    if let Some(desc) = to_close {
-        // TODO: we should be careful about where/when fd destructors are run
-        drop(desc);
-    }
+        if let Some(desc) = to_close {
+            // TODO: we should be careful about where/when fd destructors are run
+            drop(desc);
+        }
 
-    ctx.regs[0] = new_fd;
-    ctx
+        context.regs().regs[0] = new_fd;
+        context.resume_final()
+    })
 }
 
 /// syscall close(fd: u32) -> i64
 pub unsafe fn sys_close(ctx: &mut Context) -> *mut Context {
     let fd = ctx.regs[0];
-    let proc = current_process().unwrap();
 
-    let mut guard = proc.file_descriptors.lock();
-    if let Some(desc) = guard.remove(fd) {
-        // TODO: we should be careful about where/when fd destructors are run
-        drop(desc);
+    run_event_handler(ctx, move |mut context: HandlerContext<'_>| {
+        // TODO: avoid cloning process?  (Partial borrows?)  (get thread directly, then partial)
+        let proc = context.cur_process().unwrap().clone();
 
-        ctx.regs[0] = i64::from(0) as usize;
-        ctx
-    } else {
-        ctx.regs[0] = i64::from(-1) as usize;
-        ctx
-    }
+        let mut guard = proc.file_descriptors.lock();
+        if let Some(desc) = guard.remove(fd) {
+            // TODO: we should be careful about where/when fd destructors are run
+            drop(desc);
+            context.regs().regs[0] = i64::from(0) as usize;
+        } else {
+            context.regs().regs[0] = i64::from(-1) as usize;
+        }
+        context.resume_final()
+    })
 }
 
 /// syscall pread(fd: u32, buf: *mut u8, len: u64, offset: u64) -> i64

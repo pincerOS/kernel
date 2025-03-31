@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 
-use crate::event::async_handler::{run_async_handler, HandlerContext};
-use crate::event::context::{deschedule_thread, Context, DescheduleAction, CORES};
+use crate::event::async_handler::{run_async_handler, run_event_handler, HandlerContext};
+use crate::event::context::{deschedule_thread, Context, DescheduleAction};
 use crate::process::fd::{self, FileDescriptor};
 use crate::process::ExitStatus;
 use crate::sync::once_cell::BlockingOnceCell;
@@ -12,20 +12,20 @@ pub unsafe fn sys_shutdown(_ctx: &mut Context) -> *mut Context {
 }
 
 pub unsafe fn sys_exit(ctx: &mut Context) -> *mut Context {
-    let thread = CORES.with_current(|core| core.thread.take());
-    let mut thread = thread.expect("usermode syscall without active thread");
-
     let status = ctx.regs[0];
 
-    // TODO: split exit into process exit and thread exit?
-    // TODO: ensure processes can't exit without setting this
-    let exit_code = &thread.process.as_ref().unwrap().exit_code;
-    exit_code.set(crate::process::ExitStatus {
-        status: status as u32,
-    });
+    run_event_handler(ctx, move |context: HandlerContext<'_>| {
+        let thread = context.detach_thread();
 
-    unsafe { thread.save_context(ctx.into(), false) };
-    unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
+        // TODO: split exit into process exit and thread exit?
+        // TODO: ensure processes can't exit without setting this
+        let exit_code = &thread.process.as_ref().unwrap().exit_code;
+        exit_code.set(crate::process::ExitStatus {
+            status: status as u32,
+        });
+
+        unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
+    })
 }
 
 pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
@@ -34,44 +34,38 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
     let user_x0 = ctx.regs[2];
     let flags = ctx.regs[3];
 
-    let cur_process = CORES.with_current(|core| {
-        let thread = core.thread.take().unwrap();
-        // TODO: don't require cloning here
-        // TODO: how to make longer periods of access to the current thread sound?
-        // (ie. either internal mutability, or can't yield/preempt/check preempt status...)
-        let cur_process = thread.process.clone();
-        core.thread.set(Some(thread));
-        cur_process
-    });
-    let old_process = cur_process.unwrap();
+    run_event_handler(ctx, move |mut context: HandlerContext<'_>| {
+        // TODO: avoid cloning process?  (Partial borrows?)  (get thread directly, then partial)
+        let old_process = context.cur_process().unwrap().clone();
 
-    let wait_fd;
-    let process;
+        let wait_fd;
+        let process;
 
-    if flags == 1 {
-        // Same process, shared memory
-        process = old_process;
-        wait_fd = (-1isize) as usize;
-    } else {
-        process = Arc::new(old_process.fork());
-        let descriptor = WaitFd(process.exit_code.clone());
-        let fd = old_process
-            .file_descriptors
-            .lock()
-            .insert(Arc::new(descriptor));
-        wait_fd = fd;
-    }
+        if flags == 1 {
+            // Same process, shared memory
+            process = old_process;
+            wait_fd = (-1isize) as usize;
+        } else {
+            process = Arc::new(old_process.fork());
+            let descriptor = WaitFd(process.exit_code.clone());
+            let fd = old_process
+                .file_descriptors
+                .lock()
+                .insert(Arc::new(descriptor));
+            wait_fd = fd;
+        }
 
-    println!(
-        "Creating new process with page dir {:#010}",
-        process.get_ttbr0()
-    );
-    let mut user_thread = unsafe { thread::Thread::new_user(process, user_sp, user_entry) };
-    user_thread.context.as_mut().unwrap().regs[0] = user_x0;
-    event::SCHEDULER.add_task(event::Event::schedule_thread(user_thread));
+        println!(
+            "Creating new process with page dir {:#010}",
+            process.get_ttbr0()
+        );
+        let mut user_thread = unsafe { thread::Thread::new_user(process, user_sp, user_entry) };
+        user_thread.context.as_mut().unwrap().regs[0] = user_x0;
+        event::SCHEDULER.add_task(event::Event::schedule_thread(user_thread));
 
-    ctx.regs[0] = wait_fd;
-    ctx
+        context.regs().regs[0] = wait_fd;
+        context.resume_final()
+    })
 }
 
 /// syscall wait(fd: u32) -> i64

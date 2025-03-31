@@ -1,8 +1,14 @@
-use crate::sync::{SpinLock, UnsafeInit, Volatile};
+use crate::sync::{InterruptSpinLock, UnsafeInit, Volatile};
 
 // https://documentation-service.arm.com/static/5e8e36c2fd977155116a90b5
 
-pub static UART: UnsafeInit<SpinLock<UARTInner>> = unsafe { UnsafeInit::uninit() };
+// TODO: This shouldn't actually use an interrupt-disabling lock, but we
+// don't currently have a better logging system.  (Interrupt handlers
+// should not print, and can still deadlock with this, but it should
+// make those deadlocks rare.)
+pub type UARTLock = InterruptSpinLock<UARTInner>;
+
+pub static UART: UnsafeInit<UARTLock> = unsafe { UnsafeInit::uninit() };
 
 pub struct UARTInner {
     base: *mut (),
@@ -132,7 +138,7 @@ impl core::fmt::Write for UARTInner {
     }
 }
 
-impl core::fmt::Write for &SpinLock<UARTInner> {
+impl core::fmt::Write for &UARTLock {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         let mut inner = self.lock();
         for b in s.bytes() {

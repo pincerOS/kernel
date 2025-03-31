@@ -1,8 +1,9 @@
-use crate::event::context::{deschedule_thread, Context, DescheduleAction, CORES};
+use crate::event::async_handler::{run_event_handler, HandlerContext};
+use crate::event::context::{deschedule_thread, Context, DescheduleAction};
 
 pub unsafe fn sys_yield(ctx: &mut Context) -> *mut Context {
-    let thread = CORES.with_current(|core| core.thread.take());
-    let mut thread = thread.expect("usermode syscall without active thread");
-    unsafe { thread.save_context(ctx.into(), false) };
-    unsafe { deschedule_thread(DescheduleAction::Yield, Some(thread)) }
+    run_event_handler(ctx, move |context: HandlerContext<'_>| {
+        let thread = context.detach_thread();
+        unsafe { deschedule_thread(DescheduleAction::Yield, Some(thread)) }
+    })
 }

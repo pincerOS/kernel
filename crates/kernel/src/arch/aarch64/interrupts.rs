@@ -1,4 +1,4 @@
-pub struct InterruptsState(u64);
+pub struct InterruptsState(pub(crate) u64);
 
 impl core::fmt::Debug for InterruptsState {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

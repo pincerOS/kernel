@@ -1,6 +1,4 @@
 use crate::event::exceptions::register_syscall_handler;
-use crate::process::Process;
-use alloc::sync::Arc;
 
 pub mod channel;
 pub mod exec;
@@ -29,16 +27,4 @@ pub unsafe fn register_syscalls() {
         register_syscall_handler(16, exec::sys_execve_fd);
         register_syscall_handler(17, proc::sys_wait);
     }
-}
-
-fn current_process() -> Option<Arc<Process>> {
-    crate::event::context::CORES.with_current(|core| {
-        let thread = core.thread.take().unwrap();
-        // TODO: don't require cloning here
-        // TODO: how to make longer periods of access to the current thread sound?
-        // (ie. either internal mutability, or can't yield/preempt/check preempt status...)
-        let cur_process = thread.process.clone();
-        core.thread.set(Some(thread));
-        cur_process
-    })
 }

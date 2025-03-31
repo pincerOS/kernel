@@ -130,7 +130,8 @@ pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
     };
 
     if thread.is_user_thread() && ctx.current_el() > context::ExceptionLevel::EL0 {
-        // Currently in an exception handler in a user thread
+        // Currently in an exception handler in a user thread, resume running
+        CORES.with_current(|core| core.thread.set(Some(thread)));
         return ctx;
     }
 
@@ -149,4 +150,24 @@ pub unsafe fn timer_handler(ctx: &mut Context) -> *mut Context {
 
     unsafe { thread.save_context(ctx.into(), thread.is_kernel_thread()) };
     unsafe { deschedule_thread(DescheduleAction::Yield, Some(thread)) };
+}
+
+#[track_caller]
+pub fn assert_non_preemptible() {
+    let all_interrupts_disabled = crate::sync::interrupts::get_interrupts().0 == 0b1111;
+    let in_thread = crate::event::context::CORES.with_current(|core| {
+        let thread = core.thread.take();
+        let res = thread.is_some();
+        core.thread.set(thread);
+        res
+    });
+    if in_thread {
+        assert!(all_interrupts_disabled);
+    }
+}
+
+#[track_caller]
+pub fn assert_not_in_interrupt() {
+    let all_interrupts_enabled = crate::sync::interrupts::get_interrupts().0 == 0b0000;
+    assert!(all_interrupts_enabled);
 }

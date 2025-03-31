@@ -110,7 +110,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let (uart_addr, _) = find_device_addr(uart).unwrap().unwrap();
         let uart_base = unsafe { map_device(uart_addr) }.as_ptr();
 
-        unsafe { uart::UART.init(SpinLock::new(uart::UARTInner::new(uart_base))) };
+        unsafe { uart::UART.init(uart::UARTLock::new(uart::UARTInner::new(uart_base))) };
         println!("| initialized UART");
     }
 
