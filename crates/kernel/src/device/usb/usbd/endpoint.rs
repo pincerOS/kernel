@@ -6,20 +6,21 @@
  *   This file contains implemenation for USB endpoints
  *
  */
-use super::super::types::*;
-use super::device::*;
-use super::pipe::*;
+use crate::device::usb;
 
-use crate::device::system_timer::*;
-use crate::device::usb::dwc_hub;
-use crate::device::usb::hcd::dwc::dwc_otg::HcdUpdateTransferSize;
-use crate::device::usb::hcd::dwc::dwc_otgreg::HCINT_CHHLTD;
-use crate::device::usb::hcd::dwc::dwc_otgreg::HCINT_NAK;
-use crate::device::usb::hcd::dwc::dwc_otgreg::HCINT_XFERCOMPL;
-use crate::device::usb::PacketId;
-use crate::device::usb::UsbInterruptMessage;
-use crate::event::schedule_rt;
+use usb::dwc_hub;
+use usb::hcd::dwc::dwc_otg::HcdUpdateTransferSize;
+use usb::hcd::dwc::dwc_otgreg::{HCINT_CHHLTD, HCINT_NAK, HCINT_XFERCOMPL};
+use usb::types::*;
+use usb::usbd::device::*;
+use usb::usbd::pipe::*;
+use usb::PacketId;
+use usb::UsbInterruptMessage;
+
+use crate::event::task::spawn_async_rt;
 use crate::shutdown;
+use crate::sync::time::{interval, MissedTicks};
+
 use alloc::boxed::Box;
 
 pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u32) {
@@ -146,10 +147,6 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
     }
 }
 
-pub fn schedule_interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
-    schedule_rt(move || interrupt_endpoint_callback(endpoint));
-}
-
 pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
     let device = unsafe { &mut *endpoint.device };
     let pipe = UsbPipeAddress {
@@ -219,11 +216,13 @@ pub fn register_interrupt_endpoint(
         timeout: timeout,
     };
 
-    timer_scheduler_add_timer_event(
-        endpoint_time,
-        schedule_interrupt_endpoint_callback,
-        endpoint,
-    );
+    spawn_async_rt(async move {
+        let μs = endpoint_time as u64 * 1000;
+        let mut interval = interval(μs).with_missed_tick_behavior(MissedTicks::Skip);
+        while interval.tick().await {
+            interrupt_endpoint_callback(endpoint);
+        }
+    });
 }
 
 #[derive(Copy, Clone)]
