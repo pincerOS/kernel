@@ -31,7 +31,7 @@ use crate::shutdown;
 use crate::SpinLock;
 use core::ptr;
 
-pub const ChannelCount: usize = 16;
+pub const ChannelCount: usize = 8;
 pub static mut dwc_otg_driver: DWC_OTG = DWC_OTG { base_addr: 0 };
 pub static DWC_CHANNEL_ACTIVE: SpinLock<DwcChannelActive> = SpinLock::new(DwcChannelActive::new());
 pub static DWC_LOCK: SpinLock<DwcLock> = SpinLock::new(DwcLock::new());
