@@ -1,0 +1,12 @@
+[package]
+name = "elf"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+bytemuck = { version = "1.19.0", default-features = false }
+
+[features]
+std = []
+alloc = []
+default = []

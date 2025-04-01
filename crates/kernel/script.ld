@@ -9,7 +9,7 @@
  * Copyright (c) 2018-2022 Andre Richter <andre.o.richter@gmail.com>
  */
 
-PAGE_SIZE = 64K;
+PAGE_SIZE = 16K;
 
 __rpi_phys_dram_start_addr = 0x00000;
 
@@ -17,7 +17,10 @@ __rpi_phys_dram_start_addr = 0x00000;
 # kernel into physical memory.
 __rpi_phys_binary_start_addr = 0x80000;
 
-ENTRY(__rpi_phys_binary_start_addr)
+__rpi_virt_base = 0xFFFFFFFFFE000000;
+__rpi_virt_binary_start_addr = __rpi_virt_base + __rpi_phys_binary_start_addr;
+
+ENTRY(__rpi_virt_binary_start_addr)
 
 /* Flags:
  *     4 == R
@@ -34,22 +37,29 @@ PHDRS {
 }
 
 SECTIONS {
-    . = __rpi_phys_dram_start_addr;
-
-    . = __rpi_phys_binary_start_addr;
+    . = __rpi_virt_binary_start_addr;
     __code_start = .;
     .text : {
         KEEP(*(.text.kernel_entry))
         *(.text*)
     } :segment_code
 
-    .rodata : ALIGN(8) { *(.rodata*) } :segment_code
-
     . = ALIGN(PAGE_SIZE);
     __code_end = .;
 
     __data_start = .;
-    .data : { *(.data) *(.data.*) } :segment_data
+    .rodata : ALIGN(8) { *(.rodata*) } :segment_data
+    .data : ALIGN(8) {
+        *(.data)
+        *(.data.*)
+    } :segment_data
+
+    .test_array : ALIGN(8) {
+        __test_array_start = .;
+        // KEEP is a workaround for #[used(linker)] being unstable
+        KEEP(*(.test_array))
+        __test_array_end = .;
+    } :segment_data
 
     .bss (NOLOAD) : ALIGN(16) {
         __bss_start = .;
@@ -61,4 +71,7 @@ SECTIONS {
 
     . = ALIGN(PAGE_SIZE);
     __data_end = .;
+
+    __rpi_virt_binary_end_addr = .;
+    __rpi_phys_binary_end_addr = . - __rpi_virt_base;
 }

@@ -1,0 +1,11 @@
+[package]
+name = "initfs"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "util"
+path = "src/bin/util.rs"
+
+[dependencies]
+lz4 = { path = "../lz4" }

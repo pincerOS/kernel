@@ -1,0 +1,52 @@
+name: Cargo check, fmt, and clippy
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  CLIPPY_OPTIONS: |
+    -W warnings
+    -W clippy::std_instead_of_core -W clippy::std_instead_of_alloc -W clippy::alloc_instead_of_core
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  fmt-clippy:
+    strategy:
+      fail-fast: true
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain and cache
+        uses: actions-rust-lang/setup-rust-toolchain@v1.10
+        with:
+          components: rustfmt,clippy
+          target: aarch64-unknown-linux-gnu
+
+      - name: Set up Rust toolchain and cache (baremetal)
+        uses: actions-rust-lang/setup-rust-toolchain@v1.10
+        with:
+          target: aarch64-unknown-none-softfloat
+
+      - uses: taiki-e/install-action@cargo-hack # for workspace feature unificiation
+
+      - name: build init
+        working-directory: ./crates/init
+        run: ./build.sh
+
+      - name: cargo check
+        run: cargo hack check --workspace --tests --examples --target=aarch64-unknown-linux-gnu
+
+      - name: cargo clippy
+        run: cargo hack clippy --workspace --tests --examples --target=aarch64-unknown-linux-gnu -- $CLIPPY_OPTIONS
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check

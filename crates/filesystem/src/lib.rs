@@ -412,12 +412,11 @@ where
 {
     fn read_logical_block_inner(
         device: &mut D,
-        superblock: &Superblock,
+        block_size: usize,
         logical_block_start: usize,
         buffer: &mut [u8],
         deferred_writes: Option<&DeferredWriteMap>,
     ) -> Result<(), Ext2Error> {
-        let block_size: usize = superblock.get_block_size();
         assert_eq!(buffer.len(), block_size);
         let start_sector_numerator: usize = logical_block_start * block_size;
         let start_sector: usize = start_sector_numerator / SECTOR_SIZE;
@@ -446,7 +445,7 @@ where
     ) -> Result<(), Ext2Error> {
         Self::read_logical_block_inner(
             &mut self.device,
-            &self.superblock,
+            self.superblock.get_block_size(),
             logical_block_start,
             buffer,
             deferred_writes,
@@ -455,15 +454,14 @@ where
 
     fn write_logical_block_inner(
         device: &mut D,
-        superblock: &Superblock,
+        block_size: usize,
         logical_block_start: usize,
         buffer: &[u8],
     ) -> Result<(), Ext2Error> {
-        assert_eq!(buffer.len(), superblock.get_block_size());
-
-        let start_sector_numerator: usize = logical_block_start * superblock.get_block_size();
+        assert_eq!(buffer.len(), block_size);
+        let start_sector_numerator: usize = logical_block_start * block_size;
         let start_sector: usize = start_sector_numerator / SECTOR_SIZE;
-        let sectors: usize = superblock.get_block_size() / SECTOR_SIZE;
+        let sectors: usize = block_size / SECTOR_SIZE;
 
         let write_result: Result<(), BlockDeviceError> =
             device.write_sectors(start_sector as u64, sectors, buffer);
@@ -482,7 +480,7 @@ where
     ) -> Result<(), Ext2Error> {
         Self::write_logical_block_inner(
             &mut self.device,
-            &self.superblock,
+            self.superblock.get_block_size(),
             logical_block_start,
             buffer,
         )
@@ -495,6 +493,7 @@ where
         inode_num: usize,
     ) -> INodeBlockInfo {
         let inode_size = superblock.s_inode_size as usize;
+        let block_size = superblock.get_block_size();
 
         let block_group_number = (inode_num - 1) / superblock.s_inodes_per_group as usize;
         let inode_table_block =
@@ -502,11 +501,8 @@ where
 
         let inode_table_index: usize = (inode_num - 1) % (superblock.s_inodes_per_group as usize);
         let inode_table_block_with_offset: usize =
-            ((inode_table_index * inode_size) / superblock.get_block_size()) + inode_table_block;
-        let inode_table_interblock_offset: usize =
-            (inode_table_index * inode_size) % superblock.get_block_size();
-
-        print!("");
+            ((inode_table_index * inode_size) / block_size) + inode_table_block;
+        let inode_table_interblock_offset: usize = (inode_table_index * inode_size) % block_size;
 
         INodeBlockInfo {
             block_num: inode_table_block_with_offset,
@@ -527,11 +523,12 @@ where
             block_group_descriptor_tables,
             inode_num,
         );
-        let mut block_buffer: Vec<u8> = vec![0; superblock.get_block_size()];
+        let block_size = superblock.get_block_size();
+        let mut block_buffer: Vec<u8> = vec![0; block_size];
 
         Self::read_logical_block_inner(
             device,
-            superblock,
+            block_size,
             inode_block_info.block_num,
             block_buffer.as_mut_slice(),
             deferred_writes,
@@ -660,11 +657,14 @@ where
         let descriptor_table_bytes: &mut [u8] =
             bytemuck::cast_slice_mut(&mut block_group_descriptor_tables);
 
-        for block in descriptor_table_bytes.chunks_exact_mut(block_size) {
+        for (i, block) in descriptor_table_bytes
+            .chunks_exact_mut(block_size)
+            .enumerate()
+        {
             Self::read_logical_block_inner(
                 &mut device,
-                &superblock,
-                block_group_descriptor_block,
+                block_size,
+                block_group_descriptor_block + i,
                 block,
                 None,
             )?;

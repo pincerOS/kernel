@@ -10,7 +10,13 @@
 //! <https://github.com/raspberrypi/firmware/wiki/Mailbox-property-interface>
 //! (since this isn't properly documented anywhere...)
 
-use crate::sync::Volatile;
+use crate::{
+    memory::{self, physical_addr},
+    sync::Volatile,
+};
+
+unsafe impl Sync for VideoCoreMailbox {}
+unsafe impl Send for VideoCoreMailbox {}
 
 pub struct VideoCoreMailbox {
     base: *mut u32,
@@ -98,6 +104,9 @@ unsafe impl PropertyRequest for PropSetPowerState {
     }
 }
 
+#[derive(Debug)]
+pub struct MailboxError;
+
 impl VideoCoreMailbox {
     const MBOX_READ: usize = 0x00;
     const MBOX_POLL: usize = 0x10;
@@ -119,19 +128,25 @@ impl VideoCoreMailbox {
         Self { base }
     }
 
-    pub unsafe fn mailbox_call(&mut self, channel: u8, buffer: &mut [u128]) -> Result<(), ()> {
+    pub unsafe fn mailbox_call(
+        &mut self,
+        channel: u8,
+        buffer: &mut [u128],
+    ) -> Result<(), MailboxError> {
         let status_reg = Volatile(self.base.wrapping_byte_add(Self::MBOX_STATUS));
         let read_reg = Volatile(self.base.wrapping_byte_add(Self::MBOX_READ));
         let write_reg = Volatile(self.base.wrapping_byte_add(Self::MBOX_WRITE));
 
         unsafe {
             while (status_reg.read() & Self::STATUS_FULL) != 0 {
-                core::arch::asm!("wfe");
+                crate::arch::wfe();
             }
         }
 
-        let addr = (buffer.as_mut_ptr()) as usize;
-        assert!(addr <= u32::MAX as usize && addr % 16 == 0);
+        let buffer_bytes = size_of_val(buffer);
+        let buffer_ptr = buffer.as_mut_ptr();
+        let addr = physical_addr(buffer_ptr.addr()).unwrap();
+        assert!(addr <= u32::MAX as u64 && addr % 16 == 0);
         assert!(channel as u32 <= Self::CHANNEL_MASK);
 
         let value = (addr as u32 & !Self::CHANNEL_MASK) | (channel as u32 & Self::CHANNEL_MASK);
@@ -149,20 +164,26 @@ impl VideoCoreMailbox {
         // TODO: translate buffer addresses for non-property calls
         // (GPU memory and CPU memory may have different virtual addresses)
 
+        unsafe {
+            memory::clean_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
+        }
         unsafe { write_reg.write(value) };
 
         loop {
             unsafe {
                 while (status_reg.read() & Self::STATUS_EMPTY) != 0 {
-                    core::arch::asm!("wfe");
+                    crate::arch::wfe();
                 }
             }
 
             let message = unsafe { read_reg.read() };
             if (message & Self::CHANNEL_MASK) == channel as u32 {
+                unsafe {
+                    memory::invalidate_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
+                }
                 break;
             } else {
-                println!("Warning: recieved mailbox message from wrong channel?");
+                println!("Warning: received mailbox message from wrong channel?");
             }
         }
 
@@ -174,11 +195,11 @@ impl VideoCoreMailbox {
         buffer: &'a mut [u128],
         tag: u32,
         request_data: &[u32],
-    ) -> Result<(u32, &'a [u8]), ()> {
+    ) -> Result<(u32, &'a [u8]), MailboxError> {
         // TODO: "Response may include unsolicited tags."
 
         let words: &mut [u32] = bytemuck::cast_slice_mut::<_, u32>(&mut *buffer);
-        let buffer_size = core::mem::size_of_val(words) as u32;
+        let buffer_size = size_of_val(words) as u32;
 
         let data_words = (words.len() - 6) as u32;
 
@@ -206,24 +227,33 @@ impl VideoCoreMailbox {
         let words: &[u32] = bytemuck::cast_slice::<_, u32>(&*buffer);
 
         let response = words[1];
-        let response_size = words[3];
+        let response_buffer_size = words[3];
         let response_code = words[4];
+        let mut response_size = response_code & 0x7FFFFFFF;
 
-        // println!("{:?} {:?} {:?}", response, response_size, response_code);
+        if (response_code & 0x80000000) == 0 {
+            return Err(MailboxError);
+        }
+
+        if response_size == 0 && [PropGetPowerState::TAG, PropGetPowerWaitTime::TAG].contains(&tag)
+        {
+            // TODO: Unsupported in qemu
+            response_size = 8;
+        }
 
         let response_data: &[u8] = &bytemuck::cast_slice(&words[5..])[..response_size as usize];
 
         // TODO: properly detect & handle responses that require a larger buffer
         // (ie. try requesing the commandline with a small buffer?)
-        if response_size > data_words * size_of::<u32>() as u32 {
+        if response_size > response_buffer_size {
             // retry?  response was truncated
-            return Err(());
+            return Err(MailboxError);
         }
 
         Ok((response, response_data))
     }
 
-    pub unsafe fn get_property<T>(&mut self, request: T) -> Result<T::Output, ()>
+    pub unsafe fn get_property<T>(&mut self, request: T) -> Result<T::Output, MailboxError>
     where
         T: PropertyRequest,
     {
@@ -321,8 +351,10 @@ impl VideoCoreMailbox {
         // println!("{:?}", bytemuck::cast_slice_mut::<_, u32>(&mut buffer));
         println!("Response: {response:#010x}\nbuffer: {buffer_ptr:#010x}, {buffer_size:#010x}, {pitch:#010x}");
 
-        let ptr = (buffer_ptr as usize) as *mut u128;
+        let ptr = unsafe { memory::map_physical_noncacheable(buffer_ptr as usize, buffer_size) };
+        let ptr = ptr.as_ptr().cast::<u128>();
         assert!(ptr.is_aligned());
+
         let array_elems = buffer_size / size_of::<u128>();
         let array = unsafe { core::slice::from_raw_parts_mut(ptr, array_elems) };
 
@@ -340,6 +372,7 @@ pub struct Surface {
     pitch_elems: usize,
 }
 
+#[cfg(target_arch = "aarch64")]
 fn memcpy128(dst: &mut [u128], src: &[u128]) {
     let len = dst.len();
     assert_eq!(len, src.len());
@@ -368,6 +401,11 @@ fn memcpy128(dst: &mut [u128], src: &[u128]) {
     }
 }
 
+#[cfg(not(target_arch = "aarch64"))]
+fn memcpy128(dst: &mut [u128], src: &[u128]) {
+    dst.copy_from_slice(src)
+}
+
 impl Surface {
     fn new(buffer: &'static mut [u128], width: usize, height: usize, pitch_elems: usize) -> Self {
         let framerate = 30;
@@ -394,21 +432,29 @@ impl Surface {
         self.framerate
     }
     pub fn buffer(&mut self) -> &mut [u32] {
-        bytemuck::cast_slice_mut(&mut *self.alternate)
+        bytemuck::cast_slice_mut(&mut self.alternate)
     }
     #[inline(never)]
     pub fn present(&mut self) {
         // Minimize tearing by doing a fast copy from the alternate
         // buffer into the actual framebuffer.
         memcpy128(self.buffer, &self.alternate);
+
+        // unsafe {
+        //     memory::clean_physical_buffer_for_device(
+        //         self.buffer().as_mut_ptr().cast(),
+        //         size_of_val(self.buffer),
+        //     );
+        // }
+
         // self.buffer.copy_from_slice(&self.alternate);
         // Force writes to go through
         core::hint::black_box(&mut *self.buffer);
     }
-    pub fn wait_for_frame(&self) {
+    pub async fn wait_for_frame(&self) {
         // TODO: proper vsync IRQs?
         let now = crate::sync::get_time();
-        crate::sync::spin_sleep_until(now.next_multiple_of(self.time_step));
+        crate::sync::time::sleep_until(now.next_multiple_of(self.time_step) as u64).await;
     }
 }
 

@@ -1,6 +1,14 @@
-use crate::sync::{SpinLock, UnsafeInit, Volatile};
+use crate::sync::{InterruptSpinLock, UnsafeInit, Volatile};
 
-pub static UART: UnsafeInit<SpinLock<UARTInner>> = unsafe { UnsafeInit::uninit() };
+// https://documentation-service.arm.com/static/5e8e36c2fd977155116a90b5
+
+// TODO: This shouldn't actually use an interrupt-disabling lock, but we
+// don't currently have a better logging system.  (Interrupt handlers
+// should not print, and can still deadlock with this, but it should
+// make those deadlocks rare.)
+pub type UARTLock = InterruptSpinLock<UARTInner>;
+
+pub static UART: UnsafeInit<UARTLock> = unsafe { UnsafeInit::uninit() };
 
 pub struct UARTInner {
     base: *mut (),
@@ -130,7 +138,7 @@ impl core::fmt::Write for UARTInner {
     }
 }
 
-impl core::fmt::Write for &SpinLock<UARTInner> {
+impl core::fmt::Write for &UARTLock {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         let mut inner = self.lock();
         for b in s.bytes() {
@@ -148,13 +156,13 @@ impl core::fmt::Write for &SpinLock<UARTInner> {
 macro_rules! print {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
-        write!($crate::uart::UART.get(), $($arg)*).ok();
+        write!($crate::device::uart::UART.get(), $($arg)*).ok();
     }};
 }
 #[macro_export]
 macro_rules! println {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
-        writeln!($crate::uart::UART.get(), $($arg)*).ok();
+        writeln!($crate::device::uart::UART.get(), $($arg)*).ok();
     }};
 }

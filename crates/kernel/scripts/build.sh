@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
-cargo clean
-cargo rustc --release --target aarch64-unknown-none-softfloat -- \
-    -C link-arg=--script=./crates/kernel/script.ld \
-    -C relocation-model=pic
-llvm-objcopy -O binary ../../target/aarch64-unknown-none-softfloat/release/kernel kernel.bin
+
+set -ex
+
+EXAMPLE=${1-"main"}
+TARGET=aarch64-unknown-none-softfloat
+PROFILE=${PROFILE-"release"}
+
+# cargo clean
+cargo rustc --profile="${PROFILE}" --example="${EXAMPLE}" \
+    --target="${TARGET}" -- \
+    -C relocation-model=static
+
+if test "$PROFILE" = "dev" ; then
+    BINARY="../../target/${TARGET}/debug/examples/${EXAMPLE}"
+else
+    BINARY="../../target/${TARGET}/${PROFILE}/examples/${EXAMPLE}"
+fi
+
+cp "${BINARY}" kernel.elf
+
+# equivalent to 'objcopy -I elf64-little -O binary "${BINARY}" init.bin'
+cargo dump-img "${BINARY}" kernel.bin
