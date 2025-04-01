@@ -18,10 +18,6 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
     println!("Staring basic vmm test");
 
-    unsafe {
-        crate::arch::memory::init_physical_alloc();
-        crate::arch::memory::init();
-    }
     println!("Init complete");
 
     //hack: get a "page" from the heap and try to map it to some virtual address

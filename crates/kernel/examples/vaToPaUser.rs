@@ -22,8 +22,6 @@ struct SomePage([u8; 4096]);
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
 
-    unsafe { crate::arch::memory::init_physical_alloc() };
-
     let process = crate::process::Process::new();
     // Assume fixed mapped range in user process (0x20_0000 in virtual memory)
     // TODO: mmap instead

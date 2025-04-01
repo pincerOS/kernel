@@ -10,7 +10,46 @@ pub use vmm::{map_device, map_device_block, map_physical, map_physical_noncachea
 pub use machine::at_s1e0r;
 pub use vmm::{create_user_region, init_physical_alloc, map_pa_to_va};
 
-pub const INIT_TCR_EL1: u64 = machine::TcrEl1::default().bits();
+pub const INIT_TCR_EL1: u64 = machine::TcrEl1::empty()
+    .set_t0sz(39) // 25 bits of address translation
+    .difference(machine::TcrEl1::EPD0)
+    .set_irgn0(0b01)
+    .set_orgn0(0b01)
+    .set_sh0(0b10)
+    .set_tg0(machine::PageSize::Size4KiB)
+    .set_t1sz(39) // 25 bits of address translation
+    .difference(machine::TcrEl1::A1)
+    .difference(machine::TcrEl1::EPD1)
+    .set_irgn1(0b01)
+    .set_orgn1(0b01)
+    .set_sh1(0b10)
+    .set_tg1(machine::PageSize::Size4KiB)
+    .set_ips(0b101)
+    .union(machine::TcrEl1::AS)
+    .difference(machine::TcrEl1::TBI0)
+    .difference(machine::TcrEl1::TBI1)
+    .bits();
+
+pub const FULL_TCR_EL1: u64 = machine::TcrEl1::empty()
+    .set_t0sz(39) // 25 bits of address translation
+    .difference(machine::TcrEl1::EPD0)
+    .set_irgn0(0b01)
+    .set_orgn0(0b01)
+    .set_sh0(0b10)
+    .set_tg0(machine::PageSize::Size4KiB)
+    .set_t1sz(16) // 48 bits of address translation
+    .difference(machine::TcrEl1::A1)
+    .difference(machine::TcrEl1::EPD1)
+    .set_irgn1(0b01)
+    .set_orgn1(0b01)
+    .set_sh1(0b10)
+    .set_tg1(machine::PageSize::Size4KiB)
+    .set_ips(0b101)
+    .union(machine::TcrEl1::AS)
+    .difference(machine::TcrEl1::TBI0)
+    .difference(machine::TcrEl1::TBI1)
+    .bits();
+
 pub const INIT_TRANSLATION: u64 = LeafDescriptor::new(0)
     .set_global()
     .clear_pxn()
