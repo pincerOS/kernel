@@ -16,7 +16,7 @@ pub unsafe fn sys_dup3(ctx: &mut Context) -> *mut Context {
     let flags = ctx.regs[2];
 
     let Some(_flags) = u32::try_from(flags).ok().and_then(DupFlags::from_bits) else {
-        ctx.regs[0] = i64::from(-1) as usize;
+        ctx.regs[0] = -1i64 as usize;
         return ctx;
     };
 
@@ -26,7 +26,7 @@ pub unsafe fn sys_dup3(ctx: &mut Context) -> *mut Context {
 
         let mut guard = proc.file_descriptors.lock();
         let Some(old) = guard.get(old_fd).cloned() else {
-            context.regs().regs[0] = i64::from(-1) as usize;
+            context.regs().regs[0] = -1i64 as usize;
             return context.resume_final();
         };
 
@@ -46,19 +46,17 @@ pub unsafe fn sys_dup3(ctx: &mut Context) -> *mut Context {
 pub unsafe fn sys_close(ctx: &mut Context) -> *mut Context {
     let fd = ctx.regs[0];
 
-    run_event_handler(ctx, move |mut context: HandlerContext<'_>| {
-        // TODO: avoid cloning process?  (Partial borrows?)  (get thread directly, then partial)
-        let proc = context.cur_process().unwrap().clone();
+    run_event_handler(ctx, move |context: HandlerContext<'_>| {
+        let proc = context.cur_process().unwrap();
 
-        let mut guard = proc.file_descriptors.lock();
-        if let Some(desc) = guard.remove(fd) {
+        let removed = proc.file_descriptors.lock().remove(fd);
+        if let Some(desc) = removed {
             // TODO: we should be careful about where/when fd destructors are run
             drop(desc);
-            context.regs().regs[0] = i64::from(0) as usize;
+            context.resume_return(0)
         } else {
-            context.regs().regs[0] = i64::from(-1) as usize;
+            context.resume_return(-1i64 as usize)
         }
-        context.resume_final()
     })
 }
 
@@ -74,8 +72,7 @@ pub unsafe fn sys_pread(ctx: &mut Context) -> *mut Context {
 
         let file = proc.file_descriptors.lock().get(fd).cloned();
         let Some(file) = file else {
-            context.regs().regs[0] = i64::from(-1) as usize;
-            return context.resume_final();
+            return context.resume_return(-1i64 as usize);
         };
 
         // TODO: sound abstraction for usermode buffers...
@@ -98,13 +95,12 @@ pub unsafe fn sys_pwrite(ctx: &mut Context) -> *mut Context {
     let buf_len = ctx.regs[2];
     let offset = ctx.regs[3];
 
-    run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
+    run_async_handler(ctx, async move |context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
 
         let file = proc.file_descriptors.lock().get(fd).cloned();
         let Some(file) = file else {
-            context.regs().regs[0] = i64::from(-1) as usize;
-            return context.resume_final();
+            return context.resume_return(-1i64 as usize);
         };
 
         // TODO: sound abstraction for usermode buffers...
@@ -115,8 +111,7 @@ pub unsafe fn sys_pwrite(ctx: &mut Context) -> *mut Context {
 
         let res = file.write(offset as u64, buf).await;
 
-        context.regs().regs[0] = res.0 as usize;
-        context.resume_final()
+        context.resume_return(res.0 as usize)
     })
 }
 
@@ -154,11 +149,11 @@ pub unsafe fn sys_openat(ctx: &mut Context) -> *mut Context {
     let mode = ctx.regs[4];
 
     let Some(flags) = u32::try_from(flags).ok().and_then(OpenFlags::from_bits) else {
-        ctx.regs[0] = i64::from(-1) as usize;
+        ctx.regs[0] = -1i64 as usize;
         return ctx;
     };
     let Some(mode) = u32::try_from(mode).ok().and_then(OpenMode::from_bits) else {
-        ctx.regs[0] = i64::from(-1) as usize;
+        ctx.regs[0] = -1i64 as usize;
         return ctx;
     };
 
@@ -170,13 +165,12 @@ pub unsafe fn sys_openat(ctx: &mut Context) -> *mut Context {
         _mode: mode,
     };
 
-    run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
+    run_async_handler(ctx, async move |context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
 
         let dir = proc.file_descriptors.lock().get(arg_data.dir_fd).cloned();
         let Some(dir) = dir else {
-            context.regs().regs[0] = i64::from(-1) as usize;
-            return context.resume_final();
+            return context.resume_return(-1i64 as usize);
         };
 
         let path = context.with_user_vmem(move || {
@@ -189,16 +183,12 @@ pub unsafe fn sys_openat(ctx: &mut Context) -> *mut Context {
         // TODO: file creation?
         let new_fd = match resolve_path(proc.root.as_ref(), dir, &path).await {
             Ok(f) => f,
-            Err(_e) => {
-                context.regs().regs[0] = i64::from(-1) as usize;
-                return context.resume_final();
-            }
+            Err(_e) => return context.resume_return(-1i64 as usize),
         };
 
         // TODO: close on exec, etc?
         let fd_idx = proc.file_descriptors.lock().insert(new_fd);
-        context.regs().regs[0] = fd_idx;
-        context.resume_final()
+        context.resume_return(fd_idx)
     })
 }
 

@@ -16,13 +16,12 @@ pub unsafe fn sys_pipe(ctx: &mut Context) -> *mut Context {
     let flags = ctx.regs[0];
 
     let Some(_flags) = u32::try_from(flags).ok().and_then(PipeFlags::from_bits) else {
-        ctx.regs[0] = i64::from(-1) as usize;
+        ctx.regs[0] = -1i64 as usize;
         return ctx;
     };
 
     run_event_handler(ctx, move |mut context: HandlerContext<'_>| {
-        // TODO: avoid cloning process?  (Partial borrows?)  (get thread directly, then partial)
-        let proc = context.cur_process().unwrap().clone();
+        let proc = context.cur_process().unwrap();
 
         let (tx, rx) = channel();
         let tx_fd = Arc::new(PipeWriteFd(SpinLock::new(tx)));
@@ -31,6 +30,7 @@ pub unsafe fn sys_pipe(ctx: &mut Context) -> *mut Context {
         let mut guard = proc.file_descriptors.lock();
         let rx_fdi = guard.insert(rx_fd);
         let tx_fdi = guard.insert(tx_fd);
+        drop(guard);
 
         let mut regs = context.regs();
         regs.regs[0] = rx_fdi;

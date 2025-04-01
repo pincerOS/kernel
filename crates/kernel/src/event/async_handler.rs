@@ -215,6 +215,11 @@ impl<'outer> HandlerContext<'outer> {
         ResumedContext(())
     }
 
+    pub fn resume_return(mut self, x0: usize) -> ResumedContext {
+        self.regs().regs[0] = x0;
+        ResumedContext(())
+    }
+
     pub fn regs(&mut self) -> ThreadRefMut<'_, Context> {
         let thread = self.cur_thread_mut().as_mut().unwrap();
         ThreadRefMut {

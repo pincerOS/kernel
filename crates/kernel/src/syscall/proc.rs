@@ -34,16 +34,15 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
     let user_x0 = ctx.regs[2];
     let flags = ctx.regs[3];
 
-    run_event_handler(ctx, move |mut context: HandlerContext<'_>| {
-        // TODO: avoid cloning process?  (Partial borrows?)  (get thread directly, then partial)
-        let old_process = context.cur_process().unwrap().clone();
+    run_event_handler(ctx, move |context: HandlerContext<'_>| {
+        let old_process = context.cur_process().unwrap();
 
         let wait_fd;
         let process;
 
         if flags == 1 {
             // Same process, shared memory
-            process = old_process;
+            process = old_process.clone();
             wait_fd = (-1isize) as usize;
         } else {
             process = Arc::new(old_process.fork());
@@ -63,8 +62,7 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
         user_thread.context.as_mut().unwrap().regs[0] = user_x0;
         event::SCHEDULER.add_task(event::Event::schedule_thread(user_thread));
 
-        context.regs().regs[0] = wait_fd;
-        context.resume_final()
+        context.resume_return(wait_fd)
     })
 }
 
@@ -72,23 +70,20 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
 pub unsafe fn sys_wait(ctx: &mut Context) -> *mut Context {
     let fd = ctx.regs[0];
 
-    run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
+    run_async_handler(ctx, async move |context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
 
         let file = proc.file_descriptors.lock().get(fd).cloned();
         let Some(file) = file else {
-            context.regs().regs[0] = i64::from(-1) as usize;
-            return context.resume_final();
+            return context.resume_return(-1i64 as usize);
         };
         let Some(file) = file.as_any().downcast_ref::<WaitFd>() else {
-            context.regs().regs[0] = i64::from(-1) as usize;
-            return context.resume_final();
+            return context.resume_return(-1i64 as usize);
         };
 
         let status = file.0.get().await;
 
-        context.regs().regs[0] = status.status as usize;
-        context.resume_final()
+        context.resume_return(status.status as usize)
     })
 }
 

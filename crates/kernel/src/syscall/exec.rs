@@ -41,7 +41,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
     let env_ptr = ctx.regs[5] as *const StringPair;
 
     let Some(flags) = u32::try_from(flags).ok().and_then(ExecFlags::from_bits) else {
-        ctx.regs[0] = i64::from(-1) as usize;
+        ctx.regs[0] = -1i64 as usize;
         return ctx;
     };
 
@@ -59,8 +59,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
 
         let file = proc.file_descriptors.lock().get(arg_data.fd).cloned();
         let Some(file) = file else {
-            context.regs().regs[0] = i64::from(-1) as usize;
-            return context.resume_final();
+            return context.resume_return(-1i64 as usize);
         };
 
         context.with_user_vmem(|| {
@@ -80,10 +79,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
 
         let file_data = match crate::process::fd::read_all(&*file).await {
             Ok(f) => f,
-            Err(_e) => {
-                context.regs().regs[0] = (-1i64) as usize;
-                return context.resume_final();
-            }
+            Err(_e) => return context.resume_return(-1i64 as usize),
         };
 
         // TODO: only read parts of file that are necessary

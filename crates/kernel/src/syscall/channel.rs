@@ -66,20 +66,18 @@ pub unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
     let buf_len = ctx.regs[3];
     let flags = SendRecvFlags::from_bits_truncate(ctx.regs[4] as u32);
 
-    run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
+    run_async_handler(ctx, async move |context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
 
         let mut fds_guard = proc.file_descriptors.lock();
         let file = fds_guard.get(fd).cloned();
         let Some(file) = file else {
             drop(fds_guard);
-            context.regs().regs[0] = i64::from(-1) as usize;
-            return context.resume_final();
+            return context.resume_return(-1i64 as usize);
         };
         let Some(sender) = file.as_any().downcast_ref::<Channel>() else {
             drop(fds_guard);
-            context.regs().regs[0] = i64::from(-1) as usize;
-            return context.resume_final();
+            return context.resume_return(-1i64 as usize);
         };
 
         let user_message = context.with_user_vmem(|| {
@@ -93,8 +91,7 @@ pub unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
             if desc != u32::MAX {
                 let Some(fd) = fds_guard.remove(desc as usize) else {
                     drop(fds_guard);
-                    context.regs().regs[0] = i64::from(-1) as usize;
-                    return context.resume_final();
+                    return context.resume_return(-1i64 as usize);
                 };
                 *obj = Some(fd);
             }
@@ -141,8 +138,7 @@ pub unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
             res = 0;
         }
 
-        context.regs().regs[0] = res;
-        context.resume_final()
+        context.resume_return(res)
     })
 }
 
@@ -153,17 +149,15 @@ pub unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
     let buf_cap = ctx.regs[3];
     let flags = SendRecvFlags::from_bits_truncate(ctx.regs[4] as u32);
 
-    run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
+    run_async_handler(ctx, async move |context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
 
         let file = proc.file_descriptors.lock().get(fd).cloned();
         let Some(file) = file else {
-            context.regs().regs[0] = i64::from(-1) as usize;
-            return context.resume_final();
+            return context.resume_return(-1i64 as usize);
         };
         let Some(channel) = file.as_any().downcast_ref::<Channel>() else {
-            context.regs().regs[0] = i64::from(-1) as usize;
-            return context.resume_final();
+            return context.resume_return(-1i64 as usize);
         };
 
         let message;
@@ -174,8 +168,7 @@ pub unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
         }
 
         let Some(message) = message else {
-            context.regs().regs[0] = -2isize as usize;
-            return context.resume_final();
+            return context.resume_return(-2i64 as usize);
         };
 
         let mut objects = [u32::MAX; 4];
@@ -214,8 +207,7 @@ pub unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
             unsafe { core::ptr::write(msg_ptr, user_message) };
         });
 
-        context.regs().regs[0] = data_len;
-        context.resume_final()
+        context.resume_return(data_len)
     })
 }
 
