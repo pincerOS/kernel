@@ -200,14 +200,7 @@ pub struct Superblock {
     unused_alignment_2: [u8; 3],
     s_default_mount_options: u32,
     s_first_meta_bg: u32,
-    // for some reason (padding?) unused_alignment_4: [u8; 760] still causes
-    // issues with bytemuck::Zeroable so I did this garbage instead
-    unused_alignment_4: [u8; 512],
-    unused_alignment_5: [u8; 128],
-    unused_alignment_6: [u8; 64],
-    unused_alignment_7: [u8; 32],
-    unused_alignment_8: [u8; 16],
-    unused_alignment_9: [u8; 8],
+    unused_alignment_4: [u8; 760],
 }
 
 impl Superblock {
@@ -487,7 +480,6 @@ where
     }
 
     fn get_block_that_has_inode(
-        device: &mut D,
         superblock: &Superblock,
         block_group_descriptor_tables: &Vec<BGD>,
         inode_num: usize,
@@ -517,8 +509,7 @@ where
         inode_num: usize,
         deferred_writes: Option<&DeferredWriteMap>,
     ) -> Result<INode, Ext2Error> {
-        let inode_block_info: INodeBlockInfo = Ext2::get_block_that_has_inode(
-            device,
+        let inode_block_info: INodeBlockInfo = Self::get_block_that_has_inode(
             superblock,
             block_group_descriptor_tables,
             inode_num,
@@ -753,7 +744,7 @@ where
         let mut current_node: Rc<RefCell<INodeWrapper>> = node;
 
         for (index, file_dir) in path_split_vec.iter().enumerate() {
-            let mut current_node_result: Result<Rc<RefCell<INodeWrapper>>, Ext2Error> =
+            let current_node_result: Result<Rc<RefCell<INodeWrapper>>, Ext2Error> =
                 self.find(&current_node.borrow(), file_dir);
 
             if current_node_result.is_err() {
@@ -791,7 +782,7 @@ where
         let block_size: usize = self.superblock.get_block_size();
         let mut found_block_group_index_option: Option<usize> = None;
 
-        for (block_group_index, mut block_group_table) in
+        for (block_group_index, block_group_table) in
             self.block_group_descriptor_tables.iter_mut().enumerate()
         {
             if block_group_table.bg_free_inodes_count > 1 {
@@ -808,7 +799,7 @@ where
             let inode_bitmap_num = self.block_group_descriptor_tables[found_block_group_index]
                 .bg_inode_bitmap as usize;
             let mut byte_write: [u8; 1] = [0; 1];
-            let mut byte_write_pos: usize = 0;
+            let byte_write_pos;
 
             self.read_logical_block(
                 inode_bitmap_num,
@@ -1279,7 +1270,7 @@ impl INodeWrapper {
         (self.inode.i_size as u64) | ((self.inode.i_dir_acl as u64) << 32)
     }
 
-    pub fn update_size<D: BlockDevice>(&mut self, new_size: u64, ext2: &Ext2<D>) {
+    pub fn update_size<D: BlockDevice>(&mut self, new_size: u64, _ext2: &Ext2<D>) {
         self.inode.i_size = ((new_size << 32) >> 32) as u32;
         self.inode.i_dir_acl = (new_size >> 32) as u32;
     }
@@ -1289,8 +1280,7 @@ impl INodeWrapper {
         ext2: &mut Ext2<D>,
         deferred_write_map: &mut DeferredWriteMap,
     ) -> Result<(), Ext2Error> {
-        let inode_block_info: INodeBlockInfo = Ext2::get_block_that_has_inode(
-            &mut ext2.device,
+        let inode_block_info: INodeBlockInfo = Ext2::<D>::get_block_that_has_inode(
             &ext2.superblock,
             &ext2.block_group_descriptor_tables,
             self._inode_num as usize,
@@ -1337,10 +1327,8 @@ impl INodeWrapper {
         let block_size: usize = ext2.superblock.get_block_size();
         let block_inode_list_size: usize = block_size / size_of::<u32>();
         let block_inode_list_size_squared: usize = block_inode_list_size * block_inode_list_size;
-        let block_inode_list_size_cubed: usize =
-            block_inode_list_size_squared * block_inode_list_size;
 
-        let mut logical_block_number: u32 = 0;
+        let logical_block_number;
         let mut block_buffer = vec![0; block_size];
 
         if number
@@ -1417,8 +1405,6 @@ impl INodeWrapper {
 
             let index: usize = number - 12;
             let offset: usize = index * size_of::<u32>();
-
-            let block_buffer_u32_slice: &[u32] = bytemuck::cast_slice::<_, u32>(&mut block_buffer);
 
             logical_block_number = Self::get_word(&block_buffer[offset..offset + 4]);
         } else {
@@ -1682,7 +1668,7 @@ impl INodeWrapper {
         )?;
 
         {
-            let mut block_buffer_u32_slice: &mut [u32] =
+            let block_buffer_u32_slice: &mut [u32] =
                 bytemuck::cast_slice_mut::<_, u32>(block_buffer.as_mut_slice());
 
             // handling the contained lists of inode blocks
@@ -1695,8 +1681,6 @@ impl INodeWrapper {
                     break;
                 }
             }
-
-            print!("");
         }
 
         // TODO(Bobby): change this to a selective write rather than writing the whole buffer
@@ -2157,8 +2141,7 @@ impl INodeWrapper {
         // TODO:
         let mut deferred_writes = BTreeMap::new();
         let block_size: usize = ext2.superblock.get_block_size();
-        let block_info: INodeBlockInfo = Ext2::get_block_that_has_inode(
-            &mut ext2.device,
+        let block_info: INodeBlockInfo = Ext2::<D>::get_block_that_has_inode(
             &ext2.superblock,
             &ext2.block_group_descriptor_tables,
             self._inode_num as usize,

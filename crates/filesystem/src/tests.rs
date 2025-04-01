@@ -5,12 +5,12 @@ use crate::{linux::FileBlockDevice, Ext2, INodeWrapper};
 use alloc::rc::Rc;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{File, ReadDir};
+use std::fs::File;
 use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::prelude::v1::{Box, String, ToString, Vec};
-use std::process::{Command, Output};
+use std::prelude::v1::{String, ToString, Vec};
+use std::process::Command;
 use std::{env, io, println, vec};
 use std::{format, fs};
 
@@ -48,8 +48,7 @@ pub fn create_ext2_fs(
         .unwrap();
     let disk: FileBlockDevice = FileBlockDevice::new(file);
 
-    let mut ext2 = Ext2::new(disk);
-
+    let ext2 = Ext2::new(disk);
     ext2.unwrap()
 }
 
@@ -80,7 +79,7 @@ fn read_and_verify_via_fuse_test(verify_requests: &Vec<VerifyRequest>, image_pat
     let mut test_mount_dir = String::from("/tmp/tst-fuse-ext2-mnt-");
     test_mount_dir.push_str(image_path);
 
-    let mkdir_result = Command::new("mkdir")
+    let _mkdir_result = Command::new("mkdir")
         .args([test_mount_dir.as_str()])
         .output();
     let mut complete_image_path = String::from(std::env::current_dir().unwrap().to_str().unwrap());
@@ -97,7 +96,7 @@ fn read_and_verify_via_fuse_test(verify_requests: &Vec<VerifyRequest>, image_pat
         ])
         .output()
         .unwrap();
-    let fuse_ext2_stderr = String::from_utf8(fuse_ext2_output.stderr).unwrap();
+    // let fuse_ext2_stderr = String::from_utf8(fuse_ext2_output.stderr).unwrap();
 
     assert!(fuse_ext2_output.status.success());
 
@@ -162,7 +161,7 @@ fn read_and_verify_test(
 ) {
     let root_node: Rc<RefCell<INodeWrapper>> = ext2.get_root_inode_wrapper();
 
-    for (i, verify_request) in verify_requests.iter().enumerate() {
+    for verify_request in verify_requests.iter() {
         let file_node: Rc<RefCell<INodeWrapper>> = ext2
             .find_recursive(root_node.clone(), verify_request.file_path, false, false)
             .unwrap();
@@ -190,8 +189,6 @@ fn write_and_verify_test(
     let root_node = ext2.get_root_inode_wrapper();
 
     for verify_request in verify_requests {
-        let file_path_str: &str = std::str::from_utf8(verify_request.file_path).unwrap();
-
         let file_node: Rc<RefCell<INodeWrapper>> = ext2
             .find_recursive(
                 root_node.clone(),
@@ -305,7 +302,7 @@ fn single_indirect_read_test() {
     for i in 0..13 {
         text_bytes[i * 1024] = (i + 1) as u8;
     }
-    f.write(&text_bytes);
+    f.write(&text_bytes).unwrap();
 
     // block size is 1024 for now
     let image_path = "indirect1.img";
@@ -318,7 +315,7 @@ fn single_indirect_read_test() {
         write_mode: WriteMode::None,
         create_dirs_if_nonexistent: false,
     }];
-    fs::remove_file("../../test/example_1.dir/single.txt");
+    fs::remove_file("../../test/example_1.dir/single.txt").unwrap();
 
     read_and_verify_test(&mut ext2, &verify_requests, image_path);
 }
@@ -337,7 +334,7 @@ fn double_indirect_read_test() {
     for i in 0..269 {
         text_bytes[i * 1024] = (i + 1) as u8;
     }
-    f.write(&text_bytes);
+    f.write(&text_bytes).unwrap();
 
     // block size is 1024 for now
     let image_path = "indirect2.img";
@@ -350,7 +347,7 @@ fn double_indirect_read_test() {
         write_mode: WriteMode::None,
         create_dirs_if_nonexistent: false,
     }];
-    fs::remove_file("../../test/example_1.dir/double.txt");
+    fs::remove_file("../../test/example_1.dir/double.txt").unwrap();
 
     read_and_verify_test(&mut ext2, &verify_requests, image_path);
 }
@@ -559,16 +556,13 @@ fn file_mass_creation_test() {
         .unwrap();
 
     let mut verify_requests: Vec<VerifyRequest> = Vec::new();
-    let mut file_paths: [String; 50] = core::array::from_fn(|i| String::from(""));
-
-    for i in 0..50 {
+    let file_paths: [String; 50] = core::array::from_fn(|i| {
         let file_suffix: &str = match i % 2 {
             0 => "image.jpg",
             _ => "bee_movie.txt",
         };
-
-        file_paths[i] = format!("{}{}", i, file_suffix);
-    }
+        format!("{}{}", i, file_suffix)
+    });
 
     for i in 0..50 {
         let data_ptr = match i % 2 {
