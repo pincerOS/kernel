@@ -14,7 +14,9 @@ use super::{
 const PG_SZ: usize = 0x1000;
 const KERNEL_LEAF_TABLE_SIZE: usize = PG_SZ / 8 * 2;
 
-#[repr(C, align(128))]
+const TABLE_SIZE: usize = PG_SZ / size_of::<LeafDescriptor>();
+
+#[repr(C, align(4096))]
 pub struct KernelTranslationTable(pub [TranslationDescriptor; 16]);
 
 #[repr(C, align(4096))]
@@ -129,31 +131,105 @@ unsafe fn first_unused_virt_page(table: *mut KernelLeafTable) -> Option<usize> {
     None
 }
 
+//Address levels are taken from the following documentation
+//https://developer.arm.com/documentation/101811/0104/Translation-granule/The-starting-level-of-address-translation
 #[derive(Debug)]
 pub enum MappingError {
     HugePagePresent,
     TableDescriptorPresent,
     LeafTableSpotTaken,
+    Level0EntryInvalid,
+    Level1EntryInvalid,
+    Level2EntryInvalid,
+    Level3EntryInvalid,
 }
 
 impl Display for MappingError {
     fn fmt(&self, f: &mut Formatter) -> core::fmt::Result {
         match self {
-            Self::HugePagePresent => {
-                write!(
-                    f,
-                    "Huge page present is present in desired mapping location"
-                )
-            }
-            Self::TableDescriptorPresent => {
-                write!(f, "Table descriptor present in desired mapping location")
-            }
-            Self::LeafTableSpotTaken => write!(
-                f,
-                "The spot in the leaf table that is being mapped to is already taken"
-            ),
+            Self::HugePagePresent => write!(f, "Huge page present is present in desired mapping location"),
+            Self::TableDescriptorPresent => write!(f, "Table descriptor present in desired mapping location"),
+            Self::LeafTableSpotTaken => write!(f, "The spot in the leaf table that is being mapped to is already taken"),
+            Self::Level0EntryInvalid => write!(f, "The level 0 entry for this address is invalid"),
+            Self::Level1EntryInvalid => write!(f, "The level 1 entry for this address is invalid"),
+            Self::Level2EntryInvalid => write!(f, "The level 2 entry for this address is invalid"),
+            Self::Level3EntryInvalid => write!(f, "The level 3 entry for this address is invalid"),
         }
     }
+}
+
+pub unsafe fn get_table_descriptor_kernel(va: usize, target_level: u8, curr_level: u8, translation_table: *mut KernelTranslationTable) -> Result<&mut TableDescriptor, MappingError> {
+    assert!(target_level <= 2);
+    assert!(curr_level <= 2);
+    //12 bits for 4096 byte page offset, after that its 9 bits for each level
+    let mask = 0b111111111;
+    let table_index = (va >> (12 + (9 * (4 - curr_level)))) & mask;
+    let table_entry: *mut TableDescriptor = translation_table.cast::<TableDescriptor>().wrapping_add(table_index);
+    
+    //This allows you to get an invalid table descriptor, can move this lower if needed
+    if curr_level == target_level {
+        return OK(&mut (*table_entry));
+    }
+
+    if unsafe { table_entry.read()  }.is_valid() {
+        let err: MappingError = match curr_level {
+            0 => MappingError::Level0EntryInvalid,
+            1 => MappingError::Level1EntryInvalid,
+            2 => MappingError::Level2EntryInvalid,
+            _ => unreachable!(),
+        };
+
+        return Err(err);
+    } else { 
+        let next_lvl_table_pa: usize = unsafe { *table_entry  }.get_pa() << 12;
+        let next_lvl_table: *mut KernelTranslationTable = PAGE_ALLOCATOR.get().get_mapped_frame(PhysicalPage::new(PAddr(next_level_table_pa))).cast::<KernelTranslationTable>();
+
+        table_desc = get_table_descriptor_user(va, target_level, curr_level - 1, next_lvl_table)?;
+    }
+    return Ok(table_desc);
+}
+
+pub unsafe fn get_table_descriptor_user(va: usize, target_level: u8, curr_level: u8, translation_table: *mut UserTranslationTable) -> Result<&mut TableDescriptor, MappingError> {
+    assert!(target_level <= 2);
+    assert!(curr_level <= 2);
+    //12 bits for 4096 byte page offset, after that its 9 bits for each level
+    let mask = 0b111111111;
+    let table_index = (va >> (12 + (9 * (4 - curr_level)))) & mask;
+    let table_entry: *mut TableDescriptor = translation_table.cast::<TableDescriptor>().wrapping_add(table_index);
+    
+    //This allows you to get an invalid table descriptor, can move this lower if needed
+    if curr_level == target_level {
+        return OK(&mut (*table_entry));
+    }
+
+    if unsafe { table_entry.read()  }.is_valid() {
+        let err: MappingError = match curr_level {
+            0 => MappingError::Level0EntryInvalid,
+            1 => MappingError::Level1EntryInvalid,
+            2 => MappingError::Level2EntryInvalid,
+            _ => unreachable!(),
+        };
+
+        return Err(err);
+    } else { 
+        let next_lvl_table_pa: usize = unsafe { *table_entry  }.get_pa() << 12;
+        let next_lvl_table: *mut UserTranslationTable = PAGE_ALLOCATOR.get().get_mapped_frame(PhysicalPage::new(PAddr(next_level_table_pa))).cast::<UserTranslationTable>();
+
+        table_desc = get_table_descriptor_user(va, target_level, curr_level - 1, next_lvl_table)?;
+        return Ok(table_desc);
+    }
+}
+
+pub unsafe fn get_leaf_descriptor(va: usize, table_descriptor: &mut TableDescriptor) -> &mut LeafDescriptor {
+    let mask = 0b111111111;
+    //12 bits for page offset, last 9 are leaf table index
+    let leaf_table_index = (va >> (12 + 9)) & mask;
+    let leaf_table_pa: usize = table_descriptor.get_pa() << 12;
+    let lvl3_table_ptr = PAGE_ALLOCATOR.get().get_mapped_frame(PhysicalPage::new(PAddr(leaf_table_pa))).cast::<[LeafDescriptor; PG_SZ / size_of::<LeafDescriptor>()]>();
+    let table_base = lvl3_table_ptr.cast::<LeafDescriptor>();
+    let entry = table_base.wrapping_add(leaf_table_index);
+
+    return &mut (*entry);
 }
 
 //TODO: give option of setting bits for the mapping
@@ -210,57 +286,88 @@ pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> Result<(), MappingErr
 
 //TODO: add option to map huge page
 //TODO: add option to pass in flags
-//TODO: in the future, change this to take in a mutable reference to the user translation table
-//instead of just ttrb0
-pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result<(), MappingError> {
-    let translation_table = PAGE_ALLOCATOR
-        .get()
-        .get_mapped_frame(PhysicalPage::new(PAddr(ttbr0_pa)))
-        .cast::<UserTranslationTable>();
-    let translation_table = unsafe { &mut *translation_table };
+pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, translation_table: &mut Box<UserTranslationTable>, is_huge_page: bool) -> Result<(), MappingError> {
+    let translation_table_ptr: *mut UserTranslationTable = &mut *translation_table;
 
-    //TODO: stop using these constants
-    let mut index_bits = 25 - 21; //mildly redundant
-    let mut mask = (1 << index_bits) - 1;
-    //level 2 table index is bits 29-21
-    let mut table_index = (va >> 21) & mask;
-    let mut table_descriptor: TableDescriptor = unsafe { translation_table.0[table_index].table };
-
-    //Need to insert new page table
-    if !table_descriptor.is_valid() {
-        let frame = PAGE_ALLOCATOR.get().alloc_mapped_frame();
-        translation_table.0[table_index] = TranslationDescriptor {
-            table: TableDescriptor::new(frame.paddr),
-        };
-        //Need to update table descriptor being used so that leaf insertion can occur
-        table_descriptor = unsafe { translation_table.0[table_index].table };
-    } else if !table_descriptor.is_table_descriptor() {
-        //Error: Huge page instead of table descriptor
-        return Err(MappingError::HugePagePresent);
+    let mut table_descriptor: &mut TableDescriptor;
+    loop {
+        match get_table_descriptor_user(va, 2, 0, translation_table_ptr){
+            Ok(table_desc) => {
+                table_descriptor = table_desc;
+                break;
+            },
+            Err(MappingError::Level0EntryInvalid) => {
+                let table_desc: &mut UserTranslationTable = get_table_descriptor_user(va, 0, 0, translation_table_ptr);
+                let frame = PAGE_ALLOCATOR.get().alloc_mapped_frame();
+                table_desc = TranslationDescriptor { table: TableDescriptor::new(frame.paddr), };
+                unsafe {
+                    asm! {
+                        "dsb ISH",
+                        options(readonly, nostack, preserves_flags)
+                    }
+                }
+            },
+            Err(MappingError::Level1EntryInvalid) => { 
+                let table_desc: &mut UserTranslationTable = get_table_descriptor_user(va, 1, 0, translation_table_ptr);
+                let frame = PAGE_ALLOCATOR.get().alloc_mapped_frame();
+                table_desc = TranslationDescriptor { table: TableDescriptor::new(frame.paddr), };
+                unsafe {
+                    asm! {
+                        "dsb ISH",
+                        options(readonly, nostack, preserves_flags)
+                    }
+                }
+            },
+            Err(e) => unreachable!(),
+        }
     }
 
-    //Regular page case
-    let lvl3_pa: usize = table_descriptor.get_pa() << 12;
-    let lvl3_table_ptr = PAGE_ALLOCATOR
-        .get()
-        .get_mapped_frame(PhysicalPage::new(PAddr(lvl3_pa)))
-        .cast::<[LeafDescriptor; PG_SZ / size_of::<LeafDescriptor>()]>();
+    if is_huge_page {
+        
+        if table_descriptor.is_valid() {
+            //Want to map a huge page but there is one already there
+            return Err(MappingError::HugePagePresent);
+        }
 
-    index_bits = 21 - 12;
-    mask = (1 << index_bits) - 1;
-    table_index = (va >> 12) & mask;
-
-    let table_base = lvl3_table_ptr.cast::<LeafDescriptor>();
-    let entry = table_base.wrapping_add(table_index);
-    if unsafe { entry.read() }.is_valid() {
-        //Error: spot in leaf table is taken
+        let aligned_pa = (pa / 0x200_000) * 0x200_000;
+        table_descriptor = TableDescriptor::new(aligned_pa).set_global();
+        
+        //TODO: add this function to machine.rs
+        table_descriptor.set_user_permissions(true);
+        unsafe {
+            asm! {
+                "dsb ISH",
+                options(readonly, nostack, preserves_flags)
+            }
+        }
+        return Ok(());
+    }
+    
+    //The physical page that this points to is a leaf table
+    if !table_descriptor.is_valid() {
+         
+        let frame = PAGE_ALLOCATOR.get().alloc_mapped_frame();
+        table_desc = TranslationDescriptor { table: TableDescriptor::new(frame.paddr), };
+        unsafe {
+            asm! {
+                "dsb ISH",
+                options(readonly, nostack, preserves_flags)
+            }
+        }
+    } else if !table_descriptor.is_table_descriptor() {
+        //TODO: change code to support huge pages
+        return Err(MappingError::HugePagePresent);
+    }
+    
+    let leaf_descriptor: &mut LeafDescriptor = get_leaf_descriptor(va, table_descriptor);
+    if !leaf_descriptor.is_valid() {
         return Err(MappingError::LeafTableSpotTaken);
     }
 
     let aligned_pa = (pa / PG_SZ) * PG_SZ;
-
-    let new_desc = LeafDescriptor::new(aligned_pa).set_global();
-    unsafe { entry.write(new_desc) };
+    leaf_descriptor = LeafDescriptor::new(aligned_pa).set_global();
+    //TODO: add this function to machine.rs
+    leaf_descriptor.set_user_permissions(true);
 
     unsafe {
         asm! {
@@ -269,7 +376,7 @@ pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result
         }
     }
 
-    Ok(())
+    return Ok(());
 }
 
 /// not thread safe
