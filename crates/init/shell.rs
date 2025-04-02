@@ -87,7 +87,7 @@ fn readline(reader: &mut LineReader) -> Result<&[u8], usize> {
 }
 
 #[no_mangle]
-fn main(_chan: ulib::sys::ChannelDesc) {
+fn main() {
     println!("Starting 🐚");
 
     let root = 3;

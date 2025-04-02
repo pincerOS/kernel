@@ -12,7 +12,7 @@ bitflags::bitflags! {
 /// syscall dup3(old_fd: u32, new_fd: u32, flags: DupFlags) -> i64
 pub unsafe fn sys_dup3(ctx: &mut Context) -> *mut Context {
     let old_fd = ctx.regs[0];
-    let new_fd = ctx.regs[1];
+    let mut new_fd = ctx.regs[1];
     let flags = ctx.regs[2];
 
     let Some(_flags) = u32::try_from(flags).ok().and_then(DupFlags::from_bits) else {
@@ -30,11 +30,14 @@ pub unsafe fn sys_dup3(ctx: &mut Context) -> *mut Context {
             return context.resume_final();
         };
 
-        let to_close = guard.set(new_fd, old);
-
-        if let Some(desc) = to_close {
-            // TODO: we should be careful about where/when fd destructors are run
-            drop(desc);
+        if new_fd == u32::MAX as usize {
+            new_fd = guard.insert(old);
+        } else {
+            let to_close = guard.set(new_fd, old);
+            if let Some(desc) = to_close {
+                // TODO: we should be careful about where/when fd destructors are run
+                drop(desc);
+            }
         }
 
         context.regs().regs[0] = new_fd;
