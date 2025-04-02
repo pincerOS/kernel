@@ -115,6 +115,7 @@ unsafe extern "C" {
     pub fn sys_acquire_fb(width: usize, height: usize, res: *mut RawFB) -> isize;
 }
 
+syscall!(24 => pub fn sys_memfd_create() -> isize);
 syscall!(25 => pub fn sys_poll_key_event() -> isize);
 
 syscall!(26 => pub fn sys_sem_create(value: usize) -> isize);

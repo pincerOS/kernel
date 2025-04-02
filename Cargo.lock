@@ -29,6 +29,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "display-client"
+version = "0.1.0"
+dependencies = [
+ "display-proto",
+ "ulib",
+]
+
+[[package]]
+name = "display-proto"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
+name = "display-server"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "display-proto",
+ "linked_list_allocator",
+ "ulib",
+]
+
+[[package]]
 name = "elf"
 version = "0.2.0"
 dependencies = [
