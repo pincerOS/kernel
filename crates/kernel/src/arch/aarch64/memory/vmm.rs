@@ -104,32 +104,50 @@ pub unsafe fn init() {
             //set_translation_descriptor(0x20_0000 * i, 2, 0, );
             map_pa_to_va(0x20_0000 * i, 0x20_0000, kernel_translation_table, true).unwrap();
         }
-         
-        /*
-        // TEMP: 13 x 2MB = 26MB for heap
-        for idx in 1..14 {
-            KERNEL_TRANSLATION_TABLE.0[idx] = TranslationDescriptor {
-                leaf: LeafDescriptor::new(0x20_0000 * idx)
-                    .set_global()
-                    .difference(LeafDescriptor::IS_PAGE_DESCRIPTOR),
-            };
-        }
-        // TEMP: 4MB of virtual addresses (1K pages) for kernel mmaping
-        KERNEL_TRANSLATION_TABLE.0[14] = TranslationDescriptor {
-            table: TableDescriptor::new(
-                physical_addr(addr_of!(KERNEL_LEAF_TABLE).addr()).unwrap() as usize
-            ),
-        };
-        KERNEL_TRANSLATION_TABLE.0[15] = TranslationDescriptor {
-            table: TableDescriptor::new(
-                physical_addr(addr_of!(KERNEL_LEAF_TABLE).addr() + PG_SZ).unwrap() as usize,
-            ),
-        };
-        */
+        
+        //No leaf table
     }
 }
 
-unsafe fn first_unused_virt_page(table: *mut KernelLeafTable) -> Option<usize> {
+unsafe fn first_unused_virt_page_addr(table: *mut UnifiedTranslationTable, curr_level: u8) -> Option<usize> {
+    assert!(curr_level <= 3);
+    if curr_level == 3 {
+        let table_base = table.cast::<LeafDescriptor>();
+        for idx in 0..TRANSLATION_TABLE_SIZE {
+            let entry = table_base.wrapping_add(idx);
+            if !(unsafe { entry.read()  }.is_valid()) {
+                return Some(idx * PG_SZ);
+            }
+        }
+    } else {
+        //TODO: double check the mov amount math
+        let mov_amt: usize = PG_SZ * TRANSLATION_TABLE_SIZE.powi(3 - curr_level);
+        let table_base = table.cast::<TableDescriptor>();
+        for idx in 0..TRANSLATION_TABLE_SIZE {
+            let entry = table_base.wrapping_add(idx);
+            let mut descriptor = unsafe { entry.read() };
+
+            if !descriptor.is_valid() {
+                let frame = PAGE_ALLOCATOR.get().alloc_mapped_frame();
+                descriptor = TableDescriptor::new(frame.paddr);
+                let intermediate_descriptor = TranslationDescriptor { table: descriptor, };
+                unsafe { entry.write(intermediate_descriptor) };
+            }
+            
+            let next_table: *mut UnifiedTranslationTable = (descriptor.get_pa() << 12) as *mut UnifiedTranslationTable;
+            if let Some(addr) = first_unused_virt_page_addr(next_table, curr_level + 1){
+                return Some((idx * mov_amt) + addr);
+            }
+
+        }
+    }
+
+    return None;
+}
+
+/*
+unsafe fn first_unused_virt_page(table: *mut UnifiedTranslationTable) -> Option<usize> {
+    
     let table_base = table.cast::<LeafDescriptor>();
     for idx in 0..KERNEL_LEAF_TABLE_SIZE {
         let entry = table_base.wrapping_add(idx);
@@ -138,8 +156,10 @@ unsafe fn first_unused_virt_page(table: *mut KernelLeafTable) -> Option<usize> {
             return Some(idx);
         }
     }
+    
     None
 }
+*/
 
 //Address levels are taken from the following documentation
 //https://developer.arm.com/documentation/101811/0104/Translation-granule/The-starting-level-of-address-translation
@@ -250,7 +270,6 @@ pub unsafe fn map_pa_to_va(pa: usize, va: usize, translation_table: *mut Unified
 
         let aligned_pa = (pa / 0x200_000) * 0x200_000;
         let new_lef = LeafDescriptor::new(aligned_pa).set_global().difference(LeafDescriptor::IS_PAGE_DESCRIPTOR);
-        //TODO: add this function to machine.rs
         new_leaf.set_user_permissions(true);
         
         //This ideally shouldn't panic as the loop above fills in any missing entries
@@ -289,6 +308,18 @@ pub unsafe fn map_pa_to_va(pa: usize, va: usize, translation_table: *mut Unified
 
 //TODO: rewrite all of these
 
+pub unsafe fn map_device(pa: usize) -> NonNull<()> {
+    let pa_aligned = (pa / PG_SZ) * PG_SZ;
+    let kernel_translation_table: *mut UnifiedTranslationTable = &raw mut KERNEL_TRANSLATION_TABLE;
+
+    let vaddr: usize = first_unused_virt_page_addr(kernel_translation_table, 0).expect("OUt of space in the kernel page table!");
+    let new_desc = LeafDescriptor::new(pa_aligned).set_mair(1).set_global();
+    set_translation_descriptor(vaddr, 3, 0, kernel_translation_table, TranslationDescriptor { leaf: new_desc }).unwrap();
+
+    //TODO: continue here
+}
+
+/*
 /// not thread safe
 pub unsafe fn map_device(pa: usize) -> NonNull<()> {
     let pa_aligned = (pa / PG_SZ) * PG_SZ;
@@ -311,6 +342,7 @@ pub unsafe fn map_device(pa: usize) -> NonNull<()> {
     let off = 0x20_0000 * 14 + idx * PG_SZ + (pa - pa_aligned);
     unsafe { virt_addr_base().byte_add(off) }
 }
+*/
 
 /// not thread safe
 pub unsafe fn map_device_block(pa_start: usize, size: usize) -> NonNull<()> {
