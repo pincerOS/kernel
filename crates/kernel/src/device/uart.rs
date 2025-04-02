@@ -150,17 +150,17 @@ impl core::fmt::Write for &SpinLock<UARTInner> {
     }
 }
 
-#[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => {{
-        use core::fmt::Write;
-        write!($crate::device::uart::UART.get(), $($arg)*).ok();
-    }};
-}
-#[macro_export]
-macro_rules! println {
-    ($($arg:tt)*) => {{
-        use core::fmt::Write;
-        writeln!($crate::device::uart::UART.get(), $($arg)*).ok();
-    }};
-}
+// #[macro_export]
+// macro_rules! print {
+//     ($($arg:tt)*) => {{
+//         use core::fmt::Write;
+//         write!($crate::device::uart::UART.get(), $($arg)*).ok();
+//     }};
+// }
+// #[macro_export]
+// macro_rules! println {
+//     ($($arg:tt)*) => {{
+//         use core::fmt::Write;
+//         writeln!($crate::device::uart::UART.get(), $($arg)*).ok();
+//     }};
+// }

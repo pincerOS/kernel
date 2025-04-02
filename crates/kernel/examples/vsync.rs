@@ -44,5 +44,6 @@ fn vsync_tearing_demo(surface: &mut mailbox::Surface) {
 
         surface.present();
         surface.wait_for_frame();
+        println!("test");
     }
 }

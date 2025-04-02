@@ -7,4 +7,5 @@ kernel.elf
 .DS_Store
 *.tmp.*
 *.img
+*.dd
 .llvmbox

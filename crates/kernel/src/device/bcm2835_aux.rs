@@ -1,6 +1,11 @@
-use crate::sync::{SpinLock, Volatile};
+use crate::sync::{SpinLock, UnsafeInit,Volatile};
+
+use super::GPIO;
 
 // https://www.raspberrypi.org/app/uploads/2012/02/BCM2835-ARM-Peripherals.pdf
+
+pub static MINI_UART: UnsafeInit<SpinLock<MiniUart>> = unsafe { UnsafeInit::uninit() };
+
 
 pub struct MiniUart {
     base: *mut (),
@@ -44,10 +49,27 @@ impl MiniUart {
             this.reg(Self::AUX_ENABLES).write(0b001);
             // Clear bit 7, DLAB (baudrate register access instead of data)
             // Clear bit 6, break
+
+            this.reg(Self::AUX_MU_IER_REG).write(0);
+            this.reg(Self::AUX_MU_CNTL_REG).write(0);
+            this.reg(Self::AUX_MU_LCR_REG).write(3);
+            this.reg(Self::AUX_MU_MCR_REG).write(0);
+            this.reg(Self::AUX_MU_IER_REG).write(0);
+            this.reg(Self::AUX_MU_IIR_REG).write(0xc6);
+            this.reg(Self::AUX_MU_BAUD_REG).write((500000000 / (115200 * 8)) - 1);
+            // this.reg(Self::AUX_MU_BAUD_REG).write(270);
+            let mut gpio = GPIO.get().lock();
+            gpio.set_function(14, super::gpio::GpioFunction::Alt5); // GPIO 14 (TXD) to alt5
+            gpio.set_function(15, super::gpio::GpioFunction::Alt5); // GPIO 15 (RXD) to alt5
+            gpio.set_pull(14, super::gpio::GpioPull::None);
+            gpio.set_pull(15, super::gpio::GpioPull::None);
+            
+            this.reg(Self::AUX_MU_CNTL_REG).write(3);
+
             // Set bit 0, 8-bit mode
-            #[allow(clippy::eq_op)]
-            this.reg(Self::AUX_MU_LCR_REG)
-                .write((0 << 7) | (0 << 6) | (1 << 0));
+            // #[allow(clippy::eq_op)]
+            // this.reg(Self::AUX_MU_LCR_REG)
+            //     .write((0 << 7) | (0 << 6) | (1 << 0));
 
             // TODO: initialize GPIO
         }
@@ -109,4 +131,19 @@ impl core::fmt::Write for &SpinLock<MiniUart> {
         let mut inner = self.lock();
         inner.write_fmt(args)
     }
+}
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        write!($crate::device::bcm2835_aux::MINI_UART.get(), $($arg)*).ok();
+    }};
+}
+#[macro_export]
+macro_rules! println {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        writeln!($crate::device::bcm2835_aux::MINI_UART.get(), $($arg)*).ok();
+    }};
 }

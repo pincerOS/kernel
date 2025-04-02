@@ -1,5 +1,6 @@
 #[macro_use]
 pub mod uart;
+#[macro_use]
 pub mod bcm2835_aux;
 pub mod bcm2836_intc;
 pub mod gic;
@@ -153,7 +154,7 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let uart_base = unsafe { map_device(uart_addr) }.as_ptr();
 
         unsafe { uart::UART.init(SpinLock::new(uart::UARTInner::new(uart_base))) };
-        println!("| initialized UART");
+        // println!("| initialized UART");
     }
 
     let mut miniuarts = discover_compatible(tree, b"brcm,bcm2835-aux").unwrap();
@@ -161,8 +162,9 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         use core::fmt::Write;
         let (miniuart_addr, _) = find_device_addr(miniuart).unwrap().unwrap();
         let miniuart_base = unsafe { map_device(miniuart_addr) }.as_ptr();
-        let mut miniuart = unsafe { bcm2835_aux::MiniUart::new(miniuart_base) };
-        writeln!(miniuart, "| initialized Mini UART (bcm2835-aux)").ok();
+        // let mut miniuart = unsafe { bcm2835_aux::MiniUart::new(miniuart_base) };
+        unsafe { bcm2835_aux::MINI_UART.init(SpinLock::new(bcm2835_aux::MiniUart::new(miniuart_base))) };
+        // writeln!(miniuart, "| initialized Mini UART (bcm2835-aux)").ok();
         println!("| initialized Mini UART");
     }
 

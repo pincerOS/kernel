@@ -65,8 +65,12 @@ impl bcm2711_gpio_driver {
 
         if apply_defaults {
             // Set UART pins
-            driver.set_function(14, GpioFunction::Alt0); // UART TX
-            driver.set_function(15, GpioFunction::Alt0); // UART RX
+            driver.set_function(14, GpioFunction::Alt5); // UART TX
+            driver.set_function(15, GpioFunction::Alt5); // UART RX
+
+            driver.set_pull(14, GpioPull::None);
+            driver.set_pull(15, GpioPull::None);
+
 
             // Add more defaults
         }
