@@ -29,7 +29,7 @@ exit # -->"##]
 extern crate ulib;
 
 #[no_mangle]
-fn main(_chan: ulib::sys::ChannelDesc) {
+fn main() {
     let root = 3;
     println!("Listing dir: {}", root);
 

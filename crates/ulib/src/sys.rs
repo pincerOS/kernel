@@ -24,10 +24,6 @@ fn int_to_error(res: isize) -> Result<usize, usize> {
 pub type FileDesc = u32;
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct ChannelDesc(pub u32);
-
-#[repr(C)]
 #[derive(Debug)]
 pub struct Message {
     pub tag: u64,
@@ -131,26 +127,26 @@ syscall!(28 => pub fn sys_sem_down(fd: usize) -> isize);
 
 const FLAG_NO_BLOCK: usize = 1 << 0;
 
-pub fn channel() -> (ChannelDesc, ChannelDesc) {
+pub fn channel() -> (FileDesc, FileDesc) {
     let res = unsafe { sys_channel() };
-    (ChannelDesc(res.0 as u32), ChannelDesc(res.1 as u32))
+    (res.0 as u32, res.1 as u32)
 }
 
-pub fn send(desc: ChannelDesc, msg: &Message, buf: &[u8], flags: usize) -> isize {
-    unsafe { sys_send(desc.0 as usize, msg, buf.as_ptr(), buf.len(), flags) }
+pub fn send(desc: FileDesc, msg: &Message, buf: &[u8], flags: usize) -> isize {
+    unsafe { sys_send(desc as usize, msg, buf.as_ptr(), buf.len(), flags) }
 }
-pub fn send_block(desc: ChannelDesc, msg: &Message, buf: &[u8]) -> isize {
+pub fn send_block(desc: FileDesc, msg: &Message, buf: &[u8]) -> isize {
     send(desc, msg, buf, 0)
 }
-pub fn send_nonblock(desc: ChannelDesc, msg: &Message, buf: &[u8]) -> isize {
+pub fn send_nonblock(desc: FileDesc, msg: &Message, buf: &[u8]) -> isize {
     send(desc, msg, buf, FLAG_NO_BLOCK)
 }
 
-pub fn recv(desc: ChannelDesc, buf: &mut [u8], flags: usize) -> Result<(usize, Message), isize> {
+pub fn recv(desc: FileDesc, buf: &mut [u8], flags: usize) -> Result<(usize, Message), isize> {
     let mut msg = MaybeUninit::uninit();
     let res = unsafe {
         sys_recv(
-            desc.0 as usize,
+            desc as usize,
             msg.as_mut_ptr(),
             buf.as_mut_ptr(),
             buf.len(),
@@ -163,10 +159,10 @@ pub fn recv(desc: ChannelDesc, buf: &mut [u8], flags: usize) -> Result<(usize, M
         Err(res)
     }
 }
-pub fn recv_block(desc: ChannelDesc, buf: &mut [u8]) -> Result<(usize, Message), isize> {
+pub fn recv_block(desc: FileDesc, buf: &mut [u8]) -> Result<(usize, Message), isize> {
     recv(desc, buf, 0)
 }
-pub fn recv_nonblock(desc: ChannelDesc, buf: &mut [u8]) -> Result<(usize, Message), isize> {
+pub fn recv_nonblock(desc: FileDesc, buf: &mut [u8]) -> Result<(usize, Message), isize> {
     recv(desc, buf, FLAG_NO_BLOCK)
 }
 
