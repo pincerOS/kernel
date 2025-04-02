@@ -2,6 +2,9 @@
 resolver = "2"
 members = [
     "crates/device-tree",
+    "crates/display-client",
+    "crates/display-proto",
+    "crates/display-server",
     "crates/elf",
     "crates/endian",
     "crates/filesystem",
