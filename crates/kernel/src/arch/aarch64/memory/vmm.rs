@@ -1,4 +1,3 @@
-use alloc::boxed::Box;
 use core::{
     arch::asm,
     fmt::{Display, Formatter},
@@ -10,7 +9,7 @@ use crate::arch::memory::{KERNEL48_USER25_TCR_EL1, KERNEL48_USER48_TCR_EL1};
 
 use super::{
     machine::{LeafDescriptor, TableDescriptor, TranslationDescriptor},
-    palloc::{PAddr, PhysicalPage, PAGE_ALLOCATOR},
+    palloc::{PhysicalPage, PAGE_ALLOCATOR},
     physical_addr,
     table::PageTablePtr,
 };
@@ -74,59 +73,6 @@ pub fn alloc_top_page_table() -> PageTablePtr {
 pub fn alloc_page_table() -> PageTablePtr {
     let page = PAGE_ALLOCATOR.get().alloc_mapped_frame::<Size4KiB>();
     PageTablePtr::from_full_page(page)
-}
-
-//Used with 48 bit vaddr space
-pub fn create_user_table(phys_base: PAddr) -> alloc::boxed::Box<UnifiedTranslationTable> {
-    let mut table = alloc::boxed::Box::new(UnifiedTranslationTable(
-        [TranslationDescriptor {
-            table: TableDescriptor::empty(),
-        }; TRANSLATION_TABLE_SIZE],
-    ));
-
-    let table_ptr: *mut UnifiedTranslationTable = &mut *table as *mut UnifiedTranslationTable;
-    let table_ptr = PageTablePtr::from_ptr(table_ptr);
-
-    let root_region_size = 0x20_0000; // 2 MiB
-                                      //let virt_region_base = 0x20_0000;
-    for i in 1..8 {
-        let phys_frame = phys_base.0 + root_region_size * i;
-        let leaf = LeafDescriptor::new(phys_frame)
-            // .clear_pxn()
-            .union(LeafDescriptor::UNPRIVILEGED_ACCESS)
-            .difference(LeafDescriptor::UXN)
-            .set_global()
-            .difference(LeafDescriptor::IS_PAGE_DESCRIPTOR);
-        println!(
-            "map phys {:#010x} to virt {:#010x} for user ({i})",
-            phys_frame,
-            root_region_size * (i + 1)
-        );
-
-        unsafe {
-            set_translation_descriptor(table_ptr, root_region_size * i, 2, 0, leaf.into(), true)
-                .unwrap();
-        }
-    }
-
-    return table;
-}
-
-//Used with 48 bit vaddr space
-pub unsafe fn create_user_region() -> (*mut [u8], Box<UnifiedTranslationTable>) {
-    let virt_region_base = 0x20_0000;
-    let region_size = 0x20_0000 * 7;
-
-    let (phys_base, _) = PAGE_ALLOCATOR.get().alloc_range(region_size, 0x20_0000);
-
-    let user_table = create_user_table(phys_base);
-    let user_table_vaddr = (&*user_table as *const UnifiedTranslationTable).addr();
-    let user_table_phys = physical_addr(user_table_vaddr).unwrap();
-    println!("creating user table, {:#010x}", user_table_phys);
-
-    let ptr = core::ptr::with_exposed_provenance_mut::<u8>(virt_region_base);
-    let slice = core::ptr::slice_from_raw_parts_mut(ptr, region_size);
-    (slice, user_table)
 }
 
 pub unsafe fn init_kernel_48bit() {

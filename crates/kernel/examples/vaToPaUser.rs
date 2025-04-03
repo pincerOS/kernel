@@ -4,11 +4,12 @@
 extern crate alloc;
 extern crate kernel;
 
-use crate::arch::memory::{map_va_to_pa, UnifiedTranslationTable};
+use crate::arch::memory::map_va_to_pa;
 use crate::event::context;
 use crate::event::thread;
 use alloc::alloc::{alloc, Layout};
 use alloc::boxed::Box;
+use arch::memory::palloc::{PAddr, PhysicalPage, Size4KiB};
 use arch::memory::table::PageTablePtr;
 use core::arch::asm;
 use kernel::*;
@@ -25,7 +26,7 @@ struct SomePage([u8; 4096]);
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
 
-    let mut process = crate::process::Process::new();
+    let process = crate::process::Process::new();
     // Assume fixed mapped range in user process (0x20_0000 in virtual memory)
     // TODO: mmap instead
     let user_region = 0x20_0000 as *mut u8;
@@ -65,8 +66,10 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     //Copying hello into the first few bytes of the page
     let phys_addr: usize = crate::arch::memory::physical_addr((page_ptr).addr()).unwrap() as usize;
 
-    let user_table: *mut UnifiedTranslationTable = &mut *process.page_table.table;
-    let user_table = PageTablePtr::from_ptr(user_table);
+    // TODO: directly modifying the page tables will break mmap
+    let table_paddr = process.mem.get_ttbr0();
+    let user_table =
+        PageTablePtr::from_full_page(PhysicalPage::<Size4KiB>::new(PAddr(table_paddr)));
 
     unsafe {
         core::ptr::copy_nonoverlapping(
