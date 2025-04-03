@@ -151,6 +151,12 @@ switch_kernel_vmem:
     and x5, x5, ((1 << 25) - 1)
     blr x5
 
+    msr TTBR0_EL1, x4
+
+    dsb sy
+    tlbi vmalle1is
+    dsb sy
+
     // Restore interrupt mask
     msr DAIF, x6
 
@@ -161,14 +167,22 @@ switch_kernel_vmem_in_phys:
     msr TCR_EL1, x1
     msr TTBR1_EL1, x0
 
-    msr TTBR0_EL1, x3
-
     dsb sy
     tlbi vmalle1is
     dsb sy
 
     ret
 
+// fn switch_user_tcr_el1(tcr_el1: usize)
+.global switch_user_tcr_el1
+switch_user_tcr_el1:
+    msr TCR_EL1, x0
+
+    dsb sy
+    tlbi vmalle1is
+    dsb sy
+
+    ret
 ",
     STACK_SIZE_LOG2 = const STACK_SIZE_LOG2,
     TCR_EL1 = const INIT_TCR_EL1,

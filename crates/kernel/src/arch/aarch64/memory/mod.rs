@@ -30,8 +30,28 @@ pub const INIT_TCR_EL1: u64 = machine::TcrEl1::empty()
     .difference(machine::TcrEl1::TBI1)
     .bits();
 
-pub const FULL_TCR_EL1: u64 = machine::TcrEl1::empty()
+pub const KERNEL48_USER25_TCR_EL1: u64 = machine::TcrEl1::empty()
     .set_t0sz(39) // 25 bits of address translation
+    .difference(machine::TcrEl1::EPD0)
+    .set_irgn0(0b01)
+    .set_orgn0(0b01)
+    .set_sh0(0b10)
+    .set_tg0(machine::PageSize::Size4KiB)
+    .set_t1sz(16) // 48 bits of address translation
+    .difference(machine::TcrEl1::A1)
+    .difference(machine::TcrEl1::EPD1)
+    .set_irgn1(0b01)
+    .set_orgn1(0b01)
+    .set_sh1(0b10)
+    .set_tg1(machine::PageSize::Size4KiB)
+    .set_ips(0b101)
+    .union(machine::TcrEl1::AS)
+    .difference(machine::TcrEl1::TBI0)
+    .difference(machine::TcrEl1::TBI1)
+    .bits();
+
+pub const KERNEL48_USER48_TCR_EL1: u64 = machine::TcrEl1::empty()
+    .set_t0sz(16) // 48 bits of address translation
     .difference(machine::TcrEl1::EPD0)
     .set_irgn0(0b01)
     .set_orgn0(0b01)

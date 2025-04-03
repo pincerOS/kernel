@@ -5,6 +5,8 @@ use core::{
     ptr::{addr_of, NonNull},
 };
 
+use crate::arch::memory::{KERNEL48_USER25_TCR_EL1, KERNEL48_USER48_TCR_EL1};
+
 use super::{
     machine::{LeafDescriptor, TableDescriptor, TranslationDescriptor},
     palloc::{PAddr, PhysicalPage, PAGE_ALLOCATOR},
@@ -131,6 +133,50 @@ pub unsafe fn init_unified() {
         }
         
         //No leaf table
+    }
+}
+
+pub unsafe fn init_kernel_48bit() {
+    let table: *mut UnifiedTranslationTable = &raw mut KERNEL_UNIFIED_TRANSLATION_TABLE;
+    let kernel_vmem_base = (&raw const __rpi_virt_base) as usize;
+
+    // TEMP: 13 x 2MB = 26MB for heap
+    for idx in 0..14 {
+        let paddr = 0x20_0000 * idx;
+        let vaddr = kernel_vmem_base + paddr;
+        let leaf = LeafDescriptor::new(paddr)
+            .clear_pxn()
+            .set_global()
+            .difference(LeafDescriptor::IS_PAGE_DESCRIPTOR);
+        unsafe { set_translation_descriptor(vaddr, 2, 0, table, leaf.into(), true).unwrap() };
+    }
+
+    // TEMP: 4MB of virtual addresses (1K pages) for kernel mmaping
+    let paddr = physical_addr((&raw const KERNEL_LEAF_TABLE).addr()).unwrap() as usize;
+    let vaddr = kernel_vmem_base + 14 * 0x20_0000;
+    let leaf = TableDescriptor::new(paddr);
+    unsafe { set_translation_descriptor(vaddr, 2, 0, table, leaf.into(), true).unwrap() };
+
+    let paddr = physical_addr((&raw const KERNEL_LEAF_TABLE).addr() + PG_SZ).unwrap() as usize;
+    let vaddr = kernel_vmem_base + 15 * 0x20_0000;
+    let leaf = TableDescriptor::new(paddr);
+    unsafe { set_translation_descriptor(vaddr, 2, 0, table, leaf.into(), true).unwrap() };
+}
+
+/// Must be run on every core
+pub unsafe fn switch_to_kernel_48bit() {
+    unsafe extern "C" {
+        fn switch_kernel_vmem(ttbr1_el1: usize, tcr_el1: usize);
+        fn switch_user_tcr_el1(tcr_el1: usize);
+    }
+
+    let table: *mut UnifiedTranslationTable = &raw mut KERNEL_UNIFIED_TRANSLATION_TABLE;
+    let table_paddr = physical_addr(table.addr()).unwrap() as usize;
+
+    unsafe { switch_kernel_vmem(table_paddr, KERNEL48_USER25_TCR_EL1 as usize) };
+    // TODO: enable once user table construction is updated
+    if false {
+        unsafe { switch_user_tcr_el1(KERNEL48_USER48_TCR_EL1 as usize) };
     }
 }
 
@@ -291,9 +337,9 @@ pub unsafe fn get_translation_descriptor(va: usize, target_level: u8, mut curr_l
         let next_lvl_table_pa: usize = descriptor.get_pa() << 12;
         translation_table = PAGE_ALLOCATOR.get().get_mapped_frame(PhysicalPage::new(PAddr(next_lvl_table_pa))).cast::<UnifiedTranslationTable>();
 
+        curr_level += 1;
         table_index = (va >> (12 + (9 * (3 - curr_level)))) & mask;
         translation_descriptor = translation_table.cast::<TranslationDescriptor>().wrapping_add(table_index);
-        curr_level += 1;
     }
 
     //Now at target level and can return the entry
@@ -328,9 +374,9 @@ pub unsafe fn set_translation_descriptor(va: usize, target_level: u8, mut curr_l
         let next_lvl_table_pa: usize = intermediate_descriptor.get_pa() << 12;
         translation_table = PAGE_ALLOCATOR.get().get_mapped_frame(PhysicalPage::new(PAddr(next_lvl_table_pa))).cast::<UnifiedTranslationTable>();
 
+        curr_level += 1;
         table_index = (va >> (12 + (9 * (3 - curr_level)))) & mask;
         translation_descriptor = translation_table.cast::<TranslationDescriptor>().wrapping_add(table_index);
-        curr_level += 1;
     }
 
     //Target level reached

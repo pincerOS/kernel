@@ -23,7 +23,7 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     }
 
     // TODO: write error message to a fixed location in memory and reset?
-    {
+    if crate::device::WATCHDOG.is_initialized() {
         // Shut down the system
         let mut watchdog = crate::device::WATCHDOG.get().lock();
         unsafe { watchdog.reset(63) };
