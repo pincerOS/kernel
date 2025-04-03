@@ -94,7 +94,7 @@ pub fn create_user_table_v2(phys_base: PAddr) -> alloc::boxed::Box<UnifiedTransl
         let translation_descriptor = TranslationDescriptor{ leaf: leaf };
         //map_pa_to_va(phys_frame, virt_region_base + root_region_size * i, table_ptr, true).unwrap();
         //This will fill in the intermediate pages on the way
-        unsafe { set_translation_descriptor(virt_region_base + root_region_size * i, 2, 0, table_ptr, translation_descriptor, true); }
+        unsafe { set_translation_descriptor(virt_region_base + root_region_size * i, 2, 0, table_ptr, translation_descriptor, true).unwrap(); }
     }
 
     return table;
@@ -107,7 +107,7 @@ pub unsafe fn create_user_region_v2() -> (*mut [u8], Box<UnifiedTranslationTable
 
     let (phys_base, _) = PAGE_ALLOCATOR.get().alloc_range(region_size, 0x20_0000);
 
-    let user_table = create_user_table(phys_base);
+    let user_table = create_user_table_v2(phys_base);
     let user_table_vaddr = (&*user_table as *const UnifiedTranslationTable).addr();
     let user_table_phys = physical_addr(user_table_vaddr).unwrap();
     println!("creating user table, {:#010x}", user_table_phys);
@@ -121,7 +121,7 @@ pub unsafe fn create_user_region_v2() -> (*mut [u8], Box<UnifiedTranslationTable
 /// only call once!
 pub unsafe fn init_unified() {
 
-    let kernel_translation_table: *mut UnifiedTranslationTable = unsafe { &mut KERNEL_UNIFIED_TRANSLATION_TABLE as *mut UnifiedTranslationTable };
+    let kernel_translation_table: *mut UnifiedTranslationTable = &raw mut KERNEL_UNIFIED_TRANSLATION_TABLE;
     unsafe {
         
         for i in 1..14 {
@@ -147,11 +147,11 @@ unsafe fn first_unused_virt_page_addr(table: *mut UnifiedTranslationTable, curr_
         }
     } else {
         //TODO: double check the mov amount math
-        let mov_amt: usize = PG_SZ * TRANSLATION_TABLE_SIZE.powi(3 - curr_level);
-        let table_base = table.cast::<TableDescriptor>();
+        let mov_amt: usize = PG_SZ * TRANSLATION_TABLE_SIZE.pow((3 - curr_level) as u32);
+        let table_base = table.cast::<TranslationDescriptor>();
         for idx in 0..TRANSLATION_TABLE_SIZE {
             let entry = table_base.wrapping_add(idx);
-            let mut descriptor = unsafe { entry.read() };
+            let mut descriptor: TableDescriptor = unsafe { entry.read().table };
 
             if !descriptor.is_valid() {
                 let frame = PAGE_ALLOCATOR.get().alloc_mapped_frame();
@@ -161,7 +161,7 @@ unsafe fn first_unused_virt_page_addr(table: *mut UnifiedTranslationTable, curr_
             }
             
             let next_table: *mut UnifiedTranslationTable = (descriptor.get_pa() << 12) as *mut UnifiedTranslationTable;
-            if let Some(addr) = first_unused_virt_page_addr(next_table, curr_level + 1){
+            if let Some(addr) = unsafe { first_unused_virt_page_addr(next_table, curr_level + 1) } {
                 return Some((idx * mov_amt) + addr);
             }
 
@@ -285,7 +285,7 @@ pub unsafe fn get_translation_descriptor(va: usize, target_level: u8, mut curr_l
         let table_entry: *mut TableDescriptor = translation_descriptor.cast::<TableDescriptor>();
         let descriptor: TableDescriptor = unsafe { table_entry.read() };
         if !descriptor.is_valid() {
-            return Err(MappringError::LevelEntryUnset(curr_level));
+            return Err(MappingError::LevelEntryUnset(curr_level));
         }
 
         let next_lvl_table_pa: usize = descriptor.get_pa() << 12;
@@ -316,7 +316,7 @@ pub unsafe fn set_translation_descriptor(va: usize, target_level: u8, mut curr_l
         if !intermediate_descriptor.is_valid() {
 
             if !fill_intermediate {
-                return Err(MappringError::LevelEntryUnset(curr_level));
+                return Err(MappingError::LevelEntryUnset(curr_level));
             }
 
             let frame = PAGE_ALLOCATOR.get().alloc_mapped_frame();
@@ -345,11 +345,11 @@ pub unsafe fn set_translation_descriptor(va: usize, target_level: u8, mut curr_l
 //TODO: take another look at this method and see if it can be improved
 pub unsafe fn map_pa_to_va(pa: usize, va: usize, translation_table: *mut UnifiedTranslationTable, is_huge_page: bool) -> Result<(), MappingError> {
     
-    let mut table_descriptor: TableDescriptor;
+    let table_descriptor: TableDescriptor;
     let mut iter_count = 0;
     loop {
         assert!(iter_count < 5);
-        match get_translation_descriptor(va, 2, 0, translation_table) {
+        match unsafe { get_translation_descriptor(va, 2, 0, translation_table) } {
             Ok(translation_desc) => {
                 table_descriptor = unsafe { translation_desc.table };
                 break;
@@ -360,9 +360,9 @@ pub unsafe fn map_pa_to_va(pa: usize, va: usize, translation_table: *mut Unified
                 let intermediate_descriptor = TranslationDescriptor { table: TableDescriptor::new(frame.paddr), };
                 //This ideally shouldn't panic as the level that failed should have a valid table
                 //TODO: take another look at this
-                set_table_descriptor(va, lvl, 0, translation_table, intermediate_descriptor, false).unwrap();
+                unsafe { set_translation_descriptor(va, lvl, 0, translation_table, intermediate_descriptor, false).unwrap(); }
             },
-            Err(e) => unreachable!(),
+            Err(_e) => unreachable!(),
         }
 
         iter_count += 1;
@@ -380,11 +380,11 @@ pub unsafe fn map_pa_to_va(pa: usize, va: usize, translation_table: *mut Unified
         }
 
         let aligned_pa = (pa / 0x200_000) * 0x200_000;
-        let new_lef = LeafDescriptor::new(aligned_pa).set_global().difference(LeafDescriptor::IS_PAGE_DESCRIPTOR);
+        let mut new_leaf = LeafDescriptor::new(aligned_pa).set_global().difference(LeafDescriptor::IS_PAGE_DESCRIPTOR);
         new_leaf.set_user_permissions(true);
         
         //This ideally shouldn't panic as the loop above fills in any missing entries
-        set_translation_descriptor(va, 2, 0, translation_table, TranslationDescriptor { leaf: new_leaf }, false).unwrap();
+        unsafe { set_translation_descriptor(va, 2, 0, translation_table, TranslationDescriptor { leaf: new_leaf }, false).unwrap(); }
 
         return Ok(());
     }
@@ -395,14 +395,15 @@ pub unsafe fn map_pa_to_va(pa: usize, va: usize, translation_table: *mut Unified
         let frame = PAGE_ALLOCATOR.get().alloc_mapped_frame();
         let intermediate_descriptor = TranslationDescriptor { table: TableDescriptor::new(frame.paddr), };
         //This ideally shouldn't panic as the level that failed should have a valid table
-        set_table_descriptor(va, lvl, 0, translation_table, intermediate_descriptor).unwrap();
+        //TODO: take another look at this
+        unsafe { set_translation_descriptor(va, 2, 0, translation_table, intermediate_descriptor, false).unwrap(); }
     } else if !table_descriptor.is_table_descriptor() {
         //huge page present where table descriptor is expected
         return Err(MappingError::HugePagePresent);
     }
     
-    let leaf_descriptor = get_translation_descriptor(va, 3, 0, translation_table).unwrap();
-    let leaf_descriptor = unsafe { leaf_descriptor.leaf  };
+    let leaf_translation_descriptor = unsafe { get_translation_descriptor(va, 3, 0, translation_table).unwrap() };
+    let mut leaf_descriptor = unsafe { leaf_translation_descriptor.leaf };
 
     if !leaf_descriptor.is_valid() {
         return Err(MappingError::LeafTableSpotTaken);
@@ -413,7 +414,7 @@ pub unsafe fn map_pa_to_va(pa: usize, va: usize, translation_table: *mut Unified
     //TODO: add this function to machine.rs
     leaf_descriptor.set_user_permissions(true);
 
-    set_translation_descriptor(va, 3, 0, translation_table, TranslationDescriptor { leaf: leaf_descriptor }, false).unwrap();
+    unsafe { set_translation_descriptor(va, 3, 0, translation_table, TranslationDescriptor { leaf: leaf_descriptor }, false).unwrap(); }
     return Ok(());
 }
 
@@ -426,7 +427,7 @@ pub unsafe fn map_physical_gen(pa_start: usize, req_size: usize, mair: u8, trans
         size += PG_SZ;
     }
 
-    let start_vaddr: usize = first_unused_virt_page_addr(translation_table, 0).expect("Out of space in the kernel page table!");
+    let start_vaddr: usize = unsafe { first_unused_virt_page_addr(translation_table, 0).expect("Out of space in the kernel page table!") };
     //This will break if there isn't enough space but should be a good enough temporary solution
     //until mmap is integrated
 
@@ -435,10 +436,10 @@ pub unsafe fn map_physical_gen(pa_start: usize, req_size: usize, mair: u8, trans
         let va: usize = start_vaddr + offset;
         let new_desc = LeafDescriptor::new(pa).set_mair(mair).set_global();
         //TODO: double check page fill selection here
-        unsafe { set_translation_descriptor(vaddr, 3, 0, translation_table, TranslationDescriptor { leaf: new_desc }, true).unwrap(); }
+        unsafe { set_translation_descriptor(va, 3, 0, translation_table, TranslationDescriptor { leaf: new_desc }, true).unwrap(); }
     }
 
-    return start_vaddr;
+    return NonNull::new(start_vaddr as *mut _).unwrap();
 }
 
 
@@ -455,21 +456,21 @@ pub unsafe fn map_device_v2(pa: usize) -> NonNull<()> {
 pub unsafe fn map_device_block_v2(pa_start: usize, req_size: usize) -> NonNull<()> {
     unsafe {
         let kernel_translation_table: *mut UnifiedTranslationTable = &raw mut KERNEL_UNIFIED_TRANSLATION_TABLE;
-        return map_physical_gen(pa, req_size, 1, kernel_translation_table);
+        return map_physical_gen(pa_start, req_size, 1, kernel_translation_table);
     }
 }
 
 pub unsafe fn map_physical_v2(pa_start: usize, req_size: usize) -> NonNull<()> {
     unsafe {
         let kernel_translation_table: *mut UnifiedTranslationTable = &raw mut KERNEL_UNIFIED_TRANSLATION_TABLE;
-        return map_physical_gen(pa, req_size, 0, kernel_translation_table);
+        return map_physical_gen(pa_start, req_size, 0, kernel_translation_table);
     }
 }
 
 pub unsafe fn map_physical_noncacheable_v2(pa_start: usize, req_size: usize) -> NonNull<()> {
     unsafe {
         let kernel_translation_table: *mut UnifiedTranslationTable = &raw mut KERNEL_UNIFIED_TRANSLATION_TABLE;
-        return map_physical_gen(pa, req_size, 2, kernel_translation_table);
+        return map_physical_gen(pa_start, req_size, 2, kernel_translation_table);
     }
 }
 
