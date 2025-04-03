@@ -8,7 +8,7 @@ use machine::{at_s1e1r, LeafDescriptor};
 pub use vmm::{map_device, map_device_block, map_physical, map_physical_noncacheable};
 
 pub use machine::at_s1e0r;
-pub use vmm::{create_user_region, init_physical_alloc, map_pa_to_va_kernel, map_pa_to_va_user};
+pub use vmm::{create_user_region, init_physical_alloc, map_pa_to_va};
 
 pub const INIT_TCR_EL1: u64 = machine::TcrEl1::default().bits();
 pub const INIT_TRANSLATION: u64 = LeafDescriptor::new(0)
