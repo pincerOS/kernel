@@ -4,6 +4,8 @@ use core::arch::asm;
 
 use bitflags::bitflags;
 
+use super::palloc::PAddr;
+
 bitflags! {
     // TODO: Address feature-dependent bits after TBI1
     #[derive(Clone, Copy, Debug)]
@@ -331,8 +333,12 @@ impl TableDescriptor {
     }
 
     // usize or u64
-    pub const fn get_pa(self) -> usize {
+    pub const fn get_phys_frame_num(self) -> usize {
         ((self.bits() >> 12) & ((1 << 36) - 1)) as usize
+    }
+
+    pub const fn get_pa(self) -> PAddr {
+        PAddr(self.intersection(Self::NEXT_ADDR).bits() as usize)
     }
 
     pub const fn is_valid(self) -> bool {

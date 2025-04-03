@@ -19,9 +19,6 @@ pub struct PageAllocator {
     allocator: SpinLock<BuddyAllocator>,
 }
 
-#[repr(C, align(4096))]
-pub struct Page([u8; 4096]);
-
 impl<S> PhysicalPage<S> {
     pub fn new(paddr: PAddr) -> Self {
         Self {
@@ -63,8 +60,8 @@ impl PageAllocator {
         }
     }
 
-    pub fn alloc_mapped_frame(&self) -> PhysicalPage<Size4KiB> {
-        let mut frame: Box<MaybeUninit<Page>> = Box::new_uninit();
+    pub fn alloc_mapped_frame<S: BasePageSize>(&self) -> PhysicalPage<S> {
+        let mut frame: Box<MaybeUninit<S::Page>> = Box::new_uninit();
         unsafe { core::ptr::write_bytes(frame.as_mut_ptr(), 0, 1) };
         let pointer = Box::into_raw(frame);
         let paddr = pointer as usize - (&raw const super::vmm::__rpi_virt_base) as usize;
@@ -76,12 +73,13 @@ impl PageAllocator {
     }
 
     #[track_caller]
-    pub fn get_mapped_frame(&self, frame: PhysicalPage<Size4KiB>) -> *mut Page {
-        let phys_heap_start = (&raw const super::vmm::__rpi_phys_binary_end_addr) as usize;
+    pub fn get_mapped_frame<S: BasePageSize>(&self, frame: PhysicalPage<S>) -> *mut S::Page {
+        // let phys_heap_start = (&raw const super::vmm::__rpi_phys_binary_end_addr) as usize;
+        let phys_heap_start = (&raw const super::vmm::__rpi_phys_binary_start_addr) as usize;
         let phys_heap_end = 0x20_0000 * 14;
         assert!(
             frame.paddr >= phys_heap_start && frame.paddr < phys_heap_end,
-            "frame {:?}, phys_heap_start {:#x}, phys_heap_end {:#x}",
+            "invalid mapped frame: {:?}, phys_heap_start {:#x}, phys_heap_end {:#x}",
             frame,
             phys_heap_start,
             phys_heap_end,
@@ -99,12 +97,21 @@ impl PageAllocator {
         let phys_heap_end = 0x20_0000 * 14;
         if frame.paddr >= phys_heap_start && frame.paddr < phys_heap_end {
             // From the kernel heap...
-            let allocation;
-            unsafe {
-                let vaddr = (&raw mut super::vmm::__rpi_virt_base).byte_add(frame.paddr);
-                allocation = Box::<MaybeUninit<Page>>::from_raw(vaddr.cast());
+            // TODO: use direct mapped physmem instead (or specialization, but that will never be stable)
+            let vaddr = unsafe { (&raw mut super::vmm::__rpi_virt_base).byte_add(frame.paddr) };
+            const { assert!(S::SIZE == 4096 || S::SIZE == 16384 || S::SIZE == 65536) };
+            if S::SIZE == 4096 {
+                let allocation = unsafe { Box::<MaybeUninit<Page4k>>::from_raw(vaddr.cast()) };
+                drop(allocation);
+            } else if S::SIZE == 16384 {
+                let allocation = unsafe { Box::<MaybeUninit<Page16k>>::from_raw(vaddr.cast()) };
+                drop(allocation);
+            } else if S::SIZE == 65536 {
+                let allocation = unsafe { Box::<MaybeUninit<Page64k>>::from_raw(vaddr.cast()) };
+                drop(allocation);
+            } else {
+                panic!();
             }
-            drop(allocation);
         } else {
             self.allocator.lock().free(frame.paddr, S::SIZE, S::SIZE);
         }
@@ -123,32 +130,69 @@ trait Sealed {}
 #[allow(private_bounds)]
 pub trait PageClass: Sealed {
     const SIZE: usize;
-    const BITS: usize;
+    const BITS: usize = Self::SIZE.ilog2() as usize;
     const NAME: &str;
 }
 
+pub trait BasePageSize: PageClass {
+    type Page;
+}
+
 pub struct Size4KiB;
+
+pub struct Size16KiB;
+
+pub struct Size64KiB;
+
 pub struct Size2MiB;
+
 pub struct Size1GiB;
+
+#[repr(C, align(4096))]
+pub struct Page4k([u8; 4096]);
+
+#[repr(C, align(16384))]
+pub struct Page16k([u8; 16384]);
+
+#[repr(C, align(16384))]
+pub struct Page64k([u8; 65536]);
 
 impl Sealed for Size4KiB {}
 impl PageClass for Size4KiB {
     const SIZE: usize = 4096;
-    const BITS: usize = 12;
     const NAME: &str = "Size4KiB";
+}
+impl BasePageSize for Size4KiB {
+    type Page = Page4k;
+}
+
+impl Sealed for Size16KiB {}
+impl PageClass for Size16KiB {
+    const SIZE: usize = 16384;
+    const NAME: &str = "Size4KiB";
+}
+impl BasePageSize for Size16KiB {
+    type Page = Page16k;
+}
+
+impl Sealed for Size64KiB {}
+impl PageClass for Size64KiB {
+    const SIZE: usize = 64384;
+    const NAME: &str = "Size4KiB";
+}
+impl BasePageSize for Size64KiB {
+    type Page = Page64k;
 }
 
 impl Sealed for Size2MiB {}
 impl PageClass for Size2MiB {
     const SIZE: usize = 4096 * 512;
-    const BITS: usize = 21;
     const NAME: &str = "Size2MiB";
 }
 
 impl Sealed for Size1GiB {}
 impl PageClass for Size1GiB {
     const SIZE: usize = 4096 * 512 * 512;
-    const BITS: usize = 30;
     const NAME: &str = "Size1GiB";
 }
 

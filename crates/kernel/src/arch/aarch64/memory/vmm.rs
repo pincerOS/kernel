@@ -5,12 +5,14 @@ use core::{
     ptr::{addr_of, NonNull},
 };
 
+use crate::arch::memory::palloc::Size4KiB;
 use crate::arch::memory::{KERNEL48_USER25_TCR_EL1, KERNEL48_USER48_TCR_EL1};
 
 use super::{
     machine::{LeafDescriptor, TableDescriptor, TranslationDescriptor},
     palloc::{PAddr, PhysicalPage, PAGE_ALLOCATOR},
     physical_addr,
+    table::PageTablePtr,
 };
 
 const PG_SZ: usize = 0x1000;
@@ -61,6 +63,19 @@ pub unsafe fn init_physical_alloc() {
     unsafe { super::palloc::init_physical_alloc(base, end) };
 }
 
+pub fn alloc_top_page_table() -> PageTablePtr {
+    let top_level_entries = 4096 / 8; // TODO
+
+    // TODO: waste less space
+    let page = PAGE_ALLOCATOR.get().alloc_mapped_frame::<Size4KiB>();
+    PageTablePtr::from_partial_page(page, top_level_entries)
+}
+
+pub fn alloc_page_table() -> PageTablePtr {
+    let page = PAGE_ALLOCATOR.get().alloc_mapped_frame::<Size4KiB>();
+    PageTablePtr::from_full_page(page)
+}
+
 //Used with 48 bit vaddr space
 pub fn create_user_table(phys_base: PAddr) -> alloc::boxed::Box<UnifiedTranslationTable> {
     let mut table = alloc::boxed::Box::new(UnifiedTranslationTable(
@@ -70,6 +85,7 @@ pub fn create_user_table(phys_base: PAddr) -> alloc::boxed::Box<UnifiedTranslati
     ));
 
     let table_ptr: *mut UnifiedTranslationTable = &mut *table as *mut UnifiedTranslationTable;
+    let table_ptr = PageTablePtr::from_ptr(table_ptr);
 
     let root_region_size = 0x20_0000; // 2 MiB
                                       //let virt_region_base = 0x20_0000;
@@ -88,7 +104,7 @@ pub fn create_user_table(phys_base: PAddr) -> alloc::boxed::Box<UnifiedTranslati
         );
 
         unsafe {
-            set_translation_descriptor(root_region_size * i, 2, 0, table_ptr, leaf.into(), true)
+            set_translation_descriptor(table_ptr, root_region_size * i, 2, 0, leaf.into(), true)
                 .unwrap();
         }
     }
@@ -115,6 +131,7 @@ pub unsafe fn create_user_region() -> (*mut [u8], Box<UnifiedTranslationTable>) 
 
 pub unsafe fn init_kernel_48bit() {
     let table: *mut UnifiedTranslationTable = &raw mut KERNEL_UNIFIED_TRANSLATION_TABLE;
+    let table = PageTablePtr::from_ptr(table);
     let kernel_vmem_base = (&raw const __rpi_virt_base) as usize;
 
     // TEMP: 13 x 2MB = 26MB for heap
@@ -125,19 +142,19 @@ pub unsafe fn init_kernel_48bit() {
             .clear_pxn()
             .set_global()
             .difference(LeafDescriptor::IS_PAGE_DESCRIPTOR);
-        unsafe { set_translation_descriptor(vaddr, 2, 0, table, leaf.into(), true).unwrap() };
+        unsafe { set_translation_descriptor(table, vaddr, 2, 0, leaf.into(), true).unwrap() };
     }
 
     // TEMP: 4MB of virtual addresses (1K pages) for kernel mmaping
     let paddr = physical_addr((&raw const KERNEL_LEAF_TABLE).addr()).unwrap() as usize;
     let vaddr = kernel_vmem_base + 14 * 0x20_0000;
     let leaf = TableDescriptor::new(paddr);
-    unsafe { set_translation_descriptor(vaddr, 2, 0, table, leaf.into(), true).unwrap() };
+    unsafe { set_translation_descriptor(table, vaddr, 2, 0, leaf.into(), true).unwrap() };
 
     let paddr = physical_addr((&raw const KERNEL_LEAF_TABLE).addr() + PG_SZ).unwrap() as usize;
     let vaddr = kernel_vmem_base + 15 * 0x20_0000;
     let leaf = TableDescriptor::new(paddr);
-    unsafe { set_translation_descriptor(vaddr, 2, 0, table, leaf.into(), true).unwrap() };
+    unsafe { set_translation_descriptor(table, vaddr, 2, 0, leaf.into(), true).unwrap() };
 }
 
 /// Must be run on every core
@@ -225,112 +242,101 @@ impl Display for MappingError {
 }
 
 pub unsafe fn get_translation_descriptor(
+    mut table: PageTablePtr,
     va: usize,
     target_level: u8,
     mut curr_level: u8,
-    mut translation_table: *mut UnifiedTranslationTable,
 ) -> Result<TranslationDescriptor, MappingError> {
     assert!(target_level <= 3);
     assert!(curr_level <= 3);
-    let mask = 0b111111111;
 
-    //12 bits for 4096 byte page offset, after that its 9 bits for each level
-    let mut table_index = (va >> (12 + (9 * (3 - curr_level)))) & mask;
-    let mut translation_descriptor: *mut TranslationDescriptor = translation_table
-        .cast::<TranslationDescriptor>()
-        .wrapping_add(table_index);
-    while curr_level < target_level {
-        let table_entry: *mut TableDescriptor = translation_descriptor.cast::<TableDescriptor>();
-        let intermediate_descriptor: TableDescriptor = unsafe { table_entry.read() };
-        if !intermediate_descriptor.is_valid() {
-            return Err(MappingError::LevelEntryUnset(curr_level));
+    loop {
+        let mask = 0b111111111;
+        //12 bits for 4096 byte page offset, after that its 9 bits for each level
+        let table_index = (va >> (12 + (9 * (3 - curr_level)))) & mask;
+        let descriptor = unsafe { table.get_entry(table_index) };
+
+        if curr_level == target_level {
+            //Now at target level and can return the entry
+            return Ok(descriptor);
         }
 
-        let next_lvl_table_pa: usize = intermediate_descriptor.get_pa() << 12;
-        translation_table = PAGE_ALLOCATOR
-            .get()
-            .get_mapped_frame(PhysicalPage::new(PAddr(next_lvl_table_pa)))
-            .cast::<UnifiedTranslationTable>();
+        let intermediate_descriptor = unsafe { descriptor.table };
+        if !intermediate_descriptor.is_valid() {
+            return Err(MappingError::LevelEntryUnset(curr_level));
+        } else if !intermediate_descriptor.is_table_descriptor() {
+            return Err(MappingError::HugePagePresent);
+        }
 
+        table = PageTablePtr::from_full_page(PhysicalPage::<Size4KiB>::new(
+            intermediate_descriptor.get_pa(),
+        ));
         curr_level += 1;
-        table_index = (va >> (12 + (9 * (3 - curr_level)))) & mask;
-        translation_descriptor = translation_table
-            .cast::<TranslationDescriptor>()
-            .wrapping_add(table_index);
     }
-
-    //Now at target level and can return the entry
-    return Ok(unsafe { translation_descriptor.read() });
 }
 
 //Fill intermediate indicates that any missing page table levels should be created
 pub unsafe fn set_translation_descriptor(
+    mut table: PageTablePtr,
     va: usize,
     target_level: u8,
     mut curr_level: u8,
-    mut translation_table: *mut UnifiedTranslationTable,
     descriptor: TranslationDescriptor,
     fill_intermediate: bool,
 ) -> Result<(), MappingError> {
     assert!(target_level <= 3);
     assert!(curr_level <= 3);
-    let mask = 0b111111111;
-    let mut table_index = (va >> (12 + (9 * (3 - curr_level)))) & mask;
-    let mut translation_descriptor: *mut TranslationDescriptor = translation_table
-        .cast::<TranslationDescriptor>()
-        .wrapping_add(table_index);
 
-    while curr_level < target_level {
-        let table_entry: *mut TableDescriptor = translation_descriptor.cast::<TableDescriptor>();
-        let mut intermediate_descriptor: TableDescriptor = unsafe { table_entry.read() };
+    loop {
+        let mask = 0b111111111;
+        //12 bits for 4096 byte page offset, after that its 9 bits for each level
+        let table_index = (va >> (12 + (9 * (3 - curr_level)))) & mask;
+
+        if curr_level == target_level {
+            //Target level reached
+            unsafe {
+                table.set_entry(table_index, descriptor);
+                asm!("dsb ISH", options(readonly, nostack, preserves_flags));
+            }
+            return Ok(());
+        }
+
+        let descriptor = unsafe { table.get_entry(table_index) };
+        let mut intermediate_descriptor = unsafe { descriptor.table };
         if !intermediate_descriptor.is_valid() {
             if !fill_intermediate {
                 return Err(MappingError::LevelEntryUnset(curr_level));
             }
 
-            let frame = PAGE_ALLOCATOR.get().alloc_mapped_frame();
-            intermediate_descriptor = TableDescriptor::new(frame.paddr);
+            let new_table = alloc_page_table();
+            intermediate_descriptor = new_table.to_descriptor();
 
-            unsafe {
-                table_entry.write(intermediate_descriptor);
-            }
+            unsafe { table.set_entry(table_index, intermediate_descriptor.into()) };
+        } else if !intermediate_descriptor.is_table_descriptor() {
+            return Err(MappingError::HugePagePresent);
         }
 
-        let next_lvl_table_pa: usize = intermediate_descriptor.get_pa() << 12;
-        translation_table = PAGE_ALLOCATOR
-            .get()
-            .get_mapped_frame(PhysicalPage::new(PAddr(next_lvl_table_pa)))
-            .cast::<UnifiedTranslationTable>();
+        table = PageTablePtr::from_full_page(PhysicalPage::<Size4KiB>::new(
+            intermediate_descriptor.get_pa(),
+        ));
 
         curr_level += 1;
-        table_index = (va >> (12 + (9 * (3 - curr_level)))) & mask;
-        translation_descriptor = translation_table
-            .cast::<TranslationDescriptor>()
-            .wrapping_add(table_index);
     }
-
-    //Target level reached
-    unsafe {
-        translation_descriptor.write(descriptor);
-        asm!("dsb ISH", options(readonly, nostack, preserves_flags));
-    }
-
-    return Ok(());
 }
 
 pub unsafe fn map_va_to_pa(
+    table: PageTablePtr,
     pa: usize,
     va: usize,
-    translation_table: *mut UnifiedTranslationTable,
     is_huge_page: bool,
     user_permission: bool,
 ) -> Result<(), MappingError> {
     //Need level 2 table in both cases to check for huge page
     let table_descriptor: TableDescriptor;
-    match unsafe { get_translation_descriptor(va, 2, 0, translation_table) } {
+    match unsafe { get_translation_descriptor(table, va, 2, 0) } {
         Ok(translation_descriptor) => table_descriptor = unsafe { translation_descriptor.table },
         Err(MappingError::LevelEntryUnset(_lvl)) => table_descriptor = TableDescriptor::empty(),
-        Err(_e) => unreachable!(),
+        Err(e) => return Err(e),
     }
 
     if is_huge_page {
@@ -351,8 +357,7 @@ pub unsafe fn map_va_to_pa(
 
         //This ideally shouldn't panic as the get should have filled in the intermediate pages
         unsafe {
-            set_translation_descriptor(va, 2, 0, translation_table, new_leaf.into(), false)
-                .unwrap();
+            set_translation_descriptor(table, va, 2, 0, new_leaf.into(), false).unwrap();
         }
 
         return Ok(());
@@ -367,7 +372,7 @@ pub unsafe fn map_va_to_pa(
 
         //NOTE: This can be slighlty optimized
         let leaf_translation_descriptor =
-            unsafe { get_translation_descriptor(va, 3, 0, translation_table).unwrap() };
+            unsafe { get_translation_descriptor(table, va, 3, 0).unwrap() };
         let leaf_descriptor = unsafe { leaf_translation_descriptor.leaf };
 
         if leaf_descriptor.is_valid() {
@@ -380,10 +385,7 @@ pub unsafe fn map_va_to_pa(
         .set_global()
         .set_user_permissions(user_permission);
 
-    unsafe {
-        set_translation_descriptor(va, 3, 0, translation_table, leaf_descriptor.into(), true)
-            .unwrap();
-    }
+    unsafe { set_translation_descriptor(table, va, 3, 0, leaf_descriptor.into(), true).unwrap() };
     return Ok(());
 }
 

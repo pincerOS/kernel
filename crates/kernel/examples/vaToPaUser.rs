@@ -9,6 +9,7 @@ use crate::event::context;
 use crate::event::thread;
 use alloc::alloc::{alloc, Layout};
 use alloc::boxed::Box;
+use arch::memory::table::PageTablePtr;
 use core::arch::asm;
 use kernel::*;
 
@@ -64,7 +65,8 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     //Copying hello into the first few bytes of the page
     let phys_addr: usize = crate::arch::memory::physical_addr((page_ptr).addr()).unwrap() as usize;
 
-    let user_translation_table: *mut UnifiedTranslationTable = &mut *process.page_table.table;
+    let user_table: *mut UnifiedTranslationTable = &mut *process.page_table.table;
+    let user_table = PageTablePtr::from_ptr(user_table);
 
     unsafe {
         core::ptr::copy_nonoverlapping(
@@ -79,7 +81,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         phys_addr, VIRTUAL_ADDR
     );
     unsafe {
-        match map_va_to_pa(phys_addr, VIRTUAL_ADDR, user_translation_table, false, true) {
+        match map_va_to_pa(user_table, phys_addr, VIRTUAL_ADDR, false, true) {
             Ok(()) => println!("Done mapping!"),
             Err(e) => println!("Error: {}", e),
         }
@@ -144,13 +146,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         huge_phys_addr, huge_page_virt_addr
     );
     unsafe {
-        match map_va_to_pa(
-            huge_phys_addr,
-            huge_page_virt_addr,
-            user_translation_table,
-            true,
-            true,
-        ) {
+        match map_va_to_pa(user_table, huge_phys_addr, huge_page_virt_addr, true, true) {
             Ok(()) => println!("Done mapping!"),
             Err(e) => println!("Error: {}", e),
         }

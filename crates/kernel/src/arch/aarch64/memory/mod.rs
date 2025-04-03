@@ -1,5 +1,6 @@
 pub mod machine;
 pub mod palloc;
+pub mod table;
 pub mod vmm;
 
 use core::arch::asm;
