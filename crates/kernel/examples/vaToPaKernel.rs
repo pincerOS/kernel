@@ -4,10 +4,13 @@
 extern crate alloc;
 extern crate kernel;
 
+use crate::arch::memory::{
+    map_va_to_pa, UnifiedTranslationTable, KERNEL_UNIFIED_TRANSLATION_TABLE,
+};
 use alloc::boxed::Box;
 use kernel::*;
 
-const VIRTUAL_ADDR: usize = 0xFFFF_FFFF_FE00_0000 | 0x1E00000;
+const VIRTUAL_ADDR: usize = 0xFFFF_0000_0000_0000 | 0x1E00000;
 static HELLO_CHARS: [u8; 5] = *b"hello";
 
 #[repr(C, align(4096))]
@@ -18,10 +21,6 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
     println!("Staring basic vmm test");
 
-    unsafe {
-        crate::arch::memory::init_physical_alloc();
-        crate::arch::memory::init();
-    }
     println!("Init complete");
 
     //hack: get a "page" from the heap and try to map it to some virtual address
@@ -44,7 +43,9 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         phys_addr, VIRTUAL_ADDR
     );
     unsafe {
-        match crate::arch::memory::map_pa_to_va_kernel(phys_addr, VIRTUAL_ADDR) {
+        let translation_table: *mut UnifiedTranslationTable =
+            &raw mut KERNEL_UNIFIED_TRANSLATION_TABLE;
+        match map_va_to_pa(phys_addr, VIRTUAL_ADDR, translation_table, false, false) {
             Ok(()) => println!("Done mapping!"),
             Err(e) => println!("Error: {}", e),
         }

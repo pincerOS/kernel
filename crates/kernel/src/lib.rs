@@ -52,6 +52,11 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
 
     unsafe { heap::ALLOCATOR.init(heap_base, heap_size as usize) };
 
+    unsafe { crate::arch::memory::init_physical_alloc() };
+
+    unsafe { crate::arch::memory::vmm::init_kernel_48bit() };
+    unsafe { crate::arch::memory::vmm::switch_to_kernel_48bit() };
+
     let device_tree_base = unsafe { memory::map_physical(x0 as usize, u32::from_be(x4) as usize) };
     let device_tree_base = device_tree_base.as_ptr().cast_const().cast();
     let device_tree = unsafe { device_tree::DeviceTree::load(device_tree_base) }
@@ -91,6 +96,8 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kernel_entry_rust_alt(_x0: u32, _x1: u64, _x2: u64, _x3: u64) -> ! {
+    unsafe { crate::arch::memory::vmm::switch_to_kernel_48bit() };
+
     let id = arch::core_id() & 3;
     let sp = arch::debug_get_sp();
     println!("| starting core {id}, initial sp {:#x}", sp);

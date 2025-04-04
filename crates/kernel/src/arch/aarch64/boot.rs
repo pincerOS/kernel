@@ -101,7 +101,7 @@ drop_to_el1:
     msr TCR_EL1, x5
     adrl x5, KERNEL_TRANSLATION_TABLE
     msr TTBR1_EL1, x5
-    ldr x5, =0b010001000000000011111111 // Entry 0 is normal memory, entry 1 is device memory, 2 = normal noncacheable memory
+    ldr x5, ={MAIR_EL1}
     msr MAIR_EL1, x5
 
     mov x5, #0b0101
@@ -128,6 +128,61 @@ halt:
     nop
 1:  wfe
     b 1b
+
+// fn switch_kernel_vmem(ttbr1_el1: usize, tcr_el1: usize)
+.global switch_kernel_vmem
+switch_kernel_vmem:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+
+    // Mask all interrupts
+    mrs x6, DAIF
+    msr DAIFSet, #0b1111
+
+    mrs x4, TTBR0_EL1
+    mrs x3, TTBR1_EL1
+    msr TTBR0_EL1, x3
+
+    dsb sy
+    tlbi vmalle1is
+    dsb sy
+
+    adrl x5, switch_kernel_vmem_in_phys
+    and x5, x5, ((1 << 25) - 1)
+    blr x5
+
+    msr TTBR0_EL1, x4
+
+    dsb sy
+    tlbi vmalle1is
+    dsb sy
+
+    // Restore interrupt mask
+    msr DAIF, x6
+
+    ldp x29, x30, [sp], #16
+    ret
+
+switch_kernel_vmem_in_phys:
+    msr TCR_EL1, x1
+    msr TTBR1_EL1, x0
+
+    dsb sy
+    tlbi vmalle1is
+    dsb sy
+
+    ret
+
+// fn switch_user_tcr_el1(tcr_el1: usize)
+.global switch_user_tcr_el1
+switch_user_tcr_el1:
+    msr TCR_EL1, x0
+
+    dsb sy
+    tlbi vmalle1is
+    dsb sy
+
+    ret
 ",
     STACK_SIZE_LOG2 = const STACK_SIZE_LOG2,
     TCR_EL1 = const INIT_TCR_EL1,
@@ -139,5 +194,10 @@ halt:
         (1 << 2) | // enable data caching
         (1 << 1) | // enable alignment faults
         1           // enable EL1&0 virtual memory
+    ),
+    MAIR_EL1 = const (
+        (0b01000100 << 16) | // Entry 2: normal noncacheable memory
+        (0b00000000 << 8)  | // Entry 1: device memory
+        (0b11111111 << 0)    // Entry 0: normal memory
     )
 );

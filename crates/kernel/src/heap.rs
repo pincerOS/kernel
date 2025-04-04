@@ -24,8 +24,9 @@ impl BumpAllocator {
     }
     // TODO: safety requirements of initialization?
     pub unsafe fn init(&self, base: *mut (), max: usize) {
-        self.base.store(base, Ordering::SeqCst);
-        self.max.store(max, Ordering::SeqCst);
+        //self.base.store(base, Ordering::SeqCst);
+        self.offset.store(base as usize, Ordering::SeqCst);
+        self.max.store(max + (base as usize), Ordering::SeqCst);
     }
 }
 
@@ -35,7 +36,8 @@ unsafe impl GlobalAlloc for BumpAllocator {
         let align = layout.align();
 
         let base = self.base.load(Ordering::Relaxed).cast::<u8>();
-        assert!(!base.is_null());
+        assert!(self.max.load(Ordering::Relaxed) != 0);
+        //assert!(!base.is_null());
 
         let mut cur = self.offset.load(Ordering::Relaxed);
         let max = self.max.load(Ordering::Relaxed);

@@ -17,7 +17,6 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
 
     unsafe { syscall::register_syscalls() };
-    unsafe { crate::arch::memory::init_physical_alloc() };
 
     let (_stdio, mut stdin_tx, mut stdout_rx) = {
         let (stdin_tx, stdin_rx) = ringbuffer::channel();

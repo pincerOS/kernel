@@ -10,7 +10,7 @@ pub mod fd;
 pub type ProcessRef = Arc<Process>;
 
 pub struct UserPageTable {
-    pub table: Box<crate::arch::memory::vmm::UserTranslationTable>,
+    pub table: Box<crate::arch::memory::vmm::UnifiedTranslationTable>,
     pub phys_addr: usize,
 }
 
