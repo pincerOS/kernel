@@ -12,6 +12,10 @@
 *	across all systems, and in fact its implementation varies little either.
 ******************************************************************************/
 
+//How the channels & usbxfer current works
+// The transfer queue will hold future USB transfer requests (Usb Xfer). A channel is a representation by the USB spec to be able to access an endpoint (the thing talking to the USB device).
+// Callbacks are the method that should be invoked once the data has been transferred.
+
 use crate::device::system_timer::micro_delay;
 use crate::device::usb::hcd::dwc::dwc_otg::*;
 use crate::device::usb::hcd::dwc::roothub::memory_copy;

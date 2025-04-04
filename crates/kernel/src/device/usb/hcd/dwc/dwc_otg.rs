@@ -35,12 +35,44 @@ use core::ptr;
 
 pub const ChannelCount: usize = 8;
 pub static mut dwc_otg_driver: DWC_OTG = DWC_OTG { base_addr: 0 };
-pub static DWC_CHANNEL_ACTIVE: SpinLock<DwcChannelActive> = SpinLock::new(DwcChannelActive::new());
 pub static DWC_LOCK: InterruptSpinLock<DwcLock> = InterruptSpinLock::new(DwcLock::new());
+pub static DWC_CHANNEL_ACTIVE: SpinLock<DwcChannelActive> = SpinLock::new(DwcChannelActive::new());
 pub static mut DWC_CHANNEL_CALLBACK: DwcChannelCallback = DwcChannelCallback::new();
 
 pub fn dwc_otg_register_interrupt_handler() {
     gic::GIC.get().register_isr(105, dwc_otg_interrupt_handler);
+}
+
+fn schedule_next_transfer(channel: u8) {
+    //Check if another transfer is pending
+    let transfer = USB_TRANSFER_QUEUE.get_transfer();
+
+    if transfer.is_some() {
+        //Enable transfer, keep holding channel
+
+        let transfer = transfer.unwrap();
+
+        unsafe {
+            let device = &mut *(transfer.as_ref().endpoint_descriptor.device as *mut UsbDevice);
+            //check if the transfer is a bulk transfer or endpoint transfer
+            match transfer.as_ref().endpoint_descriptor.endpoint_type {
+                //TODO: Kinda cursed, maybe make cleaner
+                UsbTransfer::Bulk => {
+                    UsbBulkMessage(device, transfer, channel);
+                }
+                UsbTransfer::Interrupt => {
+                    UsbInterruptMessage(device, transfer, channel);
+                }
+                _ => {
+                    //Really should not be here
+                    panic!("DWC: Interrupt Handler Unsupported transfer type");
+                }
+            }
+        }
+    } else {
+        //Don't need the occupy channel anymore
+        dwc_otg_free_channel(channel as u32);
+    }
 }
 
 pub fn dwc_otg_interrupt_handler(_ctx: &mut Context) {
@@ -69,52 +101,22 @@ pub fn dwc_otg_interrupt_handler(_ctx: &mut Context) {
     {
         for i in 0..ChannelCount {
             if hcint_channels[i] != 0 {
-                unsafe {
-                    if let Some(endpoint_descriptor) = DWC_CHANNEL_CALLBACK.endpoint_descriptors[i]
-                    {
-                        if let Some(callback) = DWC_CHANNEL_CALLBACK.callback[i] {
-                            let hcint = hcint_channels[i];
-                            schedule_rt(move || {
-                                callback(endpoint_descriptor, hcint, i as u8);
-
-                                //Check if another transfer is pending
-                                let transfer = USB_TRANSFER_QUEUE.get_transfer();
-
-                                if transfer.is_some() {
-                                    //Enable transfer, keep holding channel
-
-                                    let transfer = transfer.unwrap();
-                                    let device = &mut *(transfer.as_ref().endpoint_descriptor.device
-                                        as *mut UsbDevice);
-                                    //check if the transfer is a bulk transfer or endpoint transfer
-                                    match transfer.as_ref().endpoint_descriptor.endpoint_type {
-                                        //TODO: Kinda cursed, maybe make cleaner
-                                        UsbTransfer::Bulk => {
-                                            UsbBulkMessage(device, transfer, i as u8);
-                                        }
-                                        UsbTransfer::Interrupt => {
-                                            UsbInterruptMessage(device, transfer, i as u8);
-                                        }
-                                        _ => {
-                                            //Really should not be here
-                                            panic!(
-                                                "DWC: Interrupt Handler Unsupported transfer type"
-                                            );
-                                        }
-                                    }
-                                } else {
-                                    //Don't need the occupy channel anymore
-                                    dwc_otg_free_channel(i as u32);
-                                }
-                            });
-                        } else {
-                            println!("| DWC: No callback for channel {}.\n", i);
-                            shutdown();
-                        }
+                if let Some(endpoint_descriptor) =
+                    unsafe { DWC_CHANNEL_CALLBACK.endpoint_descriptors[i] }
+                {
+                    if let Some(callback) = unsafe { DWC_CHANNEL_CALLBACK.callback[i] } {
+                        let hcint = hcint_channels[i];
+                        schedule_rt(move || {
+                            callback(endpoint_descriptor, hcint, i as u8);
+                            schedule_next_transfer(i as u8);
+                        });
                     } else {
-                        println!("| DWC: No endpoint descriptor for channel {}.\n", i);
+                        println!("| DWC: No callback for channel {}.\n", i);
                         shutdown();
                     }
+                } else {
+                    println!("| DWC: No endpoint descriptor for channel {}.\n", i);
+                    shutdown();
                 }
             }
         }

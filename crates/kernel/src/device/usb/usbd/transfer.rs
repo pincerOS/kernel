@@ -65,6 +65,7 @@ impl UsbTransferQueue {
     }
 }
 
+#[derive(Copy, Clone)]
 pub struct UsbXfer {
     pub endpoint_descriptor: endpoint_descriptor,
     pub buffer: *mut u8,
