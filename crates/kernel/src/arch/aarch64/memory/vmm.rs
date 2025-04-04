@@ -293,7 +293,6 @@ pub unsafe fn set_translation_descriptor(
 
             unsafe {
                 table_entry.write(intermediate_descriptor);
-                asm!("dsb ISH", options(readonly, nostack, preserves_flags));
             }
         }
 
@@ -319,7 +318,7 @@ pub unsafe fn set_translation_descriptor(
     return Ok(());
 }
 
-pub unsafe fn map_pa_to_va(
+pub unsafe fn map_va_to_pa(
     pa: usize,
     va: usize,
     translation_table: *mut UnifiedTranslationTable,
