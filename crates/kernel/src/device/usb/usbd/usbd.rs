@@ -27,8 +27,12 @@ use super::device::*;
 use super::pipe::*;
 use super::request::*;
 use crate::device::usb::usbd::endpoint::*;
+use crate::device::usb::usbd::transfer::*;
 
 use core::ptr;
+
+//TODO: This needs checking under load
+pub static USB_TRANSFER_QUEUE: UsbTransferQueue = UsbTransferQueue::new();
 
 /** The default timeout in ms of control transfers. */
 pub const ControlMessageTimeout: usize = 10;
@@ -70,7 +74,7 @@ pub fn UsbInitialise(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
     result
 }
 
-pub unsafe fn UsbBulkMessage(
+pub unsafe fn UsbSendBulkMessage(
     device: &mut UsbDevice,
     pipe: UsbPipeAddress,
     buffer: *mut u8,
@@ -79,45 +83,80 @@ pub unsafe fn UsbBulkMessage(
     device_endpoint_number: u8,
     timeout_: u32,
 ) -> ResultCode {
-    let mut available_channel = dwc_otg_get_active_channel();
-    while available_channel == ChannelCount as u8 {
-        available_channel = dwc_otg_get_active_channel();
-    } //TODO: Make a queue system instead of busy waiting
+
+    let callback_fn = if pipe.direction == UsbDirection::In {
+        finish_bulk_endpoint_callback_in
+    } else {
+        finish_bulk_endpoint_callback_out
+    };
+
+    let b = Box::new(UsbXfer {
+        endpoint_descriptor: endpoint_descriptor {
+            endpoint_address: pipe.end_point,
+            endpoint_direction: pipe.direction,
+            endpoint_type: pipe.transfer_type,
+            max_packet_size: pipe.max_size,
+            device_endpoint_number: device_endpoint_number,
+            device: device,
+            device_number: device.number,
+            device_speed: device.speed,
+            buffer_length: buffer_length,
+            buffer: buffer,
+            timeout: timeout_,
+        },
+        buffer: buffer,
+        buffer_length: buffer_length,
+        callback: Some(callback_fn),
+        packet_id: packet_id,
+        pipe: pipe,
+    });
+
+    let result;
+    result = USB_TRANSFER_QUEUE.add_transfer(b, pipe.transfer_type);
+    if result.is_err() {
+        panic!("| USBD: Failed to add transfer to queue");
+    }
+
+    let available_channel = dwc_otg_get_active_channel();
+    if available_channel == ChannelCount as u8 {
+        //no available channel at the moment
+        return ResultCode::OK;
+    }
 
     unsafe {
-        DWC_CHANNEL_CALLBACK.endpoint_descriptors[available_channel as usize] =
-            Some(endpoint_descriptor {
-                endpoint_address: pipe.end_point,
-                endpoint_direction: pipe.direction,
-                endpoint_type: pipe.transfer_type,
-                max_packet_size: pipe.max_size,
-                device_endpoint_number: device_endpoint_number,
-                device: device,
-                device_number: device.number,
-                device_speed: device.speed,
-                buffer_length: buffer_length,
-                buffer: buffer,
-                channel: available_channel,
-                timeout: timeout_,
-            });
+        let transfer = USB_TRANSFER_QUEUE.get_transfer();
 
-        if pipe.direction == UsbDirection::Out {
-            DWC_CHANNEL_CALLBACK.callback[available_channel as usize] =
-                Some(finish_bulk_endpoint_callback_out);
-        } else {
-            DWC_CHANNEL_CALLBACK.callback[available_channel as usize] =
-                Some(finish_bulk_endpoint_callback_in);
+        if transfer.is_none() {
+            dwc_otg_free_channel(available_channel as u32);
+            return ResultCode::OK;
         }
+
+        return UsbBulkMessage(
+            device,
+            transfer.unwrap(),
+            available_channel,
+        );
+    }
+}
+
+pub unsafe fn UsbBulkMessage(
+    device: &mut UsbDevice,
+    usb_xfer: Box<UsbXfer>,
+    channel: u8,
+) -> ResultCode {
+    unsafe {
+        DWC_CHANNEL_CALLBACK.endpoint_descriptors[channel as usize] = Some(usb_xfer.endpoint_descriptor);
+        DWC_CHANNEL_CALLBACK.callback[channel as usize] = usb_xfer.callback;
     }
 
     let result = unsafe {
         HcdSubmitBulkMessage(
             device,
-            available_channel,
-            pipe,
-            buffer,
-            buffer_length,
-            packet_id,
+            channel,
+            usb_xfer.pipe,
+            usb_xfer.buffer,
+            usb_xfer.buffer_length,
+            usb_xfer.packet_id,
         )
     };
 
@@ -129,39 +168,73 @@ pub unsafe fn UsbBulkMessage(
     return result;
 }
 
-pub unsafe fn UsbInterruptMessage(
+pub unsafe fn UsbSendInterruptMessage(
     device: &mut UsbDevice,
     pipe: UsbPipeAddress,
     buffer: *mut u8,
     buffer_length: u32,
     packet_id: PacketId,
     _timeout_: u32,
-    callback: fn(endpoint_descriptor, u32),
+    callback: fn(endpoint_descriptor, u32, u8),
     endpoint: endpoint_descriptor,
 ) -> ResultCode {
-    let mut available_channel = dwc_otg_get_active_channel();
-    while available_channel == ChannelCount as u8 {
-        available_channel = dwc_otg_get_active_channel();
-    } //TODO: Make a queue system instead of busy waiting
 
-    let new_endpoint = endpoint_descriptor {
-        channel: available_channel,
-        ..endpoint
-    }; //TODO: make a better way to do edit endpoint
+    let b = Box::new(UsbXfer {
+        endpoint_descriptor: endpoint,
+        buffer: buffer,
+        buffer_length: buffer_length,
+        callback: Some(callback),
+        packet_id: packet_id,
+        pipe: pipe,
+    });
+
+    let result;
+    result = USB_TRANSFER_QUEUE.add_transfer(b, pipe.transfer_type);
+    if result.is_err() {
+        panic!("| USBD: Failed to add transfer to queue");
+    }
+
+    let available_channel = dwc_otg_get_active_channel();
+    if available_channel == ChannelCount as u8 {
+        //no available channel at the moment
+        return ResultCode::OK;
+    }
 
     unsafe {
-        DWC_CHANNEL_CALLBACK.callback[available_channel as usize] = Some(callback);
-        DWC_CHANNEL_CALLBACK.endpoint_descriptors[available_channel as usize] = Some(new_endpoint);
+        let transfer = USB_TRANSFER_QUEUE.get_transfer();
+
+        if transfer.is_none() {
+            dwc_otg_free_channel(available_channel as u32);
+            return ResultCode::OK;
+        }
+
+        return UsbInterruptMessage(
+            device,
+            transfer.unwrap(),
+            available_channel
+        );
+    }
+}
+
+pub unsafe fn UsbInterruptMessage(
+    device: &mut UsbDevice,
+    usb_xfer: Box<UsbXfer>,
+    channel: u8
+) -> ResultCode {
+
+    unsafe {
+        DWC_CHANNEL_CALLBACK.callback[channel as usize] = Some(usb_xfer.callback.unwrap());
+        DWC_CHANNEL_CALLBACK.endpoint_descriptors[channel as usize] = Some(usb_xfer.endpoint_descriptor);
     }
 
     let result = unsafe {
         HcdSubmitInterruptMessage(
             device,
-            available_channel,
-            pipe,
-            buffer,
-            buffer_length,
-            packet_id,
+            channel,
+            usb_xfer.pipe,
+            usb_xfer.buffer,
+            usb_xfer.buffer_length,
+            usb_xfer.packet_id,
         )
     };
 

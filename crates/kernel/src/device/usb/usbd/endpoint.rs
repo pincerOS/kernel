@@ -15,7 +15,7 @@ use usb::types::*;
 use usb::usbd::device::*;
 use usb::usbd::pipe::*;
 use usb::PacketId;
-use usb::UsbInterruptMessage;
+use crate::device::usb::UsbSendInterruptMessage;
 
 use crate::event::task::spawn_async_rt;
 use crate::shutdown;
@@ -23,17 +23,17 @@ use crate::sync::time::{interval, MissedTicks};
 
 use alloc::boxed::Box;
 
-pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u32) {
+pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u32, channel: u8) {
     let device = unsafe { &mut *endpoint.device };
 
-    let transfer_size = HcdUpdateTransferSize(device, endpoint.channel);
+    let transfer_size = HcdUpdateTransferSize(device, channel);
     device.last_transfer = endpoint.buffer_length - transfer_size;
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     if hcint & HCINT_CHHLTD == 0 {
         println!(
             "| Endpoint {} in: HCINT_CHHLTD not set, aborting. hcint: {:x}.",
-            endpoint.channel, hcint
+            channel, hcint
         );
         shutdown();
     }
@@ -41,13 +41,13 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
     if hcint & HCINT_XFERCOMPL == 0 {
         println!(
             "| Endpoint {} in: HCINT_XFERCOMPL not set, aborting. {:x}",
-            endpoint.channel, hcint
+            channel, hcint
         );
         shutdown();
     }
 
     let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
-    let dma_addr = dwc_sc.dma_addr[endpoint.channel as usize];
+    let dma_addr = dwc_sc.dma_addr[channel as usize];
 
     let buffer = endpoint.buffer;
     let buffer_length = device.last_transfer;
@@ -67,15 +67,15 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
     }
 }
 
-pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u32) {
+pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u32, channel: u8) {
     let device = unsafe { &mut *endpoint.device };
-    let transfer_size = HcdUpdateTransferSize(device, endpoint.channel);
+    let transfer_size = HcdUpdateTransferSize(device, channel);
     device.last_transfer = endpoint.buffer_length - transfer_size;
 
     if hcint & HCINT_CHHLTD == 0 {
         println!(
             "| Endpoint {}: HCINT_CHHLTD not set, aborting.",
-            endpoint.channel
+            channel
         );
         shutdown();
     }
@@ -83,7 +83,7 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
     if hcint & HCINT_XFERCOMPL == 0 {
         println!(
             "| Endpoint {}: HCINT_XFERCOMPL not set, aborting.",
-            endpoint.channel
+            channel
         );
         shutdown();
     }
@@ -91,21 +91,21 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
     //Good to go
 }
 
-pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: u32) {
+pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: u32, channel: u8) {
     let device = unsafe { &mut *endpoint.device };
-    let transfer_size = HcdUpdateTransferSize(device, endpoint.channel);
+    let transfer_size = HcdUpdateTransferSize(device, channel);
     device.last_transfer = endpoint.buffer_length - transfer_size;
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     //TODO: Hardcoded for usb-kbd for now
     let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
 
-    let dma_addr = dwc_sc.dma_addr[endpoint.channel as usize];
+    let dma_addr = dwc_sc.dma_addr[channel as usize];
 
     if hcint & HCINT_CHHLTD == 0 {
         println!(
             "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x}.",
-            endpoint.channel, hcint
+            channel, hcint
         );
         shutdown();
     }
@@ -129,7 +129,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
     } else {
         println!(
             "| Endpoint {}: Unknown interrupt, aborting.",
-            endpoint.channel
+            channel
         );
         shutdown();
     }
@@ -162,7 +162,7 @@ pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
     //TODO: Hardcoded for usb-kbd for now
     let mut buffer = Box::new([0u8; 8]);
     let result = unsafe {
-        UsbInterruptMessage(
+        UsbSendInterruptMessage(
             device,
             pipe,
             buffer.as_mut_ptr(),
@@ -212,7 +212,6 @@ pub fn register_interrupt_endpoint(
         device_speed: device.speed,
         buffer_length: 8,
         buffer: core::ptr::null_mut(),
-        channel: 0,
         timeout: timeout,
     };
 
@@ -237,7 +236,6 @@ pub struct endpoint_descriptor {
     pub device_speed: UsbSpeed,
     pub buffer_length: u32,
     pub buffer: *mut u8,
-    pub channel: u8,
     pub timeout: u32,
 }
 
@@ -257,7 +255,6 @@ impl endpoint_descriptor {
             device_speed: UsbSpeed::Low,
             buffer_length: 0,
             buffer: core::ptr::null_mut(),
-            channel: 0,
             timeout: 0,
         }
     }

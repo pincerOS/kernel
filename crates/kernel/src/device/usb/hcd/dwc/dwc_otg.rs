@@ -31,6 +31,8 @@ use crate::shutdown;
 use crate::sync::InterruptSpinLock;
 use crate::sync::SpinLock;
 use core::ptr;
+use crate::device::usb::{ USB_TRANSFER_QUEUE, UsbBulkMessage, UsbInterruptMessage };
+
 
 pub const ChannelCount: usize = 8;
 pub static mut dwc_otg_driver: DWC_OTG = DWC_OTG { base_addr: 0 };
@@ -74,8 +76,40 @@ pub fn dwc_otg_interrupt_handler(_ctx: &mut Context) {
                         if let Some(callback) = DWC_CHANNEL_CALLBACK.callback[i] {
                             let hcint = hcint_channels[i];
                             schedule_rt(move || {
-                                callback(endpoint_descriptor, hcint);
-                                dwc_otg_free_channel(i as u32);
+                                callback(endpoint_descriptor, hcint, i as u8);
+
+                                //Check if another transfer is pending
+                                let transfer = USB_TRANSFER_QUEUE.get_transfer();
+
+                                if transfer.is_some() {
+                                    //Enable transfer, keep holding channel
+
+                                    let transfer = transfer.unwrap();
+                                    let device = &mut *(transfer.as_ref().endpoint_descriptor.device as *mut UsbDevice);
+                                    //check if the transfer is a bulk transfer or endpoint transfer
+                                    match transfer.as_ref().endpoint_descriptor.endpoint_type { //TODO: Kinda cursed, maybe make cleaner
+                                        UsbTransfer::Bulk => {
+                                            UsbBulkMessage(
+                                                device,
+                                                transfer,
+                                                i as u8
+                                            );
+                                        }
+                                        UsbTransfer::Interrupt => {
+                                            UsbInterruptMessage(
+                                                device, 
+                                                transfer, 
+                                                i as u8);
+                                        }
+                                        _ => {
+                                            //Really should not be here
+                                            panic!("DWC: Interrupt Handler Unsupported transfer type");
+                                        }
+                                    }
+                                } else {
+                                    //Don't need the occupy channel anymore
+                                    dwc_otg_free_channel(i as u32);
+                                }
                             });
                         } else {
                             println!("| DWC: No callback for channel {}.\n", i);
@@ -1530,7 +1564,7 @@ pub fn dwc_otg_free_channel(channel: u32) {
 }
 
 pub struct DwcChannelCallback {
-    pub callback: [Option<fn(endpoint_descriptor, u32)>; ChannelCount],
+    pub callback: [Option<fn(endpoint_descriptor, u32, u8)>; ChannelCount],
     pub endpoint_descriptors: [Option<endpoint_descriptor>; ChannelCount],
 }
 
