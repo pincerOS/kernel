@@ -4,9 +4,9 @@
 extern crate alloc;
 extern crate kernel;
 
+use crate::arch::memory::{map_pa_to_va, UnifiedTranslationTable};
 use crate::event::context;
 use crate::event::thread;
-use crate::arch::memory::{UnifiedTranslationTable, map_pa_to_va};
 use alloc::boxed::Box;
 use core::arch::asm;
 use kernel::*;

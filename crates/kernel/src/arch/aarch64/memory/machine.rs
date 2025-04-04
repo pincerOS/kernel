@@ -338,11 +338,12 @@ impl TableDescriptor {
     pub const fn is_valid(self) -> bool {
         self.contains(Self::VALID)
     }
-    
+
     pub fn set_valid(self, valid: bool) -> Self {
-        self.difference(Self::VALID).union(Self::from_bits_retain(valid as u64))
+        self.difference(Self::VALID)
+            .union(Self::from_bits_retain(valid as u64))
     }
-    
+
     // temporary, should be moved to more proper location
     pub const fn is_table_descriptor(self) -> bool {
         self.contains(Self::IS_TABLE_DESCRIPTOR)
@@ -374,12 +375,12 @@ impl LeafDescriptor {
         self.difference(Self::OA)
             .union(Self::from_bits_retain(pa as u64))
     }
-    
+
     //usize or u64
     pub const fn get_pa(self) -> usize {
         return ((self.bits() >> 12) & ((1 << 36) - 1)) as usize;
     }
-    
+
     pub const fn clear_pxn(self) -> Self {
         self.difference(Self::PXN)
     }
@@ -387,15 +388,17 @@ impl LeafDescriptor {
     pub const fn is_valid(self) -> bool {
         self.contains(Self::VALID)
     }
-    
+
     pub fn set_valid(self, valid: bool) -> Self {
-        self.difference(Self::VALID).union(Self::from_bits_retain(valid as u64))
+        self.difference(Self::VALID)
+            .union(Self::from_bits_retain(valid as u64))
     }
 
     pub fn set_user_permissions(&mut self, val: bool) -> Self {
-        self.difference(Self::UNPRIVILEGED_ACCESS).union(Self::from_bits_retain((val as u64) << 6))
+        self.difference(Self::UNPRIVILEGED_ACCESS)
+            .union(Self::from_bits_retain((val as u64) << 6))
     }
-    
+
     pub const fn set_mair(self, mair: u8) -> Self {
         assert!(mair < (1 << 3), "field size mismatch");
 
