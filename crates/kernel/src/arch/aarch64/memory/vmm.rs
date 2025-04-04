@@ -37,6 +37,7 @@ pub struct KernelTranslationTable(pub [TranslationDescriptor; 16]);
 #[repr(C, align(4096))]
 pub struct KernelLeafTable(pub [LeafDescriptor; KERNEL_LEAF_TABLE_SIZE]);
 
+#[allow(dead_code)]
 const USER_PG_SZ: usize = 0x1000;
 
 #[allow(improper_ctypes)]
@@ -228,7 +229,6 @@ pub unsafe fn get_translation_descriptor(
     target_level: u8,
     mut curr_level: u8,
     mut translation_table: *mut UnifiedTranslationTable,
-    fill_intermediate: bool,
 ) -> Result<TranslationDescriptor, MappingError> {
     assert!(target_level <= 3);
     assert!(curr_level <= 3);
@@ -241,18 +241,9 @@ pub unsafe fn get_translation_descriptor(
         .wrapping_add(table_index);
     while curr_level < target_level {
         let table_entry: *mut TableDescriptor = translation_descriptor.cast::<TableDescriptor>();
-        let mut intermediate_descriptor: TableDescriptor = unsafe { table_entry.read() };
+        let intermediate_descriptor: TableDescriptor = unsafe { table_entry.read() };
         if !intermediate_descriptor.is_valid() {
-            if !fill_intermediate {
-                return Err(MappingError::LevelEntryUnset(curr_level));
-            }
-
-            let frame = PAGE_ALLOCATOR.get().alloc_mapped_frame();
-            intermediate_descriptor = TableDescriptor::new(frame.paddr);
-            unsafe {
-                table_entry.write(intermediate_descriptor);
-                asm!("dsb ISH", options(readonly, nostack, preserves_flags));
-            }
+            return Err(MappingError::LevelEntryUnset(curr_level));
         }
 
         let next_lvl_table_pa: usize = intermediate_descriptor.get_pa() << 12;
@@ -299,6 +290,7 @@ pub unsafe fn set_translation_descriptor(
 
             let frame = PAGE_ALLOCATOR.get().alloc_mapped_frame();
             intermediate_descriptor = TableDescriptor::new(frame.paddr);
+
             unsafe {
                 table_entry.write(intermediate_descriptor);
                 asm!("dsb ISH", options(readonly, nostack, preserves_flags));
@@ -335,11 +327,13 @@ pub unsafe fn map_pa_to_va(
     user_permission: bool,
 ) -> Result<(), MappingError> {
     //Need level 2 table in both cases to check for huge page
-    let table_descriptor: TableDescriptor = unsafe {
-        get_translation_descriptor(va, 2, 0, translation_table, true)
-            .unwrap()
-            .table
-    };
+    let table_descriptor: TableDescriptor;
+    match unsafe { get_translation_descriptor(va, 2, 0, translation_table) } {
+        Ok(translation_descriptor) => table_descriptor = unsafe { translation_descriptor.table },
+        Err(MappingError::LevelEntryUnset(_lvl)) => table_descriptor = TableDescriptor::empty(),
+        Err(_e) => unreachable!(),
+    }
+
     if is_huge_page {
         if table_descriptor.is_valid() {
             if table_descriptor.is_table_descriptor() {
@@ -350,12 +344,11 @@ pub unsafe fn map_pa_to_va(
             }
         }
 
-        let aligned_pa = (pa / 0x200_000) * 0x200_000;
-        let mut new_leaf = LeafDescriptor::new(aligned_pa)
+        let aligned_pa = (pa / 0x20_0000) * 0x20_0000;
+        let new_leaf = LeafDescriptor::new(aligned_pa)
             .set_global()
             .difference(LeafDescriptor::IS_PAGE_DESCRIPTOR)
             .set_user_permissions(user_permission);
-        new_leaf.set_user_permissions(true);
 
         //This ideally shouldn't panic as the get should have filled in the intermediate pages
         unsafe {
@@ -367,27 +360,29 @@ pub unsafe fn map_pa_to_va(
     }
 
     //Regular page case
-    if table_descriptor.is_valid() && !table_descriptor.is_table_descriptor() {
-        //huge page present where table descriptor is expected
-        return Err(MappingError::HugePagePresent);
-    }
+    if table_descriptor.is_valid() {
+        if !table_descriptor.is_table_descriptor() {
+            //huge page present where table descriptor is expected
+            return Err(MappingError::HugePagePresent);
+        }
 
-    //NOTE: This can be slighlty optimized
-    let leaf_translation_descriptor =
-        unsafe { get_translation_descriptor(va, 3, 0, translation_table, true).unwrap() };
-    let mut leaf_descriptor = unsafe { leaf_translation_descriptor.leaf };
+        //NOTE: This can be slighlty optimized
+        let leaf_translation_descriptor =
+            unsafe { get_translation_descriptor(va, 3, 0, translation_table).unwrap() };
+        let leaf_descriptor = unsafe { leaf_translation_descriptor.leaf };
 
-    if leaf_descriptor.is_valid() {
-        return Err(MappingError::LeafTableSpotTaken);
+        if leaf_descriptor.is_valid() {
+            return Err(MappingError::LeafTableSpotTaken);
+        }
     }
 
     let aligned_pa = (pa / PG_SZ) * PG_SZ;
-    leaf_descriptor = LeafDescriptor::new(aligned_pa)
+    let leaf_descriptor = LeafDescriptor::new(aligned_pa)
         .set_global()
         .set_user_permissions(user_permission);
 
     unsafe {
-        set_translation_descriptor(va, 3, 0, translation_table, leaf_descriptor.into(), false)
+        set_translation_descriptor(va, 3, 0, translation_table, leaf_descriptor.into(), true)
             .unwrap();
     }
     return Ok(());
