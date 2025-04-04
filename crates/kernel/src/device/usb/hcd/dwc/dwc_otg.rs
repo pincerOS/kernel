@@ -35,6 +35,13 @@ use core::ptr;
 
 pub const ChannelCount: usize = 8;
 pub static mut dwc_otg_driver: DWC_OTG = DWC_OTG { base_addr: 0 };
+
+// The USB_TRANSFER_QUEUE will hold future USB transfer requests (Usb Xfer). A channel is a representation by the USB spec to be able to access an endpoint (the thing talking to the USB device).
+// Callbacks are the method that should be invoked once the data has been transferred.
+// USBD should first create a usb_xfer on the USB_TRANSFER_QUEUE and then see if a channel is available.
+// if a channel is available, it will be assigned to the usb_xfer and the callback will be set.
+//
+// After the transfer is complete, the callback will be invoked. If there are pending transfers, the next transfer will be scheduled. otherwise, the channel will be freed.
 pub static DWC_LOCK: InterruptSpinLock<DwcLock> = InterruptSpinLock::new(DwcLock::new());
 pub static DWC_CHANNEL_ACTIVE: SpinLock<DwcChannelActive> = SpinLock::new(DwcChannelActive::new());
 pub static mut DWC_CHANNEL_CALLBACK: DwcChannelCallback = DwcChannelCallback::new();
