@@ -8,6 +8,7 @@
  */
 use crate::device::usb;
 
+use crate::device::usb::UsbSendInterruptMessage;
 use usb::dwc_hub;
 use usb::hcd::dwc::dwc_otg::HcdUpdateTransferSize;
 use usb::hcd::dwc::dwc_otgreg::{HCINT_CHHLTD, HCINT_NAK, HCINT_XFERCOMPL};
@@ -15,7 +16,6 @@ use usb::types::*;
 use usb::usbd::device::*;
 use usb::usbd::pipe::*;
 use usb::PacketId;
-use crate::device::usb::UsbSendInterruptMessage;
 
 use crate::event::task::spawn_async_rt;
 use crate::shutdown;
@@ -73,18 +73,12 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
     device.last_transfer = endpoint.buffer_length - transfer_size;
 
     if hcint & HCINT_CHHLTD == 0 {
-        println!(
-            "| Endpoint {}: HCINT_CHHLTD not set, aborting.",
-            channel
-        );
+        println!("| Endpoint {}: HCINT_CHHLTD not set, aborting.", channel);
         shutdown();
     }
 
     if hcint & HCINT_XFERCOMPL == 0 {
-        println!(
-            "| Endpoint {}: HCINT_XFERCOMPL not set, aborting.",
-            channel
-        );
+        println!("| Endpoint {}: HCINT_XFERCOMPL not set, aborting.", channel);
         shutdown();
     }
 
@@ -127,10 +121,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             );
         }
     } else {
-        println!(
-            "| Endpoint {}: Unknown interrupt, aborting.",
-            channel
-        );
+        println!("| Endpoint {}: Unknown interrupt, aborting.", channel);
         shutdown();
     }
 

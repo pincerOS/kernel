@@ -83,7 +83,6 @@ pub unsafe fn UsbSendBulkMessage(
     device_endpoint_number: u8,
     timeout_: u32,
 ) -> ResultCode {
-
     let callback_fn = if pipe.direction == UsbDirection::In {
         finish_bulk_endpoint_callback_in
     } else {
@@ -131,11 +130,7 @@ pub unsafe fn UsbSendBulkMessage(
             return ResultCode::OK;
         }
 
-        return UsbBulkMessage(
-            device,
-            transfer.unwrap(),
-            available_channel,
-        );
+        return UsbBulkMessage(device, transfer.unwrap(), available_channel);
     }
 }
 
@@ -145,7 +140,8 @@ pub unsafe fn UsbBulkMessage(
     channel: u8,
 ) -> ResultCode {
     unsafe {
-        DWC_CHANNEL_CALLBACK.endpoint_descriptors[channel as usize] = Some(usb_xfer.endpoint_descriptor);
+        DWC_CHANNEL_CALLBACK.endpoint_descriptors[channel as usize] =
+            Some(usb_xfer.endpoint_descriptor);
         DWC_CHANNEL_CALLBACK.callback[channel as usize] = usb_xfer.callback;
     }
 
@@ -178,7 +174,6 @@ pub unsafe fn UsbSendInterruptMessage(
     callback: fn(endpoint_descriptor, u32, u8),
     endpoint: endpoint_descriptor,
 ) -> ResultCode {
-
     let b = Box::new(UsbXfer {
         endpoint_descriptor: endpoint,
         buffer: buffer,
@@ -208,23 +203,19 @@ pub unsafe fn UsbSendInterruptMessage(
             return ResultCode::OK;
         }
 
-        return UsbInterruptMessage(
-            device,
-            transfer.unwrap(),
-            available_channel
-        );
+        return UsbInterruptMessage(device, transfer.unwrap(), available_channel);
     }
 }
 
 pub unsafe fn UsbInterruptMessage(
     device: &mut UsbDevice,
     usb_xfer: Box<UsbXfer>,
-    channel: u8
+    channel: u8,
 ) -> ResultCode {
-
     unsafe {
         DWC_CHANNEL_CALLBACK.callback[channel as usize] = Some(usb_xfer.callback.unwrap());
-        DWC_CHANNEL_CALLBACK.endpoint_descriptors[channel as usize] = Some(usb_xfer.endpoint_descriptor);
+        DWC_CHANNEL_CALLBACK.endpoint_descriptors[channel as usize] =
+            Some(usb_xfer.endpoint_descriptor);
     }
 
     let result = unsafe {

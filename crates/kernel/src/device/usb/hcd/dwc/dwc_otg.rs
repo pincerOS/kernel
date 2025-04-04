@@ -24,6 +24,7 @@ use crate::device::gic;
 use crate::device::mailbox::PropSetPowerState;
 use crate::device::system_timer::micro_delay;
 use crate::device::usb::usbd::endpoint::endpoint_descriptor;
+use crate::device::usb::{UsbBulkMessage, UsbInterruptMessage, USB_TRANSFER_QUEUE};
 use crate::device::MAILBOX;
 use crate::event::context::Context;
 use crate::event::schedule_rt;
@@ -31,8 +32,6 @@ use crate::shutdown;
 use crate::sync::InterruptSpinLock;
 use crate::sync::SpinLock;
 use core::ptr;
-use crate::device::usb::{ USB_TRANSFER_QUEUE, UsbBulkMessage, UsbInterruptMessage };
-
 
 pub const ChannelCount: usize = 8;
 pub static mut dwc_otg_driver: DWC_OTG = DWC_OTG { base_addr: 0 };
@@ -85,25 +84,22 @@ pub fn dwc_otg_interrupt_handler(_ctx: &mut Context) {
                                     //Enable transfer, keep holding channel
 
                                     let transfer = transfer.unwrap();
-                                    let device = &mut *(transfer.as_ref().endpoint_descriptor.device as *mut UsbDevice);
+                                    let device = &mut *(transfer.as_ref().endpoint_descriptor.device
+                                        as *mut UsbDevice);
                                     //check if the transfer is a bulk transfer or endpoint transfer
-                                    match transfer.as_ref().endpoint_descriptor.endpoint_type { //TODO: Kinda cursed, maybe make cleaner
+                                    match transfer.as_ref().endpoint_descriptor.endpoint_type {
+                                        //TODO: Kinda cursed, maybe make cleaner
                                         UsbTransfer::Bulk => {
-                                            UsbBulkMessage(
-                                                device,
-                                                transfer,
-                                                i as u8
-                                            );
+                                            UsbBulkMessage(device, transfer, i as u8);
                                         }
                                         UsbTransfer::Interrupt => {
-                                            UsbInterruptMessage(
-                                                device, 
-                                                transfer, 
-                                                i as u8);
+                                            UsbInterruptMessage(device, transfer, i as u8);
                                         }
                                         _ => {
                                             //Really should not be here
-                                            panic!("DWC: Interrupt Handler Unsupported transfer type");
+                                            panic!(
+                                                "DWC: Interrupt Handler Unsupported transfer type"
+                                            );
                                         }
                                     }
                                 } else {
