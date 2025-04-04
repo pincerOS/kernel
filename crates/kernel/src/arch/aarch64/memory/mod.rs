@@ -6,8 +6,8 @@ use core::arch::asm;
 
 use machine::{at_s1e1r, LeafDescriptor};
 pub use vmm::{
-    create_user_region, init_physical_alloc, map_device, map_device_block, map_va_to_pa,
-    map_physical, map_physical_noncacheable, UnifiedTranslationTable,
+    create_user_region, init_physical_alloc, map_device, map_device_block, map_physical,
+    map_physical_noncacheable, map_va_to_pa, UnifiedTranslationTable,
     KERNEL_UNIFIED_TRANSLATION_TABLE,
 };
 
