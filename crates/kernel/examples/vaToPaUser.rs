@@ -6,6 +6,7 @@ extern crate kernel;
 
 use crate::event::context;
 use crate::event::thread;
+use crate::arch::memory::{UnifiedTranslationTable, map_pa_to_va};
 use alloc::boxed::Box;
 use core::arch::asm;
 use kernel::*;
@@ -22,7 +23,7 @@ struct SomePage([u8; 4096]);
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
 
-    let process = crate::process::Process::new();
+    let mut process = crate::process::Process::new();
     // Assume fixed mapped range in user process (0x20_0000 in virtual memory)
     // TODO: mmap instead
     let user_region = 0x20_0000 as *mut u8;
@@ -75,7 +76,9 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         phys_addr, VIRTUAL_ADDR
     );
     unsafe {
-        match crate::arch::memory::map_pa_to_va_user(phys_addr, VIRTUAL_ADDR, ttbr0) {
+        let user_translation_table: *mut UnifiedTranslationTable = &mut *process.page_table.table;
+
+        match map_pa_to_va(phys_addr, VIRTUAL_ADDR, user_translation_table, false, true) {
             Ok(()) => println!("Done mapping!"),
             Err(e) => println!("Error: {}", e),
         }

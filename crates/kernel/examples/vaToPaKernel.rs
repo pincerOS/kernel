@@ -6,8 +6,9 @@ extern crate kernel;
 
 use alloc::boxed::Box;
 use kernel::*;
+use crate::arch::memory::{UnifiedTranslationTable, KERNEL_UNIFIED_TRANSLATION_TABLE, map_pa_to_va};
 
-const VIRTUAL_ADDR: usize = 0xFFFF_FFFF_FE00_0000 | 0x1E00000;
+const VIRTUAL_ADDR: usize = 0xFFFF_0000_0000_0000 | 0x1E00000;
 static HELLO_CHARS: [u8; 5] = *b"hello";
 
 #[repr(C, align(4096))]
@@ -40,7 +41,8 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         phys_addr, VIRTUAL_ADDR
     );
     unsafe {
-        match crate::arch::memory::map_pa_to_va_kernel(phys_addr, VIRTUAL_ADDR) {
+        let translation_table: *mut UnifiedTranslationTable = &raw mut KERNEL_UNIFIED_TRANSLATION_TABLE;
+        match map_pa_to_va(phys_addr, VIRTUAL_ADDR, translation_table, false, false) {
             Ok(()) => println!("Done mapping!"),
             Err(e) => println!("Error: {}", e),
         }
