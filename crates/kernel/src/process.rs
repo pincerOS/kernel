@@ -40,8 +40,8 @@ impl Process {
         self.mem.lock().get_ttbr0()
     }
 
-    pub fn fork(&self) -> Process {
-        let new_mem = self.mem.lock().fork();
+    pub async fn fork(&self) -> Process {
+        let new_mem = self.mem.lock().fork().await;
 
         let mut new_fds = FileDescriptorList { desc: Vec::new() };
         {

@@ -210,6 +210,14 @@ static EXCEPTION_CLASS: [&str; 64] = {
     arr
 };
 
+// See D23.2 General system control registers; ESR_EL1
+// (page 7502 on my version)
+bitflags::bitflags! {
+    pub struct DataAbortISS: u32 {
+        const WRITE = 1 << 6;
+    }
+}
+
 unsafe fn read_far_el1() -> usize {
     let far: usize;
     unsafe {
@@ -288,6 +296,9 @@ unsafe extern "C" fn exception_handler_user(
         .unwrap_or(&"unspecified");
     let _insn_len = if ((esr >> 25) & 1) != 0 { 4 } else { 2 };
 
+    let _iss2 = (esr >> 32) & ((1 << 23) - 1);
+    let iss = esr & ((1 << 25) - 1);
+
     match exception_class {
         0x15 => {
             // supervisor call
@@ -305,6 +316,11 @@ unsafe extern "C" fn exception_handler_user(
                 unsafe { thread.save_context(ctx.into(), false) };
                 unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
             }
+        }
+        0x24 => {
+            // data abort from lower EL
+            let iss = DataAbortISS::from_bits_retain(iss as u32);
+            crate::process::mem::page_fault_handler(ctx, far, iss)
         }
         _ => {
             if uart::UART.is_initialized() {

@@ -1,5 +1,6 @@
 use crate::event::async_handler::{run_async_handler, HandlerContext};
 use crate::event::context::Context;
+use crate::process::mem::{MappingKind, UserAddrSpace};
 
 bitflags::bitflags! {
     struct ExecFlags: u32 {
@@ -91,9 +92,10 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
         // TODO: error handling
         // TODO: create new address space rather than modifying current
         // TODO: how to deal with other threads of same process???
-        context.with_user_vmem(|| {
-            proc.mem.lock().clear_address_space();
 
+        let mut new_mem = UserAddrSpace::new();
+        let ttbr0 = new_mem.get_ttbr0();
+        let callback = async {
             let phdrs = elf.program_headers().unwrap();
             for phdr in phdrs {
                 let phdr = phdr.unwrap();
@@ -101,35 +103,53 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                     let data = elf.segment_data(&phdr).unwrap();
                     let memsize = (phdr.p_memsz as usize).next_multiple_of(4096).max(4096);
 
-                    /*
-                    if !((0x200_000 <= phdr.p_vaddr) && (phdr.p_vaddr < (0x200_000 + (0x200_000 * 7)))){
-                        proc.page_table.lock().reserve_memory_range(phdr.p_vaddr as usize, memsize, u32::MAX, false).unwrap();
-                    }
-                    */
-
-                    proc.mem
-                        .lock()
-                        .reserve_memory_range(phdr.p_vaddr as usize, memsize, u32::MAX, false)
+                    let base = new_mem
+                        .mmap(Some(phdr.p_vaddr as usize), memsize, MappingKind::Anon)
                         .unwrap();
+
+                    // TODO: figure out how to handle user page faults when in the kernel
+                    // (need to track current address space, even if there isn't an active process)
+                    // (in this case, the current layout would be unsound -- new_mem is owned
+                    // by the current task)
+
+                    let vme = new_mem.get_vme(base).unwrap();
+                    new_mem.populate_range(vme, base, data.len()).await.unwrap();
+
                     let addr = (phdr.p_vaddr as usize) as *mut u8;
                     let mapping: &mut [u8] =
                         unsafe { core::slice::from_raw_parts_mut(addr, memsize) };
                     mapping[..data.len()].copy_from_slice(data);
-                    mapping[data.len()..].fill(0);
+                    // TODO: make sure anonymous pages are zeroed
+                    // mapping[data.len()..].fill(0);
                 }
             }
-        });
+        };
+        unsafe { crate::memory::with_user_vmem_async(ttbr0, callback).await };
+
+        let stack_size = 0x20_0000;
+        let stack_start = 0x100_0000;
+        new_mem
+            .mmap(
+                Some(stack_start - stack_size),
+                stack_size,
+                MappingKind::Anon,
+            )
+            .unwrap();
+
+        let old = core::mem::replace(&mut *proc.mem.lock(), new_mem);
+        drop(old);
 
         let user_entry = elf.elf_header().e_entry();
-        let user_sp = 0x100_0000;
+        let user_sp = stack_start;
 
         {
             let mut regs = context.regs();
             regs.regs = [0; 31];
             regs.elr = user_entry as usize;
             regs.spsr = 0b0000; // TODO: standardize initial SPSR values
+            regs.sp_el0 = user_sp;
+            context.user_regs().as_mut().unwrap().ttbr0_el1 = ttbr0;
         }
-        context.set_sp(user_sp);
 
         // TODO: initial stack setup
         // (argc, argv, envp, auxv)

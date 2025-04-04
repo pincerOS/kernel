@@ -1,99 +1,100 @@
-use crate::event::context::{Context, CORES};
+use crate::event::async_handler::{run_async_handler, HandlerContext};
+use crate::event::context::Context;
+use crate::process::mem::MappingKind;
 
+bitflags::bitflags! {
+    struct ProtFlags: u32 {
+    }
+    struct MmapFlags: u32 {
+        const MAP_FIXED = 1 << 0;
+        const MAP_ANONYMOUS = 1 << 1;
+    }
+}
+
+// syscall sys_mmap(addr: *mut (), size: usize, prot: ProtFlags, flags: Flags, fd: u32, offset: u64)
 pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
-    let req_start_addr: usize = ctx.regs[0];
-    let req_size: usize = ctx.regs[1];
-    //TODO: use this later
-    let _prot_flags: u32 = ctx.regs[2].try_into().unwrap();
-    //TODO: update this to be flags later
-    let fill_pages: bool = ctx.regs[3] != 0;
-    let fd_index: u32 = ctx.regs[4].try_into().unwrap();
-    let _offset: usize = ctx.regs[5];
+    let request_addr = ctx.regs[0];
+    let request_size = ctx.regs[1];
 
-    let cur_process = CORES.with_current(|core| {
-        let thread = core.thread.take().unwrap();
-        // TODO: don't require cloning here
-        // TODO: how to make longer periods of access to the current thread sound?
-        // (ie. either internal mutability, or can't yield/preempt/check preempt status...)
-        let cur_process = thread.process.clone();
-        core.thread.set(Some(thread));
-        cur_process
-    });
-
-    let range_start: usize = match cur_process.unwrap().mem.lock().reserve_memory_range(
-        req_start_addr,
-        req_size,
-        fd_index,
-        fill_pages,
-    ) {
-        Ok(start_addr) => start_addr,
-        Err(e) => {
-            //For debug
-            println!("Error: {:?}", e);
-            //TODO: find a better way to tell the user what went wrong
-            i64::from(-1) as usize
-        }
+    let prot_flags = ctx.regs[2];
+    let Some(_prot_flags) = u32::try_from(prot_flags)
+        .ok()
+        .and_then(ProtFlags::from_bits)
+    else {
+        ctx.regs[0] = i64::from(-1) as usize;
+        return ctx;
     };
-    ctx.regs[0] = range_start;
-    ctx
+
+    let flags = ctx.regs[3];
+    let Some(flags) = u32::try_from(flags).ok().and_then(MmapFlags::from_bits) else {
+        ctx.regs[0] = i64::from(-1) as usize;
+        return ctx;
+    };
+
+    let fd = ctx.regs[4];
+    // TODO: File offset
+    let _offset = ctx.regs[5];
+
+    run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
+        let proc = context.cur_process().unwrap();
+
+        let kind = if flags.contains(MmapFlags::MAP_ANONYMOUS) {
+            MappingKind::Anon
+        } else {
+            let file = proc.file_descriptors.lock().get(fd).cloned();
+            let Some(file) = file else {
+                context.regs().regs[0] = i64::from(-1) as usize;
+                return context.resume_final();
+            };
+            MappingKind::File(file)
+        };
+
+        let res;
+        if flags.contains(MmapFlags::MAP_FIXED) {
+            res = proc.mem.lock().mmap(Some(request_addr), request_size, kind);
+        } else {
+            // TODO: try to respect hint?
+            res = proc.mem.lock().mmap(None, request_size, kind);
+        }
+
+        match res {
+            Ok(addr) => {
+                context.regs().regs[0] = addr;
+                context.resume_final()
+            }
+            Err(e) => {
+                let code = match e {
+                    _ => -1,
+                };
+                context.regs().regs[0] = code as usize;
+                context.resume_final()
+            }
+        }
+    })
 }
 
-pub unsafe fn sys_map_physical_range(ctx: &mut Context) -> *mut Context {
-    let req_virtual_addr: usize = ctx.regs[0];
-    let req_physical_addr: usize = ctx.regs[1];
-
-    let cur_process = CORES.with_current(|core| {
-        let thread = core.thread.take().unwrap();
-        // TODO: don't require cloning here
-        // TODO: how to make longer periods of access to the current thread sound?
-        // (ie. either internal mutability, or can't yield/preempt/check preempt status...)
-        let cur_process = thread.process.clone();
-        core.thread.set(Some(thread));
-        cur_process
-    });
-
-    let retval: usize = match cur_process
-        .unwrap()
-        .mem
-        .lock()
-        .map_to_physical_range(req_virtual_addr, req_physical_addr)
-    {
-        Ok(()) => 0,
-        Err(e) => {
-            //For debug
-            println!("Error: {:?}", e);
-            //TODO: find a better way to tell the user what went wrong
-            i64::from(-1) as usize
-        }
-    };
-    ctx.regs[0] = retval;
-    ctx
-}
-
+// TODO: partial unmap?
+// syscall sys_munmap(addr: *mut ())
 pub unsafe fn sys_munmap(ctx: &mut Context) -> *mut Context {
-    let req_addr: usize = ctx.regs[0];
-    //Currently not used
-    let _len: usize = ctx.regs[1];
+    let addr = ctx.regs[0];
 
-    let cur_process = CORES.with_current(|core| {
-        let thread = core.thread.take().unwrap();
-        // TODO: don't require cloning here
-        // TODO: how to make longer periods of access to the current thread sound?
-        // (ie. either internal mutability, or can't yield/preempt/check preempt status...)
-        let cur_process = thread.process.clone();
-        core.thread.set(Some(thread));
-        cur_process
-    });
+    run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
+        let proc = context.cur_process().unwrap();
 
-    let retval: usize = match cur_process.unwrap().mem.lock().unmap_memory_range(req_addr) {
-        Ok(()) => 0,
-        Err(e) => {
-            //For debug
-            println!("Error: {:?}", e);
-            //TODO: find a better way to tell the user what went wrong
-            i64::from(-1) as usize
+        let res = proc.mem.lock().unmap(addr);
+
+        match res {
+            Ok(()) => {
+                context.regs().regs[0] = 0;
+                context.resume_final()
+            }
+            Err(e) => {
+                let code = match e {
+                    _ => -1,
+                };
+                context.regs().regs[0] = code as usize;
+                context.resume_final()
+            }
         }
-    };
-    ctx.regs[0] = retval;
-    ctx
+    })
 }

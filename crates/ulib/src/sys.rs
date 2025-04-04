@@ -80,9 +80,8 @@ syscall!(16 => pub fn sys_execve_fd(
 
 syscall!(17 => pub fn sys_wait(fd: usize) -> isize);
 
-syscall!(18 => pub fn sys_mmap(req_addr: usize, size: usize, prot_flags: usize, fill_pages: usize, fd_index: usize, offset: usize) -> isize);
-syscall!(19 => pub fn sys_munmap(req_addr: usize, length: usize) -> isize);
-syscall!(20 => pub fn sys_map_physical(virtual_addr: usize, physical_addr: usize) -> isize);
+syscall!(18 => pub fn sys_mmap(addr: usize, size: usize, prot_flags: usize, flags: usize, fd: usize, offset: usize) -> isize);
+syscall!(19 => pub fn sys_munmap(addr: usize) -> isize);
 
 /* * * * * * * * * * * * * * * * * * * */
 /* Syscall wrappers                    */
@@ -221,33 +220,28 @@ pub fn wait(fd: FileDesc) -> Result<usize, usize> {
     int_to_error(res)
 }
 
-pub fn mmap(
-    req_addr: usize,
+pub unsafe fn mmap(
+    addr: usize,
     size: usize,
     prot_flags: u32,
-    fill_pages: u32,
+    flags: u32,
     file_descriptor: FileDesc,
     offset: usize,
-) -> Result<usize, usize> {
+) -> Result<*mut (), usize> {
     let res = unsafe {
         sys_mmap(
-            req_addr,
+            addr,
             size,
             prot_flags as usize,
-            fill_pages as usize,
+            flags as usize,
             file_descriptor as usize,
             offset,
         )
     };
-    int_to_error(res)
+    int_to_error(res).map(|a| a as *mut ())
 }
 
-pub fn munmap(req_addr: usize, length: usize) -> Result<usize, usize> {
-    let res = unsafe { sys_munmap(req_addr, length) };
-    int_to_error(res)
-}
-
-pub fn map_physical(virtual_addr: usize, physical_addr: usize) -> Result<usize, usize> {
-    let res = unsafe { sys_map_physical(virtual_addr, physical_addr) };
+pub unsafe fn munmap(addr: *mut ()) -> Result<usize, usize> {
+    let res = unsafe { sys_munmap(addr.addr()) };
     int_to_error(res)
 }

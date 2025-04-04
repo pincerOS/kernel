@@ -7,6 +7,7 @@ use alloc::boxed::Box;
 
 use super::context::{enter_event_loop, Context, CORES};
 use super::scheduler::Priority;
+use super::thread::UserRegs;
 use super::{task, thread};
 use crate::event;
 
@@ -228,19 +229,13 @@ impl<'outer> HandlerContext<'outer> {
         }
     }
 
-    pub fn set_sp(&mut self, sp: usize) {
-        let thread = self.cur_thread_mut().as_mut().unwrap();
-        thread::Thread::set_sp(
-            &mut thread.user_regs,
-            unsafe { thread.last_context.as_mut() },
-            sp,
-        );
+    pub fn user_regs(&mut self) -> ThreadRefMut<'_, Option<UserRegs>> {
         self.outer_data.user_regs_changed.set(true);
-    }
-
-    pub fn get_sp(&self) -> usize {
-        let thread = self.cur_thread();
-        thread::Thread::get_sp(&thread.user_regs, unsafe { thread.last_context.as_ref() })
+        let thread = self.cur_thread_mut().as_mut().unwrap();
+        ThreadRefMut {
+            inner: &mut thread.user_regs,
+            marker: core::marker::PhantomData,
+        }
     }
 
     fn enable_user_vmem(&self) {

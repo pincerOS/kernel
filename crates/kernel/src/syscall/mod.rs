@@ -30,6 +30,5 @@ pub unsafe fn register_syscalls() {
 
         register_syscall_handler(18, mmap::sys_mmap);
         register_syscall_handler(19, mmap::sys_munmap);
-        register_syscall_handler(20, mmap::sys_map_physical_range);
     }
 }

@@ -14,7 +14,8 @@ use super::{
     table::PageTablePtr,
 };
 
-const PG_SZ: usize = 0x1000;
+pub const PAGE_SIZE: usize = 0x1000;
+pub const PG_SZ: usize = 0x1000;
 const TRANSLATION_TABLE_SIZE: usize = PG_SZ / size_of::<TranslationDescriptor>();
 
 /// This translation table is used for the user and kernel page tables once the 48 bit address

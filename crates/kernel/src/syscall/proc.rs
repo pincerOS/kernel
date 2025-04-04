@@ -34,7 +34,7 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
     let user_x0 = ctx.regs[2];
     let flags = ctx.regs[3];
 
-    run_event_handler(ctx, move |context: HandlerContext<'_>| {
+    run_async_handler(ctx, async move |context: HandlerContext<'_>| {
         let old_process = context.cur_process().unwrap();
 
         let wait_fd;
@@ -45,7 +45,7 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
             process = old_process.clone();
             wait_fd = (-1isize) as usize;
         } else {
-            process = Arc::new(old_process.fork());
+            process = Arc::new(old_process.fork().await);
             let descriptor = WaitFd(process.exit_code.clone());
             let fd = old_process
                 .file_descriptors
@@ -55,7 +55,7 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
         }
 
         println!(
-            "Creating new process with page dir {:#010}",
+            "Creating new process with page dir {:#010x}",
             process.get_ttbr0()
         );
         let mut user_thread = unsafe { thread::Thread::new_user(process, user_sp, user_entry) };
