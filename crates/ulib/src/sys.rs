@@ -80,6 +80,9 @@ syscall!(16 => pub fn sys_execve_fd(
 
 syscall!(17 => pub fn sys_wait(fd: usize) -> isize);
 
+syscall!(18 => pub fn sys_mmap(addr: usize, size: usize, prot_flags: usize, flags: usize, fd: usize, offset: usize) -> isize);
+syscall!(19 => pub fn sys_munmap(addr: usize) -> isize);
+
 /* * * * * * * * * * * * * * * * * * * */
 /* Syscall wrappers                    */
 /* * * * * * * * * * * * * * * * * * * */
@@ -214,5 +217,31 @@ pub unsafe fn execve_fd(
 
 pub fn wait(fd: FileDesc) -> Result<usize, usize> {
     let res = unsafe { sys_wait(fd as usize) };
+    int_to_error(res)
+}
+
+pub unsafe fn mmap(
+    addr: usize,
+    size: usize,
+    prot_flags: u32,
+    flags: u32,
+    file_descriptor: FileDesc,
+    offset: usize,
+) -> Result<*mut (), usize> {
+    let res = unsafe {
+        sys_mmap(
+            addr,
+            size,
+            prot_flags as usize,
+            flags as usize,
+            file_descriptor as usize,
+            offset,
+        )
+    };
+    int_to_error(res).map(|a| a as *mut ())
+}
+
+pub unsafe fn munmap(addr: *mut ()) -> Result<usize, usize> {
+    let res = unsafe { sys_munmap(addr.addr()) };
     int_to_error(res)
 }

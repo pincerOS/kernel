@@ -4,10 +4,9 @@
 extern crate alloc;
 extern crate kernel;
 
-use crate::arch::memory::{
-    map_va_to_pa, UnifiedTranslationTable, KERNEL_UNIFIED_TRANSLATION_TABLE,
-};
+use crate::arch::memory::{map_va_to_pa, KERNEL_UNIFIED_TRANSLATION_TABLE};
 use alloc::boxed::Box;
+use arch::memory::table::PageTablePtr;
 use kernel::*;
 
 const VIRTUAL_ADDR: usize = 0xFFFF_0000_0000_0000 | 0x1E00000;
@@ -43,9 +42,9 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         phys_addr, VIRTUAL_ADDR
     );
     unsafe {
-        let translation_table: *mut UnifiedTranslationTable =
-            &raw mut KERNEL_UNIFIED_TRANSLATION_TABLE;
-        match map_va_to_pa(phys_addr, VIRTUAL_ADDR, translation_table, false, false) {
+        let translation_table = &raw mut KERNEL_UNIFIED_TRANSLATION_TABLE;
+        let table = PageTablePtr::from_ptr(translation_table);
+        match map_va_to_pa(table, phys_addr, VIRTUAL_ADDR, false, false) {
             Ok(()) => println!("Done mapping!"),
             Err(e) => println!("Error: {}", e),
         }

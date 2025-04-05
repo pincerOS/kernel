@@ -1,14 +1,14 @@
 pub mod machine;
 pub mod palloc;
+pub mod table;
 pub mod vmm;
 
 use core::arch::asm;
 
 use machine::{at_s1e1r, LeafDescriptor};
 pub use vmm::{
-    create_user_region, init_physical_alloc, map_device, map_device_block, map_physical,
-    map_physical_noncacheable, map_va_to_pa, UnifiedTranslationTable,
-    KERNEL_UNIFIED_TRANSLATION_TABLE,
+    init_physical_alloc, map_device, map_device_block, map_physical, map_physical_noncacheable,
+    map_va_to_pa, UnifiedTranslationTable, KERNEL_UNIFIED_TRANSLATION_TABLE,
 };
 
 pub use machine::at_s1e0r;
