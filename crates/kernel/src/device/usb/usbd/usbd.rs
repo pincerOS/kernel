@@ -77,7 +77,7 @@ pub fn UsbInitialise(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
 pub unsafe fn UsbSendBulkMessage(
     device: &mut UsbDevice,
     pipe: UsbPipeAddress,
-    buffer: *mut u8,
+    buffer: Box<[u8]>,
     buffer_length: u32,
     packet_id: PacketId,
     device_endpoint_number: u8,
@@ -100,10 +100,10 @@ pub unsafe fn UsbSendBulkMessage(
             device_number: device.number,
             device_speed: device.speed,
             buffer_length: buffer_length,
-            buffer: buffer,
+            // buffer: buffer,
             timeout: timeout_,
         },
-        buffer: buffer,
+        buffer: Some(buffer),
         buffer_length: buffer_length,
         callback: Some(callback_fn),
         packet_id: packet_id,
@@ -167,7 +167,6 @@ pub unsafe fn UsbBulkMessage(
 pub unsafe fn UsbSendInterruptMessage(
     device: &mut UsbDevice,
     pipe: UsbPipeAddress,
-    buffer: *mut u8,
     buffer_length: u32,
     packet_id: PacketId,
     _timeout_: u32,
@@ -176,7 +175,7 @@ pub unsafe fn UsbSendInterruptMessage(
 ) -> ResultCode {
     let b = Box::new(UsbXfer {
         endpoint_descriptor: endpoint,
-        buffer: buffer,
+        buffer: None,
         buffer_length: buffer_length,
         callback: Some(callback),
         packet_id: packet_id,
@@ -223,7 +222,6 @@ pub unsafe fn UsbInterruptMessage(
             device,
             channel,
             usb_xfer.pipe,
-            usb_xfer.buffer,
             usb_xfer.buffer_length,
             usb_xfer.packet_id,
         )

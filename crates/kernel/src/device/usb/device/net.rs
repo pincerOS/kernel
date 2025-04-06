@@ -120,10 +120,10 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     unsafe {
         NET_DEVICE.device = Some(device);
     }
-    unsafe {
-        rndis_send_packet(device, buffer.as_mut_ptr(), 64);
-        rndis_receive_packet(device, buffer.as_mut_ptr(), 64);
-    }
+    // unsafe {
+    // rndis_send_packet(device, buffer.as_mut_ptr(), 64);
+    // rndis_receive_packet(device, Box::new(buffer), 64);
+    // }
     // micro_delay(1000000);
     // shutdown();
     return ResultCode::OK;
@@ -142,17 +142,12 @@ pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
 }
 
 pub fn NetSend(_buffer: *mut u8, _buffer_length: u32) {
-    println!("| Net: Send should not be called");
-    shutdown();
+    //Do nothing for now
+    //Called when USB packet is actually sent out
 }
 
 pub fn NetReceive(buffer: *mut u8, buffer_length: u32) {
     println!("| Net: Receive");
-    //print out the buffer
-    // for i in 0..buffer_length {
-    //     print!("{:02X} ", unsafe { *buffer.offset(i as isize) });
-    // }
-    // println!();
 
     unsafe {
         if let Some(callback) = NET_DEVICE.receive_callback {

@@ -65,10 +65,10 @@ impl UsbTransferQueue {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct UsbXfer {
     pub endpoint_descriptor: endpoint_descriptor,
-    pub buffer: *mut u8,
+    pub buffer: Option<Box<[u8]>>,
     pub buffer_length: u32,
     pub callback: Option<fn(endpoint_descriptor, u32, u8)>,
     pub packet_id: PacketId,
