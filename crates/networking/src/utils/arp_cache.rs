@@ -1,5 +1,5 @@
 use alloc::collections::BTreeMap;
-use core::time::Duration;
+use kernel::device::system_time;
 
 use crate::repr::{EthernetAddress, Ipv4Address};
 
@@ -28,13 +28,13 @@ impl ArpCache {
         }
     }
 
-    pub fn eth_addr_for_ip(&mut self, ipv4_addr: Ipv4Address, now: Timestamp) -> Option<EthernetAddress> {
-        self.expire_eth_addr(now);
+    pub fn eth_addr_for_ip(&mut self, ipv4_addr: Ipv4Address) -> Option<EthernetAddress> {
+        self.expire_eth_addr();
         self.entries.get(&ipv4_addr).map(|entry| entry.eth_addr)
     }
 
-    pub fn set_eth_addr_for_ip(&mut self, ipv4_addr: Ipv4Address, eth_addr: EthernetAddress, now: Timestamp) {
-        self.expire_eth_addr(now);
+    pub fn set_eth_addr_for_ip(&mut self, ipv4_addr: Ipv4Address, eth_addr: EthernetAddress) {
+        self.expire_eth_addr();
 
         if self.entries.is_empty() {
             self.in_cache_since_min = now;
@@ -49,16 +49,20 @@ impl ArpCache {
         );
     }
 
-    fn expire_eth_addr(&mut self, now: Timestamp) {
-        if now.0 > self.in_cache_since_min.0 + self.expiration.as_secs() {
-            let expiration_secs = self.expiration.as_secs();
-            self.entries.retain(|_, entry| (now.0 - entry.in_cache_since.0) <= expiration_secs);
+    fn expire_eth_addr(&mut self) {
+        let now = system_time::get_time(); // Use system_time::get_time() to get current time
 
-            self.in_cache_since_min = self.entries
-                .values()
-                .map(|entry| entry.in_cache_since)
-                .min()
-                .unwrap_or(now);
+        // If the cache has been in use for longer than the expiration period
+        if now > self.in_cache_since_min + self.expiration {
+            let expiration = self.expiration;
+            self.entries.retain(|_, entry| now.saturating_sub(entry.in_cache_since) <= expiration);
+
+            // Update the minimum in_cache_since timestamp
+            let in_cache_since = self.entries.iter().map(|(_, entry)| entry.in_cache_since);
+            self.in_cache_since_min = match in_cache_since.clone().min() {
+                Some(min_time) => min_time,
+                None => now,
+            }
         }
     }
 }

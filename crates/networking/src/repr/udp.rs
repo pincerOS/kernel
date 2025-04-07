@@ -1,4 +1,4 @@
-use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{NetworkEndian, ByteOrder};
 
 use super::Ipv4Repr;
 use crate::{Result, Error};
@@ -101,27 +101,19 @@ impl<T: AsRef<[u8]>> Packet<T> {
     }
 
     pub fn src_port(&self) -> u16 {
-        (&self.buffer.as_ref()[fields::SRC_PORT])
-            .read_u16::<NetworkEndian>()
-            .unwrap()
+        NetworkEndian::read_u16(&self.buffer.as_ref()[fields::SRC_PORT])
     }
 
     pub fn dst_port(&self) -> u16 {
-        (&self.buffer.as_ref()[fields::DST_PORT])
-            .read_u16::<NetworkEndian>()
-            .unwrap()
+        NetworkEndian::read_u16(&self.buffer.as_ref()[fields::DST_PORT])
     }
 
     pub fn length(&self) -> u16 {
-        (&self.buffer.as_ref()[fields::LENGTH])
-            .read_u16::<NetworkEndian>()
-            .unwrap()
+        NetworkEndian::read_u16(&self.buffer.as_ref()[fields::LENGTH])
     }
 
     pub fn checksum(&self) -> u16 {
-        (&self.buffer.as_ref()[fields::CHECKSUM])
-            .read_u16::<NetworkEndian>()
-            .unwrap()
+        NetworkEndian::read_u16(&self.buffer.as_ref()[fields::CHECKSUM])
     }
 
     pub fn payload(&self) -> &[u8] {
@@ -131,27 +123,19 @@ impl<T: AsRef<[u8]>> Packet<T> {
 
 impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     pub fn set_src_port(&mut self, port: u16) {
-        (&mut self.buffer.as_mut()[fields::SRC_PORT])
-            .write_u16::<NetworkEndian>(port)
-            .unwrap()
+        NetworkEndian::write_u16(&mut self.buffer.as_mut()[fields::SRC_PORT], port)
     }
 
     pub fn set_dst_port(&mut self, port: u16) {
-        (&mut self.buffer.as_mut()[fields::DST_PORT])
-            .write_u16::<NetworkEndian>(port)
-            .unwrap()
+        NetworkEndian::write_u16(&mut self.buffer.as_mut()[fields::DST_PORT], port)
     }
 
     pub fn set_length(&mut self, length: u16) {
-        (&mut self.buffer.as_mut()[fields::LENGTH])
-            .write_u16::<NetworkEndian>(length)
-            .unwrap()
+        NetworkEndian::write_u16(&mut self.buffer.as_mut()[fields::LENGTH], length)
     }
 
     pub fn set_checksum(&mut self, checksum: u16) {
-        (&mut self.buffer.as_mut()[fields::CHECKSUM])
-            .write_u16::<NetworkEndian>(checksum)
-            .unwrap()
+        NetworkEndian::write_u16(&mut self.buffer.as_mut()[fields::CHECKSUM], checksum)
     }
 
     pub fn payload_mut(&mut self) -> &mut [u8] {

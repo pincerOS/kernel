@@ -1,4 +1,4 @@
-use byteorder::{NetworkEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{NetworkEndian, ByteOrder};
 
 use crate::utils::checksum::internet_checksum;
 use crate::{Result, Error};
@@ -61,14 +61,8 @@ impl Repr {
     where
         T: AsRef<[u8]>,
     {
-        let (id, seq) = (
-            (&packet.header()[0 .. 2])
-                .read_u16::<NetworkEndian>()
-                .unwrap(),
-            (&packet.header()[2 .. 4])
-                .read_u16::<NetworkEndian>()
-                .unwrap(),
-        );
+        let id  = NetworkEndian::read_u16(&packet.header()[0..2]);
+        let seq = NetworkEndian::read_u16(&packet.header()[2..4]);
 
         let payload_len = packet.payload().len();
 
@@ -105,12 +99,9 @@ impl Repr {
             packet.set_type(type_of);
             packet.set_code(0);
 
-            (&mut packet.header_mut()[0 .. 2])
-                .write_u16::<NetworkEndian>(id)
-                .unwrap();
-            (&mut packet.header_mut()[2 .. 4])
-                .write_u16::<NetworkEndian>(seq)
-                .unwrap();
+            NetworkEndian::write_u16(&mut packet.header_mut()[0..2], id);
+            NetworkEndian::write_u16(&mut packet.header_mut()[2..4], seq);
+
         }
 
         fn error<T>(packet: &mut Packet<T>, type_of: u8, code: u8)
@@ -205,9 +196,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
     }
 
     pub fn checksum(&self) -> u16 {
-        (&self.buffer.as_ref()[fields::CHECKSUM])
-            .read_u16::<NetworkEndian>()
-            .unwrap()
+        NetworkEndian::read_u16(&self.buffer.as_ref()[fields::CHECKSUM])
     }
 
     pub fn header(&self) -> &[u8] {
@@ -229,9 +218,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     }
 
     pub fn set_checksum(&mut self, checksum: u16) {
-        (&mut self.buffer.as_mut()[fields::CHECKSUM])
-            .write_u16::<NetworkEndian>(checksum)
-            .unwrap()
+        NetworkEndian::write_u16(&mut self.buffer.as_mut()[fields::CHECKSUM], checksum)
     }
 
     pub fn header_mut(&mut self) -> &mut [u8] {
