@@ -2,8 +2,8 @@ use crate::repr::Ipv4Packet;
 use crate::iface::{ethernet, ipv4, udp, Interface};
 use crate::socket::{RawSocket, RawType, SocketSet, TaggedSocket, UdpSocket};
 use log::warn;
-// NOTE: tcp, tcpsocket does not work right now lol
 
+// NOTE: tcp, tcpsocket does not work right now lol
 
 use crate::{Error, Result};
 
@@ -24,12 +24,12 @@ pub fn send(interface: &mut Interface, socket_set: &mut SocketSet) {
 
             match ok_or_err {
                 Ok(_) => {}
-                Err(Error::Device(err)) => {
+                Err(Error::Device(_err)) => {
                     errors = sockets;
                     break;
                 }
 
-                Err(err) => {
+                Err(_err) => {
                     errors += 1;
                 }
             }
@@ -90,7 +90,7 @@ pub fn recv(interface: &mut Interface, socket_set: &mut SocketSet) {
         let buffer_len = match interface.dev.recv(&mut eth_buffer) {
             Ok(buffer_len) => buffer_len,
             Err(Error::Device(_)) => break,
-            Err(err) => {
+            Err(_err) => {
                 break;
             }
         };

@@ -5,11 +5,10 @@ use core::fmt::{
     Result as FmtResult,
 };
 use core::ops::Deref;
-use core::hash::{Hash, Hasher};
+use core::hash::Hash;
 use core::cmp::Ordering;
 use alloc::rc::Rc;
 use alloc::collections::btree_set::BTreeSet;
-use alloc::string::ToString;
 
 use crate::repr::Ipv4Address;
 use crate::{ Error, Result };

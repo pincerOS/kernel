@@ -1,6 +1,7 @@
 #![no_std]
 extern crate byteorder;
 extern crate log;
+#[macro_use]
 extern crate alloc;
 
 pub mod utils;
@@ -17,7 +18,10 @@ use core::result::Result as CoreResult;
 use crate::repr::Ipv4Address;
 use crate::socket::SocketAddr;
 
+use kernel::device::system_timer;
+
 // TODO: make more detailed
+#[derive(Debug)]
 pub struct IOError;
 
 // TODO: make nested errors so we can have more refined structure, right now everything is on the

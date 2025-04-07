@@ -1,3 +1,5 @@
+use alloc::boxed::Box;
+
 pub mod arp;
 pub mod ethernet;
 pub mod icmp;
@@ -9,6 +11,7 @@ pub mod udp;
 use crate::utils::arp_cache::ArpCache;
 use crate::repr::{EthernetAddress, Ipv4Address, Ipv4Cidr};
 use crate::repr::dev::Device;
+
 
 // based this interface setup off of: https://github.com/ykskb/rust-user-net
 
