@@ -1,26 +1,9 @@
 [package]
 name = "networking"
 version = "0.1.0"
+edition = "2021"
 
 [dependencies]
-byteorder = "1.4"
-log = "0.4"
-
-[[app]]
-name = "arping"
-
-[[app]]
-name = "dev_up"
-
-[[app]]
-name = "ping"
-
-[[app]]
-name = "traceroute"
-
-[[app]]
-name = "udp_cat"
-
-[[app]]
-name = "udp_echo"
-
+byteorder = { version = "1.4", default-features = false }
+log = { version = "0.4", default-features = false }
+kernel = { path = "../kernel" }

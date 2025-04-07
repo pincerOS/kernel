@@ -1,8 +1,4 @@
-use byteorder::{
-    NetworkEndian,
-    ReadBytesExt,
-    WriteBytesExt,
-};
+use byteorder::{NetworkEndian, ByteOrder};
 
 use core::cmp::Ordering;
 use core::ops::Deref;
@@ -39,7 +35,7 @@ impl Address {
     }
 
     pub fn as_int(&self) -> u32 {
-        (&self.0[..]).read_u32::<NetworkEndian>().unwrap()
+        NetworkEndian::read_u32(&self.0[..])
     }
 
     // check classes, see cidr for more
@@ -57,7 +53,7 @@ impl Address {
 impl From<u32> for Address {
     fn from(addr: u32) -> Address {
         let mut bytes = [0; 4];
-        (&mut bytes[..]).write_u32::<NetworkEndian>(addr).unwrap();
+        NetworkEndian::write_u32(&mut bytes[..], addr);
         Address(bytes)
     }
 }
@@ -219,10 +215,7 @@ impl Repr {
         (&mut ip_pseudo_header[0..4]).copy_from_slice(self.src_addr.as_bytes());
         (&mut ip_pseudo_header[4..8]).copy_from_slice(self.dst_addr.as_bytes());
         ip_pseudo_header[9] = self.protocol as u8;
-        (&mut ip_pseudo_header[10..12])
-            .as_mut()
-            .write_u16::<NetworkEndian>(self.payload_len)
-            .unwrap();
+        NetworkEndian::write_u16(&mut ip_pseudo_header[10..12], self.payload_len);
     
         let mut full_buffer: Vec<u8> = ip_pseudo_header.to_vec();
         full_buffer.extend_from_slice(buffer);
@@ -330,15 +323,11 @@ impl<T: AsRef<[u8]>> Packet<T> {
     }
 
     pub fn packet_len(&self) -> u16 {
-        (&self.buffer.as_ref()[fields::PACKET_LEN])
-            .read_u16::<NetworkEndian>()
-            .unwrap()
+        NetworkEndian::read_u16(&self.buffer.as_ref()[fields::PACKET_LEN])
     }
 
     pub fn identification(&self) -> u16 {
-        (&self.buffer.as_ref()[fields::IDENTIFICATION])
-            .read_u16::<NetworkEndian>()
-            .unwrap()
+        NetworkEndian::read_u16(&self.buffer.as_ref()[fields::IDENTIFICATION])
     }
 
     pub fn flags(&self) -> u8 {
@@ -350,7 +339,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
         let mut frag_offset_only: [u8; 2] = [0; 2];
         frag_offset_only[0] = frag_offset_slice[0] & 0x1F; // Clear flags!
         frag_offset_only[1] = frag_offset_slice[1];
-        (&frag_offset_only[..]).read_u16::<NetworkEndian>().unwrap()
+        NetworkEndian::read_u16(&frag_offset_only[..])
     }
 
     pub fn ttl(&self) -> u8 {
@@ -362,9 +351,7 @@ impl<T: AsRef<[u8]>> Packet<T> {
     }
 
     pub fn header_checksum(&self) -> u16 {
-        (&self.buffer.as_ref()[fields::CHECKSUM])
-            .read_u16::<NetworkEndian>()
-            .unwrap()
+        NetworkEndian::read_u16(&self.buffer.as_ref()[fields::CHECKSUM])
     }
 
     pub fn src_addr(&self) -> Address {
@@ -404,15 +391,11 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     }
 
     pub fn set_packet_len(&mut self, packet_len: u16) {
-        (&mut self.buffer.as_mut()[fields::PACKET_LEN])
-            .write_u16::<NetworkEndian>(packet_len)
-            .unwrap()
+        NetworkEndian::write_u16(&mut self.buffer.as_mut()[fields::PACKET_LEN], packet_len)
     }
 
     pub fn set_identification(&mut self, id: u16) {
-        (&mut self.buffer.as_mut()[fields::IDENTIFICATION])
-            .write_u16::<NetworkEndian>(id)
-            .unwrap()
+        NetworkEndian::write_u16(&mut self.buffer.as_mut()[fields::IDENTIFICATION], id)
     }
 
     pub fn set_flags(&mut self, flags: u8) {
@@ -422,9 +405,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
 
     pub fn set_fragment_offset(&mut self, frag_offset: u16) {
         let flags = self.flags();
-        (&mut self.buffer.as_mut()[fields::FRAG_OFFSET])
-            .write_u16::<NetworkEndian>(frag_offset)
-            .unwrap();
+        NetworkEndian::write_u16(&mut self.buffer.as_mut()[fields::FRAG_OFFSET], frag_offset);
         self.set_flags(flags);
     }
 
@@ -437,9 +418,7 @@ impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
     }
 
     pub fn set_header_checksum(&mut self, header_checksum: u16) {
-        (&mut self.buffer.as_mut()[fields::CHECKSUM])
-            .write_u16::<NetworkEndian>(header_checksum)
-            .unwrap()
+        NetworkEndian::write_u16(&mut self.buffer.as_mut()[fields::CHECKSUM], header_checksum)
     }
 
     pub fn set_src_addr(&mut self, addr: Address) {

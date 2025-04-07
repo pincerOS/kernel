@@ -1,4 +1,4 @@
-use byteorder::{ByteOrder, NetworkEndian, ReadBytesExt};
+use byteorder::{ByteOrder, NetworkEndian};
 
 use crate::{Error, Result};
 use super::{EthernetAddress, Ipv4Address};
@@ -69,11 +69,11 @@ impl Packet {
 
         // read header
         // TODO: check proto and hw len, currently not checked
-        let hw_type = (&buffer[0 .. 2]).read_u16::<NetworkEndian>().unwrap();
-        let proto_type = (&buffer[2 .. 4]).read_u16::<NetworkEndian>().unwrap();
+        let hw_type = NetworkEndian::read_u16(&buffer[0 .. 2]);
+        let proto_type = NetworkEndian::read_u16(&buffer[2 .. 4]);
         // let hw_len = (&buffer[4 .. 5]).read_u8::<NetworkEndian>().unwrap();
         // let proto_len = (&buffer[5 .. 6]).read_u8::<NetworkEndian>().unwrap();
-        let op = (&buffer[6 .. 8]).read_u16::<NetworkEndian>().unwrap();
+        let op = NetworkEndian::read_u16(&buffer[6 .. 8]);
 
         if hw_type != Hardware::ETHERNET || proto_type != Protocols::IPV4 {
             return Err(Error::Unsupported);
