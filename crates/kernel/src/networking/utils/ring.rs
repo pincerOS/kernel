@@ -1,4 +1,4 @@
-use crate::{Error, Result};
+use crate::networking::{Error, Result};
 use alloc::vec::Vec;
 
 #[derive(Clone, Debug)]

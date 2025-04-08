@@ -1,8 +1,10 @@
-use crate::repr::{EthernetFrame, Ipv4Address, Ipv4Packet, UdpPacket};
-use crate::iface::Interface;
-use crate::socket::{Bindings, RawSocket, RawType, SocketAddr, UdpSocket};
-use crate::utils::{ring::Ring, slice::Slice};
-use crate::Result;
+use crate::networking::repr::{EthernetFrame, Ipv4Address, Ipv4Packet, UdpPacket};
+use crate::networking::iface::Interface;
+use crate::networking::socket::{Bindings, RawSocket, RawType, SocketAddr, UdpSocket};
+use crate::networking::utils::{ring::Ring, slice::Slice};
+use crate::networking::Result;
+
+use alloc::vec;
 
 // use std::time::Instant;
 

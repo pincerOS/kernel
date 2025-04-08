@@ -1,5 +1,5 @@
-use crate::utils::{ring::Ring, slice::Slice};
-use crate::{Result};
+use crate::networking::utils::{ring::Ring, slice::Slice};
+use crate::networking::{Result};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RawType {

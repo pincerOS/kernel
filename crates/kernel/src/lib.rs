@@ -23,6 +23,7 @@ pub mod runtime;
 pub mod sync;
 pub mod syscall;
 pub mod util;
+pub mod networking;
 
 use device::uart;
 use sync::SpinLock;

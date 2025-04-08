@@ -1,7 +1,7 @@
-use crate::repr::{Ipv4Protocol, Ipv4Repr, UdpPacket, UdpRepr};
-use crate::socket::{SocketAddr, SocketAddrLease};
-use crate::utils::{ring::Ring, slice::Slice};
-use crate::{Error, Result};
+use crate::networking::repr::{Ipv4Protocol, Ipv4Repr, UdpPacket, UdpRepr};
+use crate::networking::socket::{SocketAddr, SocketAddrLease};
+use crate::networking::utils::{ring::Ring, slice::Slice};
+use crate::networking::{Error, Result};
 
 // A UDP socket
 pub struct UdpSocket {

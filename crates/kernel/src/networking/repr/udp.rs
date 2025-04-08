@@ -1,7 +1,7 @@
 use byteorder::{NetworkEndian, ByteOrder};
 
 use super::Ipv4Repr;
-use crate::{Result, Error};
+use crate::networking::{Result, Error};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Repr {

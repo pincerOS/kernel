@@ -1,8 +1,8 @@
-#![no_std]
+// #![no_std]
 extern crate byteorder;
 extern crate log;
-#[macro_use]
-extern crate alloc;
+// #[macro_use]
+// extern crate alloc;
 
 pub mod utils;
 pub mod repr;
@@ -15,10 +15,10 @@ pub mod iface;
 
 use core::result::Result as CoreResult;
 
-use crate::repr::Ipv4Address;
-use crate::socket::SocketAddr;
+use crate::networking::repr::Ipv4Address;
+use crate::networking::socket::SocketAddr;
 
-use kernel::device::system_timer;
+use crate::device::system_timer;
 
 // TODO: make more detailed
 #[derive(Debug)]

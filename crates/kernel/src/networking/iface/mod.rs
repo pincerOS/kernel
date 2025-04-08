@@ -8,9 +8,9 @@ pub mod socket;
 // pub mod tcp;
 pub mod udp;
 
-use crate::utils::arp_cache::ArpCache;
-use crate::repr::{EthernetAddress, Ipv4Address, Ipv4Cidr};
-use crate::repr::dev::Device;
+use crate::networking::utils::arp_cache::ArpCache;
+use crate::networking::repr::{EthernetAddress, Ipv4Address, Ipv4Cidr};
+use crate::networking::repr::dev::Device;
 
 
 // based this interface setup off of: https://github.com/ykskb/rust-user-net
