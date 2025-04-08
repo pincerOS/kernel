@@ -1,7 +1,7 @@
-use crate::repr::{EthernetType, Ipv4Protocol, EthernetFrame, Ipv4Address, Ipv4Packet, Ipv4Repr};
-use crate::iface::{arp, ethernet, icmp, udp, Interface};
-use crate::socket::{RawType, SocketSet, TaggedSocket};
-use crate::{Error, Result};
+use crate::networking::repr::{EthernetType, Ipv4Protocol, EthernetFrame, Ipv4Address, Ipv4Packet, Ipv4Repr};
+use crate::networking::iface::{arp, ethernet, icmp, udp, Interface};
+use crate::networking::socket::{RawType, SocketSet, TaggedSocket};
+use crate::networking::{Error, Result};
 
 use log::debug;
 

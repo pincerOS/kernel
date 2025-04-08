@@ -1,6 +1,6 @@
 use byteorder::{ByteOrder, NetworkEndian};
 
-use crate::{Error, Result};
+use crate::networking::{Error, Result};
 use super::{EthernetAddress, Ipv4Address};
 
 /*

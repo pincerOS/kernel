@@ -1,7 +1,7 @@
-use crate::repr::{EthernetType, ArpPacket, ArpOperation, EthernetAddress, EthernetFrame, Ipv4Address};
-use crate::iface::{ethernet,Interface};
+use crate::networking::repr::{EthernetType, ArpPacket, ArpOperation, EthernetAddress, EthernetFrame, Ipv4Address};
+use crate::networking::iface::{ethernet,Interface};
 
-use crate::{Error,Result};
+use crate::networking::{Error,Result};
 
 use log::debug;
 

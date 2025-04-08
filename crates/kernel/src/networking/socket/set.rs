@@ -1,7 +1,7 @@
 use core::slice::IterMut as SliceIterMut;
 use alloc::vec::Vec;
 
-use crate::socket::TaggedSocket;
+use crate::networking::socket::TaggedSocket;
 
 // A set of sockets with stable integral handles.
 pub struct SocketSet {

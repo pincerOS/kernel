@@ -1,4 +1,4 @@
-use crate::Result;
+use crate::networking::Result;
 
 pub trait Device {
     fn send(&mut self, buffer: &[u8]) -> Result<()>;

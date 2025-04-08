@@ -1,9 +1,0 @@
-[package]
-name = "networking"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-byteorder = { version = "1.4", default-features = false }
-log = { version = "0.4", default-features = false }
-kernel = { path = "../kernel" }

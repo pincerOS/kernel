@@ -1,4 +1,4 @@
-use crate::socket::{ RawSocket, UdpSocket };
+use crate::networking::socket::{ RawSocket, UdpSocket };
 
 // One of many types of sockets.
 pub enum TaggedSocket {

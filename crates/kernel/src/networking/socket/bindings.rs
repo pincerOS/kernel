@@ -10,8 +10,8 @@ use core::cmp::Ordering;
 use alloc::rc::Rc;
 use alloc::collections::btree_set::BTreeSet;
 
-use crate::repr::Ipv4Address;
-use crate::{ Error, Result };
+use crate::networking::repr::Ipv4Address;
+use crate::networking::{ Error, Result };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 // An IPv4 + port socket address.

@@ -23,6 +23,7 @@ pub mod runtime;
 pub mod sync;
 pub mod syscall;
 pub mod util;
+pub mod networking;
 
 use arch::memory::palloc::PAGE_ALLOCATOR;
 use device::uart;

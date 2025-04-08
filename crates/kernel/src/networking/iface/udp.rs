@@ -1,4 +1,4 @@
-use crate::repr::{
+use crate::networking::repr::{
     Ipv4Packet,
     Ipv4Protocol,
     Ipv4Repr,
@@ -8,9 +8,9 @@ use crate::repr::{
     IcmpRepr,
     IcmpDstUnreachable,
 };
-use crate::iface::{icmp, ipv4, Interface};
-use crate::socket::{SocketAddr, SocketSet, TaggedSocket};
-use crate::{Result};
+use crate::networking::iface::{icmp, ipv4, Interface};
+use crate::networking::socket::{SocketAddr, SocketSet, TaggedSocket};
+use crate::networking::{Result};
 
 use log::debug;
 

@@ -8,8 +8,8 @@ use core::str::FromStr;
 
 use alloc::vec::Vec;
 
-use crate::utils::checksum::internet_checksum;
-use crate::{Error, Result};
+use crate::networking::utils::checksum::internet_checksum;
+use crate::networking::{Error, Result};
 
 // https://en.wikipedia.org/wiki/IPv4
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

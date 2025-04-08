@@ -1,7 +1,7 @@
 use core::ops::{Deref, DerefMut};
 use alloc::vec::Vec;
 
-use crate::{Error, Result};
+use crate::networking::{Error, Result};
 
 // dynamically resizable slice that acts as a view over a non-resizable buffer
 #[derive(Clone, Debug)]

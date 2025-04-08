@@ -18,7 +18,7 @@ this file mainly lays out the specifications and representation for ethernet
 use byteorder::{ByteOrder, NetworkEndian};
 use core::fmt;
 
-use crate::{Result, Error};
+use crate::networking::{Result, Error};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] 
 pub struct Address([u8; 6]);
