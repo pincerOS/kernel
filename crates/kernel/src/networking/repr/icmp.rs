@@ -1,7 +1,7 @@
 use byteorder::{NetworkEndian, ByteOrder};
 
-use crate::utils::checksum::internet_checksum;
-use crate::{Result, Error};
+use crate::networking::utils::checksum::internet_checksum;
+use crate::networking::{Result, Error};
 
 /*
 +-----------------------------------+

@@ -1,8 +1,8 @@
 use log::debug;
 
-use crate::repr::{IcmpMessage, IcmpPacket, IcmpRepr, Ipv4Repr};
-use crate::iface::{ipv4, Interface};
-use crate::{Error, Result};
+use crate::networking::repr::{IcmpMessage, IcmpPacket, IcmpRepr, Ipv4Repr};
+use crate::networking::iface::{ipv4, Interface};
+use crate::networking::{Error, Result};
 
 pub fn send_packet<F>(
     interface: &mut Interface,

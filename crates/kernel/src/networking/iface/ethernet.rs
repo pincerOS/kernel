@@ -1,7 +1,8 @@
-use crate::repr::{EthernetType, EthernetFrame};
-use crate::iface::{arp, ipv4, Interface};
-use crate::socket::{RawType, SocketSet, TaggedSocket};
-use crate::{Error, Result};
+use crate::networking::repr::{EthernetType, EthernetFrame};
+use crate::networking::iface::{arp, ipv4, Interface};
+use crate::networking::socket::{RawType, SocketSet, TaggedSocket};
+use crate::networking::{Error, Result};
+use alloc::vec;
 use log::debug;
 
 // sends out an ethernet frame over an interface
