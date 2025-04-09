@@ -24,6 +24,7 @@ pub mod sync;
 pub mod syscall;
 pub mod util;
 
+use arch::memory::palloc::PAGE_ALLOCATOR;
 use device::uart;
 use sync::SpinLock;
 
@@ -53,6 +54,12 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     unsafe { heap::ALLOCATOR.init(heap_base, heap_size as usize) };
 
     unsafe { crate::arch::memory::init_physical_alloc() };
+
+    let device_tree_base = x0 as usize;
+    let device_tree_size = u32::from_be(x4) as usize;
+    PAGE_ALLOCATOR
+        .get()
+        .mark_region_unusable(device_tree_base, device_tree_size);
 
     unsafe { crate::arch::memory::vmm::init_kernel_48bit() };
     unsafe { crate::arch::memory::vmm::switch_to_kernel_48bit() };

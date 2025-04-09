@@ -1,11 +1,17 @@
 use core::fmt::Formatter;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
+use core::sync::atomic::Ordering;
 
 use alloc::boxed::Box;
 use alloc::collections::vec_deque::VecDeque;
 
 use crate::sync::{SpinLock, UnsafeInit};
+
+use super::vmm::{
+    __rpi_phys_binary_end_addr, __rpi_phys_binary_start_addr, __rpi_virt_base, DIRECT_MAP_BASE,
+    VMEM_INIT_DONE,
+};
 
 pub struct PhysicalPage<Size> {
     pub paddr: usize,
@@ -39,6 +45,12 @@ impl PageAllocator {
         }
     }
 
+    pub fn mark_region_unusable(&self, start: usize, size: usize) {
+        self.allocator
+            .lock()
+            .mark_region_unusable(start, start + size);
+    }
+
     pub fn alloc_range(&self, size: usize, align: usize) -> (PAddr, PAddr) {
         let paddr = self
             .allocator
@@ -61,44 +73,44 @@ impl PageAllocator {
     }
 
     pub fn alloc_mapped_frame<S: BasePageSize>(&self) -> PhysicalPage<S> {
-        let mut frame: Box<MaybeUninit<S::Page>> = Box::new_uninit();
-        unsafe { core::ptr::write_bytes(frame.as_mut_ptr(), 0, 1) };
-        let pointer = Box::into_raw(frame);
-        let paddr = pointer as usize - (&raw const super::vmm::__rpi_virt_base) as usize;
-
-        PhysicalPage {
-            paddr,
-            _marker: PhantomData,
+        if VMEM_INIT_DONE.load(Ordering::Relaxed) {
+            self.alloc_frame()
+        } else {
+            let mut frame: Box<MaybeUninit<S::Page>> = Box::new_uninit();
+            unsafe { core::ptr::write_bytes(frame.as_mut_ptr(), 0, 1) };
+            let pointer = Box::into_raw(frame);
+            let paddr = pointer as usize - (&raw const __rpi_virt_base) as usize;
+            PhysicalPage {
+                paddr,
+                _marker: PhantomData,
+            }
         }
     }
 
-    #[track_caller]
     pub fn get_mapped_frame<S: BasePageSize>(&self, frame: PhysicalPage<S>) -> *mut S::Page {
-        // let phys_heap_start = (&raw const super::vmm::__rpi_phys_binary_end_addr) as usize;
-        let phys_heap_start = (&raw const super::vmm::__rpi_phys_binary_start_addr) as usize;
-        let phys_heap_end = 0x20_0000 * 14;
-        assert!(
-            frame.paddr >= phys_heap_start && frame.paddr < phys_heap_end,
-            "invalid mapped frame: {:?}, phys_heap_start {:#x}, phys_heap_end {:#x}",
-            frame,
-            phys_heap_start,
-            phys_heap_end,
-        );
-
-        unsafe {
-            (&raw mut super::vmm::__rpi_virt_base)
-                .byte_add(frame.paddr)
-                .cast()
+        if VMEM_INIT_DONE.load(Ordering::Relaxed) {
+            unsafe { (DIRECT_MAP_BASE as *mut ()).byte_add(frame.paddr).cast() }
+        } else {
+            let phys_heap_start = (&raw const __rpi_phys_binary_start_addr) as usize;
+            let phys_heap_end = 0x20_0000 * 14;
+            assert!(
+                frame.paddr >= phys_heap_start && frame.paddr < phys_heap_end,
+                "invalid mapped frame: {:?}, phys_heap_start {:#x}, phys_heap_end {:#x}",
+                frame,
+                phys_heap_start,
+                phys_heap_end,
+            );
+            unsafe { (&raw mut __rpi_virt_base).byte_add(frame.paddr).cast() }
         }
     }
 
     pub fn dealloc_frame<S: PageClass>(&self, frame: PhysicalPage<S>) {
-        let phys_heap_start = (&raw const super::vmm::__rpi_phys_binary_end_addr) as usize;
+        let phys_heap_start = (&raw const __rpi_phys_binary_end_addr) as usize;
         let phys_heap_end = 0x20_0000 * 14;
         if frame.paddr >= phys_heap_start && frame.paddr < phys_heap_end {
             // From the kernel heap...
             // TODO: use direct mapped physmem instead (or specialization, but that will never be stable)
-            let vaddr = unsafe { (&raw mut super::vmm::__rpi_virt_base).byte_add(frame.paddr) };
+            let vaddr = unsafe { (&raw mut __rpi_virt_base).byte_add(frame.paddr) };
             const { assert!(S::SIZE == 4096 || S::SIZE == 16384 || S::SIZE == 65536) };
             if S::SIZE == 4096 {
                 let allocation = unsafe { Box::<MaybeUninit<Page4k>>::from_raw(vaddr.cast()) };
