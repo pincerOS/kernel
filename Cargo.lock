@@ -65,6 +65,7 @@ dependencies = [
  "device-tree",
  "elf",
  "endian",
+ "filesystem",
  "initfs",
  "smallbox",
 ]

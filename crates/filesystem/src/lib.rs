@@ -12,8 +12,8 @@ use core::ops::ControlFlow;
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "std")]
-pub mod linux;
+// #[cfg(feature = "std")]
+// pub mod linux;
 
 pub const SECTOR_SIZE: usize = 512;
 
