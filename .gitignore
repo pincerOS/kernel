@@ -9,3 +9,4 @@ kernel.elf
 net0.pcap
 *.img
 .llvmbox
+.zed

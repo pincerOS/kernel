@@ -1,17 +1,5 @@
 use core::mem::MaybeUninit;
-
-macro_rules! syscall {
-    ($num:literal => $vis:vis fn $ident:ident ( $($arg:ident : $ty:ty),* $(,)? ) $( -> $ret:ty )?) => {
-        core::arch::global_asm!(
-            ".global {name}; {name}: svc #{num}; ret",
-            name = sym $ident,
-            num = const $num,
-        );
-        unsafe extern "C" {
-            $vis fn $ident( $($arg: $ty,)* ) $(-> $ret)?;
-        }
-    };
-}
+pub use syscalls::sys::*;
 
 fn int_to_error(res: isize) -> Result<usize, usize> {
     match res {
@@ -19,66 +7,6 @@ fn int_to_error(res: isize) -> Result<usize, usize> {
         ..0 => Err(res.unsigned_abs()),
     }
 }
-
-pub type FileDesc = u32;
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct ChannelDesc(pub u32);
-
-#[repr(C)]
-#[derive(Debug)]
-pub struct Message {
-    pub tag: u64,
-    pub objects: [u32; 4],
-}
-
-#[repr(C)]
-pub struct Channels(pub usize, pub usize);
-
-#[repr(C)]
-pub struct PipeValues(pub [isize; 2]);
-
-#[repr(C)]
-pub struct ArgStr {
-    pub len: usize,
-    pub ptr: *const u8,
-}
-
-syscall!(1 => pub fn sys_shutdown());
-syscall!(3 => pub fn sys_yield());
-syscall!(5 => pub fn sys_spawn(pc: usize, sp: usize, x0: usize, flags: usize) -> isize);
-syscall!(6 => pub fn sys_exit(status: usize));
-
-syscall!(7 => pub fn sys_channel() -> Channels);
-syscall!(8 => pub fn sys_send(desc: usize, msg: *const Message, buf: *const u8, buf_len: usize, flags: usize) -> isize);
-syscall!(9 => pub fn sys_recv(desc: usize, msg: *mut Message, buf: *mut u8, buf_cap: usize, flags: usize) -> isize);
-
-syscall!(10 => pub fn sys_pread(fd: usize, buf: *mut u8, buf_len: usize, offset: u64) -> isize);
-syscall!(11 => pub fn sys_pwrite(fd: usize, buf: *const u8, buf_len: usize, offset: u64) -> isize);
-
-syscall!(12 => pub fn sys_close(fd: usize) -> isize);
-syscall!(13 => pub fn sys_dup3(old_fd: usize, new_fd: usize, flags: usize) -> isize);
-syscall!(14 => pub fn sys_pipe(flags: usize) -> PipeValues);
-
-syscall!(15 => pub fn sys_openat(
-    dir_fd: usize,
-    path_len: usize,
-    path_ptr: *const u8,
-    flags: usize,
-    mode: usize,
-) -> isize);
-
-syscall!(16 => pub fn sys_execve_fd(
-    fd: usize,
-    flags: usize,
-    argc: usize,
-    argv: *const ArgStr,
-    envc: usize,
-    envp: *const ArgStr,
-) -> isize);
-
-syscall!(17 => pub fn sys_wait(fd: usize) -> isize);
 
 syscall!(18 => pub fn sys_mmap(addr: usize, size: usize, prot_flags: usize, flags: usize, fd: usize, offset: usize) -> isize);
 syscall!(19 => pub fn sys_munmap(addr: usize) -> isize);

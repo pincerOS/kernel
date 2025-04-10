@@ -1,12 +1,12 @@
 [package]
-name = "ulib"
+name = "syscalls"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-syscalls = { path = "../syscalls" }
 
 [features]
 default = ["runtime"]
 runtime = []
+kernel = []
 test = []

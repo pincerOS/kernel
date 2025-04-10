@@ -11,4 +11,5 @@ smallbox = { version = "0.8.6", default-features = false }
 device-tree = { path = "../device-tree" }
 endian = { path = "../endian" }
 elf = { path = "../elf" }
-initfs = { path = "../initfs"}
+initfs = { path = "../initfs" }
+syscalls = { path = "../syscalls" }
