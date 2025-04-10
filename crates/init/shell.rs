@@ -66,7 +66,16 @@ fn readline(reader: &mut LineReader) -> Result<&[u8], usize> {
                     reader.cur_base = i + 1;
                     return Ok(&reader.buf[base..i]);
                 }
-                b'\x7f' => print!("^?"),
+                b'\x7f' => {
+                    if reader.processed >= 2 {
+                        reader.processed -= 2;
+                        reader.cursor -= 2;
+                        print!("\x08 \x08");
+                    } else {
+                        reader.processed -= 1;
+                        reader.cursor -= 1;
+                    }
+                }
                 c if c.is_ascii_control() => print!("^{}", (c + 64) as char),
                 c => print!("{}", c as char),
             }
@@ -75,30 +84,6 @@ fn readline(reader: &mut LineReader) -> Result<&[u8], usize> {
         let read = try_read_stdin(&mut reader.buf[reader.cursor..])?;
         reader.cursor += read;
     }
-}
-
-fn spawn_elf(fd: FileDesc) -> Result<FileDesc, usize> {
-    let current_stack = current_sp();
-    let target_pc = exec_child as usize;
-    let arg = fd;
-
-    let wait_fd = unsafe { ulib::sys::spawn(target_pc, current_stack, arg as usize, 0) };
-    wait_fd
-}
-
-fn current_sp() -> usize {
-    let sp: usize;
-    unsafe { core::arch::asm!("mov {0}, sp", out(reg) sp) };
-    sp
-}
-
-extern "C" fn exec_child(fd: FileDesc) -> ! {
-    let flags = 0;
-    let args = &[];
-    let env = &[];
-    let res = unsafe { ulib::sys::execve_fd(fd, flags, args, env) };
-    println!("Execve failed: {:?}", res);
-    ulib::sys::exit(1);
 }
 
 #[no_mangle]
@@ -131,70 +116,6 @@ fn main(_chan: ulib::sys::ChannelDesc) {
     let buf = b"Stdout write test\n";
     ulib::sys::pwrite_all(stdout, buf, 0).unwrap();
 
-    println!("Dir: {}", root);
-
-    let mut cookie = 0;
-    let mut data_backing = [0u64; 8192 / 8];
-    let data = cast_slice(&mut data_backing);
-
-    fn cast_slice<'a>(s: &'a mut [u64]) -> &'a mut [u8] {
-        unsafe {
-            core::slice::from_raw_parts_mut(s.as_mut_ptr().cast::<u8>(), s.len() * size_of::<u64>())
-        }
-    }
-
-    #[repr(C)]
-    #[derive(Copy, Clone, Debug)]
-    pub struct DirEntry {
-        pub inode: u64,
-        pub next_entry_cookie: u64,
-        pub rec_len: u16,
-        pub name_len: u16,
-        pub file_type: u8,
-        pub name: [u8; 3],
-        // Name is an arbitrary size array; the record is always padded with
-        // 0 bytes such that rec_len is a multiple of 8 bytes.
-    }
-
-    loop {
-        println!("reading dir with cookie {}", cookie);
-        match ulib::sys::pread(root, data, cookie) {
-            Err(_) => break,
-            Ok(0) => {
-                println!("read 0 bytes, exiting");
-                break;
-            }
-            Ok(len) => {
-                println!("read {} bytes", len);
-                let mut i = 0;
-                while i < len as usize {
-                    let slice = &data[i..];
-                    assert!(slice.len() >= size_of::<DirEntry>());
-                    let entry = unsafe { *slice.as_ptr().cast::<DirEntry>() };
-                    println!("Entry: {:#?}", entry);
-                    let name_off = core::mem::offset_of!(DirEntry, name);
-                    let name = &slice[name_off..][..entry.name_len as usize];
-                    println!("Name: {}", core::str::from_utf8(name).unwrap());
-                    i += entry.rec_len as usize;
-                    cookie = entry.next_entry_cookie;
-                }
-                if cookie == 0 {
-                    break;
-                }
-            }
-        }
-    }
-
-    // let mut buf = [0; 1024];
-    // let (len, msg) = recv_block(chan, &mut buf).unwrap();
-    // let data = &buf[..len];
-
-    // println!(
-    //     "Received message from parent; tag {:#x}, data {:?}",
-    //     msg.tag,
-    //     core::str::from_utf8(data).unwrap()
-    // );
-
     let mut reader = LineReader {
         buf: [0; 4096],
         cursor: 0,
@@ -218,22 +139,20 @@ fn main(_chan: ulib::sys::ChannelDesc) {
             continue;
         }
 
-        println!("Got line: {}", line);
-
-        // let msg = Message {
-        //     tag: 0xAAAAAAAA,
-        //     objects: [0; 4],
-        // };
-        // send_block(chan, &msg, line.as_bytes());
-
         if line == "exit" {
             break;
         } else {
             let first = line.split_ascii_whitespace().next().unwrap_or(line);
             let root_fd = 3;
             if let Ok(file) = ulib::sys::openat(root_fd, first.as_bytes(), 0, 0) {
-                // TODO: channels
-                let child = spawn_elf(file).unwrap();
+                // TODO: args
+                let child = ulib::sys::spawn_elf(&ulib::sys::SpawnArgs {
+                    fd: file,
+                    stdin: None,
+                    stdout: None,
+                })
+                .unwrap();
+
                 let status = ulib::sys::wait(child).unwrap();
                 println!("child exited with code {}", status);
             } else {

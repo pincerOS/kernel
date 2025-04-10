@@ -36,7 +36,7 @@ pub fn spin_sleep_until(target: usize) {
 }
 
 pub async fn sleep(μs: u64) {
-    TIMER_SCHEDULER.sleep(μs).await;
+    TIMER_SCHEDULER.sleep(μs).await
 }
 
 pub async fn sleep_until(target: u64) {

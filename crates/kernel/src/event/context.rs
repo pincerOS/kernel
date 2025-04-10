@@ -300,7 +300,8 @@ restore_context:
 
 asm_deschedule_thread:
     mov sp, x2
-    bl deschedule_thread_callback
+    mov lr, #0
+    b deschedule_thread_callback
     udf #0
 
 "#,
