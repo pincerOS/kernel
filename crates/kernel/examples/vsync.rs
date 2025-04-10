@@ -4,23 +4,27 @@
 extern crate alloc;
 extern crate kernel;
 
-use device::{discover_compatible, find_device_addr, mailbox};
-use kernel::*;
+use device::{discover_compatible, find_device_addr, mailbox, sdcard};
+use kernel::{device::MAILBOX, device::SD, sync::SpinLock, *};
 
 #[no_mangle]
 extern "Rust" fn kernel_main(tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
 
-    let mailbox = discover_compatible(&tree, b"brcm,bcm2835-mbox")
-        .unwrap()
-        .next()
-        .unwrap();
-    let (mailbox_addr, _) = find_device_addr(mailbox).unwrap().unwrap();
-    let mailbox_base = unsafe { memory::map_device(mailbox_addr) }.as_ptr();
-    let mut mailbox = unsafe { mailbox::VideoCoreMailbox::init(mailbox_base) };
+    // let sdcard = discover_compatible(&tree, b"brcm,bcm2711-emmc2")
+    //         .unwrap()
+    //         .next()
+    //         .unwrap();
+    //     let (sdcard_addr, _) = find_device_addr(sdcard).unwrap().unwrap();
+    //     let sdcard_base = unsafe { memory::map_device(sdcard_addr) }.as_ptr();
+    //     println!("| SD Card controller addr: {:#010x}", sdcard_addr as usize);
+    //     println!("| SD Card controller base: {:#010x}", sdcard_base as usize);
+    //     let sdcard = unsafe { sdcard::bcm2711_emmc2_driver::init(sdcard_base) };
+    //     unsafe { SD.init(SpinLock::new(sdcard)) };
+    //     println!("| initialized SD Card");
 
     println!("| acquiring framebuffer");
-    let mut surface = unsafe { mailbox.get_framebuffer() };
+    let mut surface = unsafe { MAILBOX.get().lock().get_framebuffer() };
 
     println!("| starting vsync demo; make sure to run with 'just run-ui'");
     vsync_tearing_demo(&mut surface);
@@ -44,6 +48,7 @@ fn vsync_tearing_demo(surface: &mut mailbox::Surface) {
 
         surface.present();
         surface.wait_for_frame();
-        println!("test");
+        // println!("SD Capacity: {}", SD.get().lock().get_capacity());
+        // println!("SD Block Size: {}", SD.get().lock().get_block_size());
     }
 }

@@ -537,3 +537,6 @@ impl core::ops::IndexMut<(usize, usize)> for Surface {
         &mut bytemuck::cast_slice_mut(&mut self.alternate)[idx]
     }
 }
+
+unsafe impl Send for VideoCoreMailbox {}
+unsafe impl Sync for VideoCoreMailbox {}

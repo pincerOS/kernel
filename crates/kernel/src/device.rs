@@ -9,6 +9,7 @@ pub mod mailbox;
 pub mod rng;
 pub mod system_timer;
 pub mod watchdog;
+pub mod sdcard;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -96,6 +97,10 @@ pub static PER_CORE_INIT: UnsafeInit<Vec<InitTask>> = unsafe { UnsafeInit::unini
 
 pub static GPIO: UnsafeInit<SpinLock<gpio::bcm2711_gpio_driver>> = unsafe { UnsafeInit::uninit() };
 
+pub static MAILBOX: UnsafeInit<SpinLock<mailbox::VideoCoreMailbox>> = unsafe { UnsafeInit::uninit() };
+
+pub static SD: UnsafeInit<SpinLock<sdcard::bcm2711_emmc2_driver>> = unsafe { UnsafeInit::uninit() };
+
 pub static LED_OUT: UnsafeInit<LEDDebugger> = unsafe { UnsafeInit::uninit() };
 
 pub struct LEDDebugger {
@@ -146,6 +151,17 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
 
     let debug = LEDDebugger::init([16, 20, 21, 6, 5, 22, 27, 17]);
     unsafe { LED_OUT.init(debug) };
+
+    {
+        let mailbox = discover_compatible(&tree, b"brcm,bcm2835-mbox")
+            .unwrap()
+            .next()
+            .unwrap();
+        let (mailbox_addr, _) = find_device_addr(mailbox).unwrap().unwrap();
+        let mailbox_base = unsafe { map_device(mailbox_addr) }.as_ptr();
+        let mut mailbox = unsafe { mailbox::VideoCoreMailbox::init(mailbox_base) };
+        unsafe  {MAILBOX.init(SpinLock::new(mailbox));}
+    }
 
     let mut uarts = discover_compatible(tree, b"arm,pl011").unwrap();
     {
