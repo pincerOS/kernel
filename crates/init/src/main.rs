@@ -6,69 +6,26 @@ extern crate ulib;
 
 mod runtime;
 
-use ulib::sys::FileDesc;
-
-fn spawn_elf(fd: FileDesc) -> Result<FileDesc, usize> {
-    let current_stack = current_sp();
-    let target_pc = exec_child as usize;
-    let arg = fd;
-
-    let wait_fd = unsafe { ulib::sys::spawn(target_pc, current_stack, arg as usize, 0) };
-    wait_fd
-}
-
-fn current_sp() -> usize {
-    let sp: usize;
-    unsafe { core::arch::asm!("mov {0}, sp", out(reg) sp) };
-    sp
-}
-
-extern "C" fn exec_child(fd: FileDesc) -> ! {
-    let flags = 0;
-    let args = &[];
-    let env = &[];
-    let res = unsafe { ulib::sys::execve_fd(fd, flags, args, env) };
-    println!("Execve failed: {:?}", res);
-    ulib::sys::exit(1);
-}
+use ulib::sys::spawn_elf;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("Running in usermode! (parent)");
 
     let root_fd = 3;
-    let path = b"example.elf";
+    let path = b"shell.elf";
     let file = ulib::sys::openat(root_fd, path, 0, 0).unwrap();
 
-    // TODO: channels
-    let child = spawn_elf(file).unwrap();
+    let child = spawn_elf(&ulib::sys::SpawnArgs {
+        fd: file,
+        stdin: None,
+        stdout: None,
+    })
+    .unwrap();
 
     let status = ulib::sys::wait(child).unwrap();
 
     println!("Child exited with status {}", status);
-
-    // let msg = sys::Message {
-    //     tag: 0xAABBCCDD,
-    //     objects: [0; 4],
-    // };
-    // sys::send_block(child, &msg, b"Hello child!");
-
-    // let mut buf = [0; 1024];
-
-    // loop {
-    //     let (len, msg) = sys::recv_block(child, &mut buf).unwrap();
-    //     let data = &buf[..len];
-
-    //     println!(
-    //         "Received message from child; tag {:#x}, data {:?}",
-    //         msg.tag,
-    //         core::str::from_utf8(data).unwrap()
-    //     );
-
-    //     if data == b"shutdown" {
-    //         break;
-    //     }
-    // }
 
     ulib::sys::shutdown();
 }

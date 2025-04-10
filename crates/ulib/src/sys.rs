@@ -300,3 +300,42 @@ pub fn sem_down(fd: FileDesc) -> Result<(), usize> {
     let res = unsafe { sys_sem_down(fd as usize) };
     int_to_error(res).map(|_| ())
 }
+
+pub struct SpawnArgs {
+    pub fd: FileDesc,
+    pub stdin: Option<FileDesc>,
+    pub stdout: Option<FileDesc>,
+}
+
+pub fn spawn_elf(args: &SpawnArgs) -> Result<FileDesc, usize> {
+    let current_stack = current_sp();
+    let target_pc = exec_child as usize;
+    let arg = args as *const SpawnArgs;
+
+    let wait_fd = unsafe { spawn(target_pc, current_stack, arg as usize, 0) };
+    wait_fd
+}
+
+fn current_sp() -> usize {
+    let sp: usize;
+    unsafe { core::arch::asm!("mov {0}, sp", out(reg) sp) };
+    sp
+}
+
+extern "C" fn exec_child(spawn_args: *const SpawnArgs) -> ! {
+    let spawn_args = unsafe { &*spawn_args };
+
+    if let Some(fd) = spawn_args.stdin {
+        dup3(fd, 0, 0).unwrap();
+    }
+    if let Some(fd) = spawn_args.stdout {
+        dup3(fd, 1, 0).unwrap();
+    }
+
+    let flags = 0;
+    let args = &[];
+    let env = &[];
+    let _res = unsafe { execve_fd(spawn_args.fd, flags, args, env) };
+    // TODO: notify parent of spawn failure
+    exit(1);
+}
