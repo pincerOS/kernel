@@ -7,7 +7,6 @@ use core::{
 
 use crate::arch::memory::palloc::Size4KiB;
 use crate::arch::memory::{KERNEL48_USER25_TCR_EL1, KERNEL48_USER48_TCR_EL1};
-use crate::heap::ALLOCATOR;
 
 use super::{
     machine::{LeafDescriptor, TableDescriptor, TranslationDescriptor},
@@ -69,11 +68,15 @@ pub fn alloc_top_page_table() -> PageTablePtr {
 
     // TODO: waste less space
     let page = PAGE_ALLOCATOR.get().alloc_mapped_frame::<Size4KiB>();
+    let table = PAGE_ALLOCATOR.get().get_mapped_frame(page.clone());
+    unsafe { core::ptr::write_bytes(table, 0, 1) };
     PageTablePtr::from_partial_page(page, top_level_entries)
 }
 
 pub fn alloc_page_table() -> PageTablePtr {
     let page = PAGE_ALLOCATOR.get().alloc_mapped_frame::<Size4KiB>();
+    let table = PAGE_ALLOCATOR.get().get_mapped_frame(page.clone());
+    unsafe { core::ptr::write_bytes(table, 0, 1) };
     PageTablePtr::from_full_page(page)
 }
 
@@ -109,8 +112,6 @@ pub unsafe fn init_kernel_48bit() {
     let leaf = TableDescriptor::new(paddr);
     unsafe { set_translation_descriptor(table, vaddr, 2, 0, leaf.into(), true).unwrap() };
 
-    let huge_page_size = 4096 * 512; // 2 MiB
-    let huge_page_level = 2;
     let huge2_page_size = 4096 * 512 * 512; // 1 GiB
     let huge2_page_level = 1;
 
@@ -128,21 +129,9 @@ pub unsafe fn init_kernel_48bit() {
         };
     }
 
-    let heap_size = 1 << 27; // 128 MiB
-    let (start, end) = PAGE_ALLOCATOR.get().alloc_range(heap_size, huge_page_size);
-
-    let heap_base = MAPPED_HEAP_BASE + start.0;
-    for paddr in (start.0..end.0).step_by(huge_page_size) {
-        let vaddr = MAPPED_HEAP_BASE + paddr;
-        let leaf = LeafDescriptor::new(paddr)
-            .set_global()
-            .difference(LeafDescriptor::IS_PAGE_DESCRIPTOR);
-        unsafe {
-            set_translation_descriptor(table, vaddr, huge_page_level, 0, leaf.into(), true).unwrap()
-        };
-    }
-
-    unsafe { ALLOCATOR.init(heap_base as *mut (), heap_size) };
+    *crate::heap::ALLOCATOR_HACK.lock() = crate::heap::AllocatorHack::Virt(unsafe {
+        crate::heap::VirtAllocator::new(MAPPED_HEAP_BASE as *mut (), 0x100000000000)
+    });
 
     // Note that this will *also* be true on the secondary cores in 25 bit mode,
     // before they switch to 48, which could cause issues.
@@ -259,6 +248,7 @@ pub unsafe fn get_translation_descriptor(
         }
 
         let intermediate_descriptor = unsafe { descriptor.table };
+        // println!("{intermediate_descriptor:?}, {:#016x} in table {:#x}", unsafe { intermediate_descriptor.bits() }, table.paddr());
         if !intermediate_descriptor.is_valid() {
             return Err(MappingError::LevelEntryUnset(curr_level));
         } else if !intermediate_descriptor.is_table_descriptor() {
