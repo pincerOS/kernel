@@ -6,6 +6,8 @@ use alloc::sync::Arc;
 pub type ArcFd = Arc<dyn FileDescriptor + Send + Sync>;
 
 pub use smallbox::SmallBox;
+
+use crate::sync;
 pub type SmallFuture<'a, Out> = SmallBox<dyn Future<Output = Out> + Send + 'a, smallbox::space::S4>;
 pub type SmallFutureOwned<Out> = SmallBox<dyn Future<Output = Out> + Send, smallbox::space::S4>;
 
@@ -119,6 +121,8 @@ impl FileDescriptor for DummyFd {
 
 pub struct UartFd(pub &'static crate::device::uart::UARTLock);
 
+const READ_NO_BLOCK: bool = true;
+
 // TODO: how to handle non-zero offsets for non-seekable files?
 impl FileDescriptor for UartFd {
     fn is_same_file(&self, other: &dyn FileDescriptor) -> bool {
@@ -135,10 +139,22 @@ impl FileDescriptor for UartFd {
             return boxed_future(async move { FileDescResult::ok(0) });
         }
         boxed_future(async move {
-            // TODO: async UART handling
-            let c = self.0.lock().getc();
-            buf[0] = c;
-            FileDescResult::ok(1)
+            if READ_NO_BLOCK {
+                let c = self.0.lock().try_getc();
+                if let Some(c) = c {
+                    buf[0] = c;
+                    FileDescResult::ok(1)
+                } else {
+                    // TODO: proper non-blocking reads, or proper kernel heap...
+                    sync::time::sleep(100).await;
+                    FileDescResult::ok(0)
+                }
+            } else {
+                // TODO: async UART handling
+                let c = self.0.lock().getc();
+                buf[0] = c;
+                FileDescResult::ok(1)
+            }
         })
     }
     fn write<'a>(&'a self, _offset: u64, buf: &'a [u8]) -> SmallFuture<'a, FileDescResult> {

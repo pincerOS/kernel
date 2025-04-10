@@ -4,7 +4,7 @@ use crate::event::async_handler::{run_event_handler, HandlerContext};
 use crate::event::context::Context;
 use crate::process::fd;
 use crate::ringbuffer::channel;
-use crate::sync::SpinLock;
+use crate::sync::{self, SpinLock};
 
 bitflags::bitflags! {
     struct PipeFlags: u32 {
@@ -87,6 +87,8 @@ impl fd::FileDescriptor for PipeWriteFd {
     }
 }
 
+const READ_NO_BLOCK: bool = true;
+
 // TODO: how to handle non-zero offsets for non-seekable files?
 impl fd::FileDescriptor for PipeReadFd {
     fn is_same_file(&self, other: &dyn fd::FileDescriptor) -> bool {
@@ -107,9 +109,21 @@ impl fd::FileDescriptor for PipeReadFd {
             return fd::boxed_future(async move { fd::FileDescResult::ok(0) });
         }
         fd::boxed_future(async move {
-            let c = self.0.lock().recv().await;
-            buf[0] = c;
-            fd::FileDescResult::ok(1)
+            if READ_NO_BLOCK {
+                let c = self.0.lock().try_recv();
+                if let Some(c) = c {
+                    buf[0] = c;
+                    fd::FileDescResult::ok(1)
+                } else {
+                    // TODO: proper non-blocking reads, or proper kernel heap...
+                    sync::time::sleep(100).await;
+                    fd::FileDescResult::ok(0)
+                }
+            } else {
+                let c = self.0.lock().recv().await;
+                buf[0] = c;
+                fd::FileDescResult::ok(1)
+            }
         })
     }
     fn write<'a>(
