@@ -51,7 +51,9 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     let heap_end = (&raw mut arch::memory::vmm::__rpi_virt_base).wrapping_byte_add(0x20_0000 * 14);
     let heap_size = unsafe { heap_end.byte_offset_from(heap_base) };
 
-    unsafe { heap::ALLOCATOR.init(heap_base, heap_size as usize) };
+    let bump = unsafe { heap::BumpAllocator::new_uninit() };
+    unsafe { bump.init(heap_base.cast(), heap_size as usize) };
+    *heap::ALLOCATOR_HACK.lock() = heap::AllocatorHack::Bump(bump);
 
     unsafe { crate::arch::memory::init_physical_alloc() };
 
