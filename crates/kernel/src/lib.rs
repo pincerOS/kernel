@@ -95,6 +95,15 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
         shutdown();
     });
 
+    event::task::spawn_async(async move {
+        let period = 200_000;
+        let mut interval = sync::time::interval(period);
+        loop {
+            interval.tick().await;
+            println!("heap size: {:#016x}", ALLOCATOR.offset.load(Ordering::SeqCst));
+        }
+    });
+
     START_BARRIER.fetch_add(1, Ordering::SeqCst);
     while START_BARRIER.load(Ordering::SeqCst) < core_count {
         core::hint::spin_loop();

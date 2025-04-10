@@ -9,7 +9,7 @@ pub static ALLOCATOR: BumpAllocator = unsafe { BumpAllocator::new_uninit() };
 
 pub struct BumpAllocator {
     base: AtomicPtr<()>,
-    offset: AtomicUsize,
+    pub offset: AtomicUsize,
     max: AtomicUsize,
 }
 unsafe impl Sync for BumpAllocator {}
