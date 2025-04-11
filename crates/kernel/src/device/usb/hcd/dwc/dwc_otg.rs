@@ -244,15 +244,15 @@ pub unsafe fn HcdTransmitChannel(device: &UsbDevice, channel: u8, buffer: *mut u
             convert_host_split_control(dwc_sc.channel[channel as usize].split_control),
         );
 
-        if ((buffer as u32) & 3) != 0 {
+        if ((buffer as usize) & 3) != 0 {
             println!(
                 "HCD: Transfer buffer {:#x} is not DWORD aligned. Ignored, but dangerous.\n",
-                buffer as u32,
+                buffer as usize,
             );
         }
 
-        let dma_address = 0x2FF0000;
-        let dma_loc = dwc_sc.dma_loc;
+        let dma_address = 0x2FF0000 + 0x1000 * channel as usize;
+        let dma_loc = dwc_sc.dma_loc + 0x1000 * channel as usize;
         //copy from buffer to dma_loc for 32 bytes
         memory_copy(dma_loc as *mut u8, buffer, 100);
 
@@ -723,10 +723,10 @@ fn HcdTransmitChannelNoWait(device: &UsbDevice, channel: u8, buffer: *mut u8) {
             convert_host_split_control(dwc_sc.channel[channel as usize].split_control),
         );
 
-        if ((buffer as u32) & 3) != 0 {
+        if ((buffer as usize) & 3) != 0 {
             println!(
-                "HCD: Transfer buffer {:#x} is not DWORD aligned. Ignored, but dangerous.\n",
-                buffer as u32,
+                "HCD: Transfer buffer in no wait {:#x} is not DWORD aligned. Ignored, but dangerous.\n",
+                buffer as usize,
             );
         }
 
@@ -1194,7 +1194,12 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
         let dma_loc =
             map_physical_noncacheable(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
         dwc_sc.dma_loc = dma_loc; //TODO: Temporay, move to somwhere elses
-
+        println!(
+            "| HCD: DMA address {:#x} mapped from {:#x} to {:#x}",
+            dma_address,
+            dma_loc,
+            dma_loc + 0x1000 * ChannelCount
+        );
         for i in 0..ChannelCount {
             dwc_sc.dma_addr[i as usize] = dma_loc + (i * 0x1000);
             dwc_sc.dma_phys[i as usize] = dma_address + (i * 0x1000);
