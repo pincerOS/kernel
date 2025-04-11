@@ -146,6 +146,7 @@ pub const INTERFACE_CLASS_ATTACH_COUNT: usize = 16;
 /** The maximum number of devices that can be connected. */
 pub const MaximumDevices: usize = 32;
 
+unsafe impl Sync for UsbBus {}
 pub struct UsbBus {
     pub devices: [Option<Box<UsbDevice>>; MaximumDevices],
     pub interface_class_attach: [Option<

@@ -19,6 +19,7 @@ use device_tree::format::StructEntry;
 use device_tree::util::MappingIterator;
 use device_tree::DeviceTree;
 use usb::usbd::endpoint::endpoint_descriptor;
+use crate::device::usb::usbd::device::UsbBus;
 
 const ENABLE_USB: bool = true;
 
@@ -99,6 +100,8 @@ pub static PER_CORE_INIT: UnsafeInit<Vec<InitTask>> = unsafe { UnsafeInit::unini
 pub static GPIO: UnsafeInit<SpinLock<gpio::bcm2711_gpio_driver>> = unsafe { UnsafeInit::uninit() };
 pub static MAILBOX: UnsafeInit<SpinLock<mailbox::VideoCoreMailbox>> =
     unsafe { UnsafeInit::uninit() };
+
+pub static BOX: UnsafeInit<Box<UsbBus>> = unsafe { UnsafeInit::uninit() };
 
 pub fn init_devices(tree: &DeviceTree<'_>) {
     let mut init_fns: Vec<InitTask> = Vec::new();
@@ -224,7 +227,8 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let (usb_addr, _) = find_device_addr(usb).unwrap().unwrap();
         let usb_base = unsafe { map_device_block(usb_addr, 0x11000) }.as_ptr(); //size is from core gloabl to dev ep 15
 
-        let _bus = usb::usb_init(usb_base);
+        let bus = usb::usb_init(usb_base);
+        unsafe { BOX.init(bus) };
     }
 
     // Set up the interrupt controllers to preempt on the arm generic

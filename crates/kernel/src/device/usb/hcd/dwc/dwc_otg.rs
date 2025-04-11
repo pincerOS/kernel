@@ -737,10 +737,10 @@ fn HcdTransmitChannelNoWait(device: &UsbDevice, channel: u8, buffer: *mut u8) {
             convert_host_split_control(dwc_sc.channel[channel as usize].split_control),
         );
 
-        if ((buffer as u32) & 3) != 0 {
+        if ((buffer as usize) & 3) != 0 {
             println!(
-                "HCD: Transfer buffer {:#x} is not DWORD aligned. Ignored, but dangerous.\n",
-                buffer as u32,
+                "HCD: Transfer buffer in no wait {:#x} is not DWORD aligned. Ignored, but dangerous.\n",
+                buffer as usize,
             );
         }
 

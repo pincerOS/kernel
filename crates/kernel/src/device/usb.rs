@@ -17,13 +17,13 @@ use hcd::dwc::dwc_otg::*;
 use usbd::device::*;
 use usbd::usbd::*;
 
-pub fn usb_init(base_addr: *mut ()) -> UsbBus {
-    let mut bus = UsbBus {
+pub fn usb_init(base_addr: *mut ()) -> Box<UsbBus> {
+    let mut bus = Box::new(UsbBus {
         devices: core::array::from_fn(|_| const { None }),
         interface_class_attach: [None; INTERFACE_CLASS_ATTACH_COUNT],
         roothub_device_number: 0,
         dwc_sc: Box::new(dwc_hub::new()),
-    };
+    });
     // usbd::UsbLoad(&mut bus);
     UsbInitialise(&mut bus, base_addr);
 

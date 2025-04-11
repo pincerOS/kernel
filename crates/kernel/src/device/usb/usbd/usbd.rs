@@ -744,7 +744,7 @@ fn UsbAttachRootHub(bus: &mut UsbBus) -> ResultCode {
         return ResultCode::ErrorDevice;
     }
 
-    let mut device = unsafe { Box::new(UsbDevice::new(bus, 0 as u32)) };
+    let device = unsafe { Box::new(UsbDevice::new(bus, 0 as u32)) };
 
     if UsbAllocateDevice(device) != ResultCode::OK {
         println!("Error: UsbAllocateDevice failed");
