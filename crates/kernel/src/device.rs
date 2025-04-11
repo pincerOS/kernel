@@ -95,6 +95,8 @@ pub static WATCHDOG: UnsafeInit<SpinLock<watchdog::bcm2835_wdt_driver>> =
 type InitTask = Box<dyn Fn() + Send + Sync>;
 pub static PER_CORE_INIT: UnsafeInit<Vec<InitTask>> = unsafe { UnsafeInit::uninit() };
 
+pub static MAILBOX: UnsafeInit<SpinLock<mailbox::VideoCoreMailbox>> = unsafe { UnsafeInit::uninit() };
+
 pub static GPIO: UnsafeInit<SpinLock<gpio::bcm2711_gpio_driver>> = unsafe { UnsafeInit::uninit() };
 
 pub static MAILBOX: UnsafeInit<SpinLock<mailbox::VideoCoreMailbox>> = unsafe { UnsafeInit::uninit() };
@@ -246,6 +248,20 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
                 bcm2836_intc::exception_handler_bcm2836_intc_irq,
             )
         }
+    }
+
+    {
+        let sdcard = discover_compatible(tree, b"brcm,bcm2711-emmc2")
+            .unwrap()
+            .next()
+            .unwrap();
+        let (sdcard_addr, _) = find_device_addr(sdcard).unwrap().unwrap();
+        let sdcard_base = unsafe { map_device(sdcard_addr) }.as_ptr();
+        println!("| SD Card controller addr: {:#010x}", sdcard_addr as usize);
+        println!("| SD Card controller base: {:#010x}", sdcard_base as usize);
+        let sdcard = unsafe { sdcard::bcm2711_emmc2_driver::init(sdcard_base) };
+        unsafe { SD.init(SpinLock::new(sdcard)) };
+        println!("| initialized SD Card");
     }
 
     // Set up the interrupt controllers to preempt on the arm generic

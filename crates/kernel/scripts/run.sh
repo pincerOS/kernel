@@ -2,6 +2,14 @@
 
 set -e
 
+# Check if sdcard.img exists, create it if not
+if [ ! -f sdcard.img ]; then
+    echo "Creating SD card image"
+    dd if=/dev/zero of=sdcard.img bs=1M count=4096
+    mkfs.fat -F 32 sdcard.img
+    echo "SD card image created."
+fi
+
 QEMU_TARGET_HARDWARE=${QEMU_TARGET_HARDWARE-"-M raspi4b -dtb bcm2711-rpi-4-b.dtb"}
 QEMU_DEBUG=${QEMU_DEBUG-"mmu,guest_errors"}
 QEMU_DISPLAY=${QEMU_DISPLAY-"none"}
@@ -41,5 +49,8 @@ qemu-system-aarch64 \
     -serial stdio \
     # -serial "${SERIAL_ALT}" \
     -display "${QEMU_DISPLAY}" \
+    -sd sdcard.img \
+    -monitor stdio \
     "${QEMU_DEBUG_PFX}" "${QEMU_DEBUG}" \
     ${DEBUG_ARGS}
+    

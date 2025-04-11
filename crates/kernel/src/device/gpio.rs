@@ -72,7 +72,6 @@ impl bcm2711_gpio_driver {
             driver.set_pull(15, GpioPull::None);
 
 
-            // Add more defaults
         }
 
         driver
