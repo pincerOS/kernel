@@ -62,6 +62,9 @@ pub unsafe extern "C" fn kernel_entry_rust(x0: u32, _x1: u64, _x2: u64, _x3: u64
     PAGE_ALLOCATOR
         .get()
         .mark_region_unusable(device_tree_base, device_tree_size);
+    PAGE_ALLOCATOR
+        .get()
+        .mark_region_unusable(0x2FF0000, 0x1000 * 8);
 
     unsafe { crate::arch::memory::vmm::init_kernel_48bit() };
     unsafe { crate::arch::memory::vmm::switch_to_kernel_48bit() };
