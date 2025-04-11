@@ -147,7 +147,7 @@ pub const INTERFACE_CLASS_ATTACH_COUNT: usize = 16;
 pub const MaximumDevices: usize = 32;
 
 pub struct UsbBus {
-    pub devices: [Option<*mut Box<UsbDevice>>; MaximumDevices],
+    pub devices: [Option<Box<UsbDevice>>; MaximumDevices],
     pub interface_class_attach: [Option<
         fn(device: &mut UsbDevice, interface_number: u32) -> ResultCode,
     >; INTERFACE_CLASS_ATTACH_COUNT],

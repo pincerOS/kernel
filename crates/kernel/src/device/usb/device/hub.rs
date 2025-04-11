@@ -341,7 +341,7 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
     let data = device.driver_data.downcast::<HubDevice>().unwrap();
     let mut dev = unsafe { Box::new(UsbDevice::new(device.bus, 0)) };
     data.Children[port as usize] = dev.as_mut() as *mut UsbDevice;
-    result = UsbAllocateDevice(&mut dev);
+    result = UsbAllocateDevice(dev);
     if result != ResultCode::OK {
         println!("| HUB: failed to allocate new device");
         return result;
