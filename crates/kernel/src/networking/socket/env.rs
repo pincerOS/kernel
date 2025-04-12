@@ -22,7 +22,7 @@ impl SocketEnv {
     pub fn new(interface: &Interface) -> SocketEnv {
         SocketEnv {
             bindings: Bindings::new(),
-            interface_mtu: interface.dev.mtu(),
+            interface_mtu: 1500,
         }
     }
 

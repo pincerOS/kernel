@@ -42,7 +42,7 @@ where
 pub fn recv_packet(
     interface: &mut Interface,
     eth_frame: &EthernetFrame<&[u8]>,
-    socket_set: &mut SocketSet,
+    // socket_set: &mut SocketSet,
 ) -> Result<()> {
     let ipv4_packet = Ipv4Packet::try_new(eth_frame.payload())?;
     ipv4_packet.check_encoding()?;
@@ -62,24 +62,24 @@ pub fn recv_packet(
             .set_eth_addr_for_ip(ipv4_packet.src_addr(), eth_frame.src_addr());
     }
 
-    socket_set
-        .iter_mut()
-        .filter_map(|socket| match *socket {
-            TaggedSocket::Raw(ref mut socket) => if socket.raw_type() == RawType::Ipv4 {
-                Some(socket)
-            } else {
-                None
-            },
-            _ => None,
-        })
-        .for_each(|socket| {
-            if let Err(err) = socket.recv_enqueue(ipv4_packet.as_ref()) {
-                debug!(
-                    "Error enqueueing IPv4 packet for receiving via socket with {:?}.",
-                    err
-                );
-            }
-        });
+    // socket_set
+    //     .iter_mut()
+    //     .filter_map(|socket| match *socket {
+    //         TaggedSocket::Raw(ref mut socket) => if socket.raw_type() == RawType::Ipv4 {
+    //             Some(socket)
+    //         } else {
+    //             None
+    //         },
+    //         _ => None,
+    //     })
+    //     .for_each(|socket| {
+    //         if let Err(err) = socket.recv_enqueue(ipv4_packet.as_ref()) {
+    //             debug!(
+    //                 "Error enqueueing IPv4 packet for receiving via socket with {:?}.",
+    //                 err
+    //             );
+    //         }
+    //     });
 
     let ipv4_repr = Ipv4Repr::deserialize(&ipv4_packet)?;
 
@@ -93,7 +93,7 @@ pub fn recv_packet(
     //     }
     // }
     match ipv4_packet.protocol() {
-        x if x == Ipv4Protocol::UDP as u8 => udp::recv_packet(interface, &ipv4_repr, &ipv4_packet, socket_set),
+        x if x == Ipv4Protocol::UDP as u8 => udp::recv_packet(interface, &ipv4_repr, &ipv4_packet),
         x if x == Ipv4Protocol::ICMP as u8 => icmp::recv_packet(interface, &ipv4_repr, ipv4_packet.payload()),
         i => {
             debug!("Ignoring IPv4 packet with type {}.", i);

@@ -14,7 +14,7 @@ where
     let mut eth_frame = EthernetFrame::try_new(&mut eth_buffer[..])?;
     f(&mut eth_frame);
     eth_frame.set_src_addr(interface.ethernet_addr);
-    interface.dev.send(eth_frame.as_ref())?;
+    // interface.dev.send(eth_frame.as_ref())?;
     Ok(())
 }
 
@@ -22,7 +22,8 @@ where
 pub fn recv_frame(
     interface: &mut Interface,
     eth_buffer: &[u8],
-    socket_set: &mut SocketSet,
+    len: u32,
+    // socket_set: &mut SocketSet,
 ) -> Result<()> {
     let eth_frame = EthernetFrame::try_new(eth_buffer)?;
 
@@ -34,28 +35,28 @@ pub fn recv_frame(
         return Err(Error::Ignored);
     }
 
-    socket_set
-        .iter_mut()
-        .filter_map(|socket| match *socket {
-            TaggedSocket::Raw(ref mut socket) => if socket.raw_type() == RawType::Ethernet {
-                Some(socket)
-            } else {
-                None
-            },
-            _ => None,
-        })
-        .for_each(|socket| {
-            if let Err(err) = socket.recv_enqueue(eth_frame.as_ref()) {
-                debug!(
-                    "Error enqueueing Ethernet frame for receiving via socket with {:?}.",
-                    err
-                );
-            }
-        });
+    // socket_set
+    //     .iter_mut()
+    //     .filter_map(|socket| match *socket {
+    //         TaggedSocket::Raw(ref mut socket) => if socket.raw_type() == RawType::Ethernet {
+    //             Some(socket)
+    //         } else {
+    //             None
+    //         },
+    //         _ => None,
+    //     })
+    //     .for_each(|socket| {
+    //         if let Err(err) = socket.recv_enqueue(eth_frame.as_ref()) {
+    //             debug!(
+    //                 "Error enqueueing Ethernet frame for receiving via socket with {:?}.",
+    //                 err
+    //             );
+    //         }
+    //     });
 
     match eth_frame.payload_type() {
         EthernetType::ARP => arp::recv_packet(interface, &eth_frame),
-        EthernetType::IPV4 => ipv4::recv_packet(interface, &eth_frame, socket_set),
+        EthernetType::IPV4 => ipv4::recv_packet(interface, &eth_frame),
         i => {
             debug!("Ignoring ethernet frame with type {}.", i);
             Err(Error::Ignored)
