@@ -122,7 +122,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // initialize arp table
     
     // register ethernet receieve
-    RegisterNetReceiveCallback(recv_ethernet);
+    // RegisterNetReceiveCallback(recv_ethernet);
     
 
     // // Ethernet Frame
@@ -153,7 +153,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // println!("Ethernet Frame: {:02X?}", &buffer[..46]);
     
     // TODO: make from u32 so we can take in OID_802_3_PERMANENT_ADDRESS
-    let arp_repr = ArpPacket {
+    let arp_packet = ArpPacket {
         op: ArpOperation::Request,
         source_hw_addr: DEFAULT_MAC,
         source_proto_addr: DEFAULT_IPV4,
@@ -161,19 +161,21 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         target_proto_addr: Ipv4Address::new([192, 168, 1, 2]),
     };
 
-    let eth_buffer = [0u8; 14];
+    println!("[+] sending test packet");
+
+    let eth_buffer = [0u8; 42];
     let mut eth_frame = EthernetFrame::try_new(eth_buffer).unwrap();
     eth_frame.set_src_addr(DEFAULT_MAC);
     eth_frame.set_dst_addr(EthernetAddress::BROADCAST);
     eth_frame.set_payload_type(EthernetType::ARP);
-    arp_repr.serialize(eth_frame.payload_mut()).unwrap();
+    arp_packet.serialize(eth_frame.payload_mut()).unwrap();
 
     unsafe {
         NET_DEVICE.device = Some(device);
     }
 
     unsafe { // :skull:
-        NetSendPacket(eth_frame.as_mut().as_mut_ptr(), 20);
+        NetSendPacket(eth_frame.as_mut().as_mut_ptr(), 60);
     }
 
     // unsafe {

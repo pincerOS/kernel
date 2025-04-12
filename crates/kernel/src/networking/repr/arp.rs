@@ -97,6 +97,7 @@ impl Packet {
     }
 
     pub fn serialize(&self, buffer: &mut [u8]) -> Result<()> {
+        println!("self buffer {} buffer {}", self.buffer_len(), buffer.len());
         if self.buffer_len() > buffer.len() {
             return Err(Error::Malformed);
         }

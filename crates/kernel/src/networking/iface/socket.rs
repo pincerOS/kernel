@@ -83,24 +83,25 @@ fn send_udp_socket(interface: &mut Interface, socket: &mut UdpSocket) -> Result<
     })
 }
 
-pub fn recv(interface: &mut Interface, socket_set: &mut SocketSet) {
-    let mut eth_buffer = vec![0; interface.dev.mtu()];
-
-    loop {
-        let buffer_len = match interface.dev.recv(&mut eth_buffer) {
-            Ok(buffer_len) => buffer_len,
-            Err(Error::Device(_)) => break,
-            Err(_err) => {
-                break;
-            }
-        };
-
-        match ethernet::recv_frame(interface, &eth_buffer[.. buffer_len], socket_set) {
-            Ok(_) => continue,
-            Err(Error::Ignored) => continue,
-            Err(Error::MacResolution(_)) => continue,
-            Err(err) => warn!("Error processing Ethernet frame with {:?}", err), // TODO: need to
-            // add to error enum
-        }
-    }
-}
+// pub fn recv(interface: &mut Interface, socket_set: &mut SocketSet) {
+//     let mut eth_buffer = vec![0; 1500];
+//
+//     loop {
+//         let buffer_len = match interface.dev.recv(&mut eth_buffer) {
+//             Ok(buffer_len) => buffer_len,
+//             Err(Error::Device(_)) => break,
+//             Err(_err) => {
+//                 break;
+//             }
+//         };
+//
+//         // match ethernet::recv_frame(interface, &eth_buffer[.. buffer_len], socket_set) {
+//         match ethernet::recv_frame(interface, &eth_buffer[.. buffer_len], buffer_len) {
+//             Ok(_) => continue,
+//             Err(Error::Ignored) => continue,
+//             Err(Error::MacResolution(_)) => continue,
+//             Err(err) => warn!("Error processing Ethernet frame with {:?}", err), // TODO: need to
+//             // add to error enum
+//         }
+//     }
+// }

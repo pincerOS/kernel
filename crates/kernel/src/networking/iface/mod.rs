@@ -17,7 +17,7 @@ use crate::networking::repr::dev::Device;
 
 // HACK: idk how to solve compile time device diff without generics, foudn this on stack exchange
 pub struct Interface {
-    pub dev: Box<dyn Device>,   // device for sending and receiving raw ethernet frames
+    // pub dev: Box<dyn Device>,   // device for sending and receiving raw ethernet frames
     pub arp_cache: ArpCache,
     pub ethernet_addr: EthernetAddress,
     pub ipv4_addr: Ipv4Cidr,
