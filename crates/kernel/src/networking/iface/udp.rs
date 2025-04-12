@@ -34,7 +34,7 @@ pub fn recv_packet(
     interface: &mut Interface,
     ipv4_repr: &Ipv4Repr,
     ipv4_packet: &Ipv4Packet<&[u8]>,
-    socket_set: &mut SocketSet,
+    // socket_set: &mut SocketSet,
 ) -> Result<()> {
     let udp_packet = UdpPacket::try_new(ipv4_packet.payload())?;
     udp_packet.check_encoding(ipv4_repr)?;
@@ -47,25 +47,25 @@ pub fn recv_packet(
     };
     let mut unreachable = true;
 
-    socket_set
-        .iter_mut()
-        .filter_map(|socket| match *socket {
-            TaggedSocket::Udp(ref mut socket) => if socket.accepts(&dst_socket_addr) {
-                Some(socket)
-            } else {
-                None
-            },
-            _ => None,
-        })
-        .for_each(|socket| {
-            unreachable = false;
-            if let Err(err) = socket.recv_enqueue(ipv4_repr, &udp_repr, udp_packet.payload()) {
-                debug!(
-                    "Error enqueueing UDP packet for receiving via socket with {:?}.",
-                    err
-                );
-            }
-        });
+    // socket_set
+    //     .iter_mut()
+    //     .filter_map(|socket| match *socket {
+    //         TaggedSocket::Udp(ref mut socket) => if socket.accepts(&dst_socket_addr) {
+    //             Some(socket)
+    //         } else {
+    //             None
+    //         },
+    //         _ => None,
+    //     })
+    //     .for_each(|socket| {
+    //         unreachable = false;
+    //         if let Err(err) = socket.recv_enqueue(ipv4_repr, &udp_repr, udp_packet.payload()) {
+    //             debug!(
+    //                 "Error enqueueing UDP packet for receiving via socket with {:?}.",
+    //                 err
+    //             );
+    //         }
+    //     });
 
     // Send an ICMP message indicating packet has been ignored because no
     // UDP sockets are bound to the specified port.

@@ -36,6 +36,12 @@ impl Address {
         Ok(Address(bytes))
     }
 
+    pub fn from_u32(val: u32) -> Address {
+        let mut bytes = [0u8; 6];
+        bytes[2..].copy_from_slice(&val.to_be_bytes());
+        Address(bytes)
+    }
+
     // covert address to bytes
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
