@@ -1,37 +1,17 @@
 use log::debug;
 
-use crate::networking::repr::{IcmpMessage, IcmpPacket, IcmpRepr, Ipv4Repr};
+use crate::networking::repr::{IcmpMessage, IcmpPacket, IcmpRepr, Ipv4Packet, Ipv4Repr};
 use crate::networking::iface::{ipv4, Interface};
 use crate::networking::{Error, Result};
 
-pub fn send_packet<F>(
+pub fn recv_icmp_packet(
     interface: &mut Interface,
-    ipv4_repr: &Ipv4Repr,
-    icmp_repr: &IcmpRepr,
-    f: F,
-) -> Result<()>
-where
-    F: FnOnce(&mut [u8]),
-{
-    ipv4::send_packet_with_repr(interface, &ipv4_repr, |ipv4_payload| {
-        let mut icmp_packet = IcmpPacket::from_bytes(ipv4_payload).unwrap();
-        icmp_repr.serialize(&mut icmp_packet).unwrap();
-        f(icmp_packet.payload_mut());
-        icmp_packet.gen_and_set_checksum();
-    })
-}
-
-pub fn recv_packet(
-    interface: &mut Interface,
-    ipv4_repr: &Ipv4Repr,
-    icmp_buffer: &[u8],
+    ipv4_repr: Ipv4Packet,
 ) -> Result<()> {
-    let icmp_recv_packet = IcmpPacket::from_bytes(icmp_buffer)?;
-    icmp_recv_packet.check_encoding()?;
+    let icmp_recv_packet = IcmpPacket::deserialize(ipv4_repr.payload)?;
+    // icmp_recv_packet.check_encoding()?;
 
-    let icmp_recv_repr = IcmpRepr::deserialize(&icmp_recv_packet)?;
-
-    let (ipv4_send_repr, icmp_send_repr) = match icmp_recv_repr.message {
+    let (ipv4_repr, icmp_send_repr) = match icmp_recv_packet.message {
         IcmpMessage::EchoRequest { id, seq } => {
             debug!(
                 "Got a ping from {}; Sending response...",
@@ -39,6 +19,7 @@ pub fn recv_packet(
             );
 
             let ipv4_send_repr = Ipv4Repr {
+                icmp_type: Icmp::
                 src_addr: ipv4_repr.dst_addr,
                 dst_addr: ipv4_repr.src_addr,
                 protocol: ipv4_repr.protocol,
@@ -56,8 +37,6 @@ pub fn recv_packet(
         _ => return Err(Error::Ignored),
     };
 
-    send_packet(interface, &ipv4_send_repr, &icmp_send_repr, |payload| {
-        payload.copy_from_slice(icmp_recv_packet.payload());
-    })
+    send_ip_packet(interface, &ipv4_send_repr,)
 }
 
