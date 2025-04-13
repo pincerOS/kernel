@@ -117,6 +117,16 @@ drop_to_el1:
     mov x5, #0b0101
     msr SPSR_EL2, x5
 
+    // Enable FPU
+    // TODO: ref https://docs.kernel.org/5.19/arm64/booting.html for register init
+    mov x5, #0
+    msr cptr_el2, x5
+
+    mrs x5, cpacr_el1
+    mov x6, #(3 << 20) // Enable FPU in EL0 and EL1
+    orr x5, x5, x6
+    msr cpacr_el1, x5
+
     ldr x5, =0xFFFFFFFFFE000000 // TODO: slightly cleaner way of encoding this?
     orr lr, lr, x5
     msr ELR_EL2, lr
