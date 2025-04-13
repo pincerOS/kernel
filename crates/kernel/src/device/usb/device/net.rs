@@ -26,6 +26,7 @@ use super::rndis::*;
 pub static mut NET_DEVICE: NetDevice = NetDevice {
     receive_callback: None,
     device: None,
+    default_interface: None,
 };
 
 pub fn NetLoad(bus: &mut UsbBus) {
@@ -98,6 +99,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // 1. new network interface
     // 2. initialize mac address
     // 3. initalize and statically set ip address and gateway
+    // 4. initialize arp table
 
     // TODO: create dummy dhcp server instead of statically setting address
     // TODO: discussion with aaron about format for user, with NetSend/Recv or with my
@@ -110,49 +112,25 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     let DEFAULT_IPV4CIDR = Ipv4Cidr::new(DEFAULT_IPV4, 24);
     let DEFAULT_GATEWAY = Ipv4Address::new([192, 168, 1, 1]); // change ts bruh
 
-    // TODO: needs to be accessible from the NetDevice struct but limited lifetime issue
-    // requires to change other references as well
     let default_interface = Interface {
-        // dev: dummy_dev(),
         arp_cache: ArpCache::new(60, system_timer::get_time()),
         ethernet_addr: DEFAULT_MAC,
         ipv4_addr: DEFAULT_IPV4CIDR,
         default_gateway: DEFAULT_GATEWAY,
     };
-    // initialize arp table
+
+    unsafe {
+        NET_DEVICE.default_interface = Some(default_interface);
+    }
+
     
+    // TODO: discuss with aaron about typing for receive function, maybe would be better to return
+    // an Option or Result<> to handle errors
     // register ethernet receieve
     // RegisterNetReceiveCallback(recv_ethernet);
-    
 
-    // // Ethernet Frame
-    // let dest_mac = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]; // Broadcast
-    // let src_mac = [0x11, 0x11, 0x22, 0x33, 0x44, 0x55]; // Example MAC
-    // let ethertype = [0x08, 0x00]; // IPv4
-    //
-    // // Write Ethernet Header
-    // buffer[..6].copy_from_slice(&dest_mac);
-    // buffer[6..12].copy_from_slice(&src_mac);
-    // buffer[12..14].copy_from_slice(&ethertype);
-    //
-    // // Payload (minimal IP header for demonstration)
-    // buffer[14..18].copy_from_slice(&[0x45, 0x00, 0x00, 0x28]); // IPv4 Header
-    // buffer[18..22].copy_from_slice(&[0x00, 0x00, 0x40, 0x00]); // Identification & Flags
-    // buffer[22..26].copy_from_slice(&[0x40, 0x11, 0xB7, 0xC8]); // TTL, Protocol (UDP), Checksum
-    // buffer[26..30].copy_from_slice(&[192, 168, 1, 1]); // Source IP: 192.168.1.1
-    // buffer[30..34].copy_from_slice(&[192, 168, 1, 2]); // Destination IP: 192.168.1.2
-    //
-    // // UDP Header (Example)
-    // buffer[34..36].copy_from_slice(&[0x1F, 0x90]); // Source Port (8080)
-    // buffer[36..38].copy_from_slice(&[0x00, 0x35]); // Destination Port (53 - DNS)
-    // buffer[38..40].copy_from_slice(&[0x00, 0x14]); // Length (20 bytes)
-    // buffer[40..42].copy_from_slice(&[0x00, 0x00]); // Checksum (assumed 0 for simplicity)
-    //
-    // // UDP Data (Example Payload)
-    // buffer[42..46].copy_from_slice(b"PING");
-    // println!("Ethernet Frame: {:02X?}", &buffer[..46]);
-    
-    // TODO: make from u32 so we can take in OID_802_3_PERMANENT_ADDRESS
+    println!("[+] sending test packet");
+
     let arp_packet = ArpPacket {
         op: ArpOperation::Request,
         source_hw_addr: DEFAULT_MAC,
@@ -160,8 +138,6 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         target_hw_addr: EthernetAddress::BROADCAST,
         target_proto_addr: Ipv4Address::new([192, 168, 1, 2]),
     };
-
-    println!("[+] sending test packet");
 
     let eth_buffer = [0u8; 42];
     let mut eth_frame = EthernetFrame::try_new(eth_buffer).unwrap();
@@ -178,12 +154,6 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         NetSendPacket(eth_frame.as_mut().as_mut_ptr(), 60);
     }
 
-    // unsafe {
-    // rndis_send_packet(device, buffer.as_mut_ptr(), 64);
-    // rndis_receive_packet(device, Box::new(buffer), 64);
-    // }
-    // micro_delay(1000000);
-    // shutdown();
     return ResultCode::OK;
 }
 
@@ -239,7 +209,7 @@ pub struct NetDevice {
     pub receive_callback: Option<fn(*mut u8, u32)>,
     // pub receive_callback: Option<fn(&mut Interface, &[u8], u32)>,
     pub device: Option<*mut UsbDevice>,
-    // pub default_interface: &mut Interface,
+    pub default_interface: Option<Interface>,
 }
 
 #[repr(u32)]
