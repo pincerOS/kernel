@@ -19,6 +19,7 @@ incremental = false
 debug = 2
 panic = "abort"
 debug-assertions = true
+overflow-checks = true
 
 [profile.dev]
 incremental = false

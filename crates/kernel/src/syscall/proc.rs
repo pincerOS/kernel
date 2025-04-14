@@ -1,14 +1,27 @@
+use alloc::boxed::Box;
 use alloc::sync::Arc;
 
 use crate::event::async_handler::{run_async_handler, run_event_handler, HandlerContext};
 use crate::event::context::{deschedule_thread, Context, DescheduleAction};
+use crate::event::thread::Thread;
 use crate::process::fd::{self, FileDescriptor};
 use crate::process::ExitStatus;
 use crate::sync::once_cell::BlockingOnceCell;
-use crate::{event, event::thread, shutdown};
+use crate::{event, shutdown};
 
-pub unsafe fn sys_shutdown(_ctx: &mut Context) -> *mut Context {
-    shutdown();
+pub unsafe fn sys_shutdown(ctx: &mut Context) -> *mut Context {
+    run_event_handler(ctx, move |_context: HandlerContext<'_>| {
+        shutdown();
+    })
+}
+
+pub unsafe fn exit_exception(mut thread: Box<Thread>, ctx: &mut Context, status: u32) -> ! {
+    let exit_code = &thread.process.as_ref().unwrap().exit_code;
+    exit_code.set(crate::process::ExitStatus {
+        status: status as u32,
+    });
+    unsafe { thread.save_context(ctx.into(), false) };
+    unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
 }
 
 pub unsafe fn sys_exit(ctx: &mut Context) -> *mut Context {
@@ -58,7 +71,7 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
             "Creating new process with page dir {:#010x}",
             process.get_ttbr0()
         );
-        let mut user_thread = unsafe { thread::Thread::new_user(process, user_sp, user_entry) };
+        let mut user_thread = unsafe { Thread::new_user(process, user_sp, user_entry) };
         user_thread.context.as_mut().unwrap().regs[0] = user_x0;
         event::SCHEDULER.add_task(event::Event::schedule_thread(user_thread));
 

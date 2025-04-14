@@ -113,14 +113,15 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                     // by the current task)
 
                     let vme = new_mem.get_vme(base).unwrap();
-                    new_mem.populate_range(vme, base, data.len()).await.unwrap();
+                    // new_mem.populate_range(vme, base, data.len()).await.unwrap();
+                    new_mem.populate_range(vme, base, memsize).await.unwrap();
 
                     let addr = (phdr.p_vaddr as usize) as *mut u8;
                     let mapping: &mut [u8] =
                         unsafe { core::slice::from_raw_parts_mut(addr, memsize) };
                     mapping[..data.len()].copy_from_slice(data);
                     // TODO: make sure anonymous pages are zeroed
-                    // mapping[data.len()..].fill(0);
+                    mapping[data.len()..].fill(0);
                 }
             }
         };

@@ -9,6 +9,8 @@ bytemuck = { version = "1.19.0", default-features = false }
 smallbox = { version = "0.8.6", default-features = false }
 byteorder = { version = "1.4", default-features = false }
 log = { version = "0.4", default-features = false }
+linked_list_allocator = "0.10.5"
+tinyvec = "1.9"
 
 device-tree = { path = "../device-tree" }
 endian = { path = "../endian" }

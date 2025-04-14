@@ -307,10 +307,8 @@ unsafe impl Send for UserAddrSpace {}
 unsafe impl Sync for UserAddrSpace {}
 
 pub fn page_fault_handler(ctx: &mut Context, far: usize, _iss: DataAbortISS) -> *mut Context {
-    run_async_handler(ctx, async move |context: HandlerContext<'_>| {
+    run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
-
-        // println!("Handling page fault at addr {far:#10x}");
 
         // TODO: make sure misaligned loads don't loop here?
         let page_addr = (far / PAGE_SIZE) * PAGE_SIZE;
@@ -324,6 +322,9 @@ pub fn page_fault_handler(ctx: &mut Context, far: usize, _iss: DataAbortISS) -> 
                     status: -1i32 as u32,
                 });
                 drop(mem);
+
+                println!("Invalid user access at addr {far:#10x}");
+                println!("{:#?}", &*context.regs());
 
                 let thread = context.detach_thread();
                 unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }

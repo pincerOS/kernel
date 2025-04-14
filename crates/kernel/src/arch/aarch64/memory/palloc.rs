@@ -1,22 +1,37 @@
 use core::fmt::Formatter;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
+use core::sync::atomic::Ordering;
 
 use alloc::boxed::Box;
-use alloc::collections::vec_deque::VecDeque;
+use alloc::vec::Vec;
 
-use crate::sync::{SpinLock, UnsafeInit};
+use crate::sync::{InterruptSpinLock, UnsafeInit};
+
+use super::vmm::{
+    __rpi_phys_binary_end_addr, __rpi_phys_binary_start_addr, __rpi_virt_base, DIRECT_MAP_BASE,
+    VMEM_INIT_DONE,
+};
 
 pub struct PhysicalPage<Size> {
     pub paddr: usize,
     _marker: PhantomData<Size>,
 }
 
+impl<S> Clone for PhysicalPage<S> {
+    fn clone(&self) -> Self {
+        Self {
+            paddr: self.paddr.clone(),
+            _marker: PhantomData,
+        }
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct PAddr(pub usize);
 
 pub struct PageAllocator {
-    allocator: SpinLock<BuddyAllocator>,
+    allocator: InterruptSpinLock<BuddyAllocator>,
 }
 
 impl<S> PhysicalPage<S> {
@@ -35,8 +50,14 @@ impl PageAllocator {
         let floored_base = (start / maximal_size) * maximal_size;
         let allocator = BuddyAllocator::new(floored_base, start, end, 4096);
         PageAllocator {
-            allocator: SpinLock::new(allocator),
+            allocator: InterruptSpinLock::new(allocator),
         }
+    }
+
+    pub fn mark_region_unusable(&self, start: usize, size: usize) {
+        self.allocator
+            .lock()
+            .mark_region_unusable(start, start + size);
     }
 
     pub fn alloc_range(&self, size: usize, align: usize) -> (PAddr, PAddr) {
@@ -61,44 +82,44 @@ impl PageAllocator {
     }
 
     pub fn alloc_mapped_frame<S: BasePageSize>(&self) -> PhysicalPage<S> {
-        let mut frame: Box<MaybeUninit<S::Page>> = Box::new_uninit();
-        unsafe { core::ptr::write_bytes(frame.as_mut_ptr(), 0, 1) };
-        let pointer = Box::into_raw(frame);
-        let paddr = pointer as usize - (&raw const super::vmm::__rpi_virt_base) as usize;
-
-        PhysicalPage {
-            paddr,
-            _marker: PhantomData,
+        if VMEM_INIT_DONE.load(Ordering::Relaxed) {
+            self.alloc_frame()
+        } else {
+            let mut frame: Box<MaybeUninit<S::Page>> = Box::new_uninit();
+            unsafe { core::ptr::write_bytes(frame.as_mut_ptr(), 0, 1) };
+            let pointer = Box::into_raw(frame);
+            let paddr = pointer as usize - (&raw const __rpi_virt_base) as usize;
+            PhysicalPage {
+                paddr,
+                _marker: PhantomData,
+            }
         }
     }
 
-    #[track_caller]
     pub fn get_mapped_frame<S: BasePageSize>(&self, frame: PhysicalPage<S>) -> *mut S::Page {
-        // let phys_heap_start = (&raw const super::vmm::__rpi_phys_binary_end_addr) as usize;
-        let phys_heap_start = (&raw const super::vmm::__rpi_phys_binary_start_addr) as usize;
-        let phys_heap_end = 0x20_0000 * 14;
-        assert!(
-            frame.paddr >= phys_heap_start && frame.paddr < phys_heap_end,
-            "invalid mapped frame: {:?}, phys_heap_start {:#x}, phys_heap_end {:#x}",
-            frame,
-            phys_heap_start,
-            phys_heap_end,
-        );
-
-        unsafe {
-            (&raw mut super::vmm::__rpi_virt_base)
-                .byte_add(frame.paddr)
-                .cast()
+        if VMEM_INIT_DONE.load(Ordering::Relaxed) {
+            unsafe { (DIRECT_MAP_BASE as *mut ()).byte_add(frame.paddr).cast() }
+        } else {
+            let phys_heap_start = (&raw const __rpi_phys_binary_start_addr) as usize;
+            let phys_heap_end = 0x20_0000 * 14;
+            assert!(
+                frame.paddr >= phys_heap_start && frame.paddr < phys_heap_end,
+                "invalid mapped frame: {:?}, phys_heap_start {:#x}, phys_heap_end {:#x}",
+                frame,
+                phys_heap_start,
+                phys_heap_end,
+            );
+            unsafe { (&raw mut __rpi_virt_base).byte_add(frame.paddr).cast() }
         }
     }
 
     pub fn dealloc_frame<S: PageClass>(&self, frame: PhysicalPage<S>) {
-        let phys_heap_start = (&raw const super::vmm::__rpi_phys_binary_end_addr) as usize;
+        let phys_heap_start = (&raw const __rpi_phys_binary_end_addr) as usize;
         let phys_heap_end = 0x20_0000 * 14;
         if frame.paddr >= phys_heap_start && frame.paddr < phys_heap_end {
             // From the kernel heap...
             // TODO: use direct mapped physmem instead (or specialization, but that will never be stable)
-            let vaddr = unsafe { (&raw mut super::vmm::__rpi_virt_base).byte_add(frame.paddr) };
+            let vaddr = unsafe { (&raw mut __rpi_virt_base).byte_add(frame.paddr) };
             const { assert!(S::SIZE == 4096 || S::SIZE == 16384 || S::SIZE == 65536) };
             if S::SIZE == 4096 {
                 let allocation = unsafe { Box::<MaybeUninit<Page4k>>::from_raw(vaddr.cast()) };
@@ -246,9 +267,50 @@ pub struct BuddyAllocator {
     size_log2: usize,
     levels: usize,
     min_size: usize,
+    freelist: Freelist,
+}
 
-    // TODO: ???? (intrusive version?)
-    freelists: Box<[VecDeque<usize>]>,
+struct Freelist {
+    freelists: Box<[Vec<usize>]>,
+}
+
+impl Freelist {
+    fn insert(&mut self, level: usize, block: usize) {
+        // TODO: How much does the ordering of the nodes matter?
+        // TODO: intrusive list?
+        let list = &mut self.freelists[level];
+        // TODO: This will fail under load; need a secondary heap
+        // or an intrusive freelist to avoid issues
+        assert!(list.len() < list.capacity());
+        debug_assert!(!list.contains(&block));
+        list.push(block);
+    }
+
+    fn pop_smallest(&mut self, max_level: usize) -> Option<(usize, usize)> {
+        for (level, freelist) in self.freelists[0..=max_level].iter_mut().enumerate().rev() {
+            if let Some(block) = freelist.pop() {
+                return Some((level, block));
+            }
+        }
+        None
+    }
+
+    fn remove(&mut self, cur_level: usize, sibling: usize) {
+        // TODO: efficiency
+        let cur_freelist = &mut self.freelists[cur_level as usize];
+        let sibling_idx = cur_freelist.iter().position(|i| *i == sibling).unwrap();
+        cur_freelist.remove(sibling_idx);
+    }
+
+    fn print_freelists(&self) {
+        for freelist in self.freelists.iter().enumerate() {
+            println!("{:?}", freelist);
+        }
+    }
+
+    fn retain(&mut self, level: usize, mut handler: impl FnMut(usize) -> bool) {
+        self.freelists[level].retain(|i| handler(*i));
+    }
 }
 
 impl BuddyAllocator {
@@ -260,7 +322,12 @@ impl BuddyAllocator {
 
         // Bitset storing (L_FREE xor R_FREE)
         let bitset = Bitset::new(1 << (levels - 1));
-        let freelists = alloc::vec![VecDeque::new(); levels as usize].into_boxed_slice();
+        let mut freelists = Vec::with_capacity(levels as usize);
+        for level in 0..levels {
+            let count = (1 << level).min(8192);
+            freelists.push(Vec::with_capacity(count));
+        }
+        let freelists = freelists.into_boxed_slice();
 
         let mut this = BuddyAllocator {
             bitset,
@@ -269,16 +336,16 @@ impl BuddyAllocator {
             size_log2: bits as usize,
             levels: levels as usize,
             min_size,
-            freelists,
+            freelist: Freelist { freelists },
         };
 
         if start == base && size == (1 << bits) {
-            this.freelists[0].push_front(0);
+            this.freelist.insert(0, 0);
         } else {
             let cutoff_start = start - base;
             let cutoff_end = end - base;
 
-            this.freelists[0].push_front(0);
+            this.freelist.insert(0, 0);
             this.mark_region_unusable(0, cutoff_start);
             this.mark_region_unusable(cutoff_end, 1 << bits);
         }
@@ -313,52 +380,81 @@ impl BuddyAllocator {
         // - in cases 3/4:
         //    - one child will be case 0/1, and the other in 3/4
 
-        for level in 0..self.levels {
+        // At each layer,
+        // - Any number of cases 0 and 1
+        // - Either
+        //    - one case 2
+        //    - up to one of each case 3 and case 4
+
+        let get_start_end = |level: usize, i: usize| -> (usize, usize) {
             let block_size = 1 << (self.size_log2 - level);
             let level_idx_start = (1 << level) - 1;
+            let block_start = (i - level_idx_start) * block_size;
+            let block_end = block_start + block_size;
+            (block_start, block_end)
+        };
+        let case_0 = |start, end| end <= range_start || start >= range_end;
+        let case_1 = |start, end| range_start <= start && end <= range_end;
 
-            let mut iter = self.freelists[level..].iter_mut();
-            let cur_list = iter.next().unwrap();
-            if let Some(next_list) = iter.next() {
-                cur_list.retain(|&i| {
-                    let block_start = (i - level_idx_start) * block_size;
-                    let block_end = block_start + block_size;
-                    if block_end <= range_start || block_start >= range_end {
+        let mut queue = tinyvec::ArrayVec::<[_; 4]>::new();
+
+        for level in 0..self.levels {
+            let prev_queue = core::mem::take(&mut queue);
+
+            if level < self.levels - 1 {
+                let mut handler = |i| {
+                    let (block_start, block_end) = get_start_end(level, i);
+                    if case_0(block_start, block_end) {
                         true // Case 0, don't remove from the free list
-                    } else if range_start <= block_start && block_end <= range_end {
+                    } else if case_1(block_start, block_end) {
                         // Case 1
-                        if i != 0 {
-                            self.bitset.toggle_bit(Self::bit_idx(i));
-                        }
+                        Self::toggle_at(&mut self.bitset, i);
                         false
                     } else {
                         // Case 2, 3, or 4
-                        if i != 0 {
-                            self.bitset.toggle_bit(Self::bit_idx(i));
-                        }
+                        Self::toggle_at(&mut self.bitset, i);
                         let left = Self::child_idx_base(i);
                         let right = left + 1;
-                        next_list.push_back(left);
-                        next_list.push_back(right);
+                        queue.push(left);
+                        queue.push(right);
                         false
                     }
-                });
+                };
+
+                self.freelist.retain(level, &mut handler);
+
+                for elem in prev_queue {
+                    if handler(elem) {
+                        self.freelist.insert(level, elem);
+                    }
+                }
             } else {
                 // Last level; treat all cases but case 0 as case 1
-                cur_list.retain(|&i| {
-                    let block_start = (i - level_idx_start) * block_size;
-                    let block_end = block_start + block_size;
-                    if block_end <= range_start || block_start >= range_end {
+                let mut handler = |i| {
+                    let (block_start, block_end) = get_start_end(level, i);
+                    if case_0(block_start, block_end) {
                         true // Case 0, don't remove from the free list
                     } else {
                         // Case 1, 2, 3, 4
-                        if i != 0 {
-                            self.bitset.toggle_bit(Self::bit_idx(i));
-                        }
+                        Self::toggle_at(&mut self.bitset, i);
                         false
                     }
-                });
+                };
+
+                self.freelist.retain(level, &mut handler);
+
+                for elem in prev_queue {
+                    if handler(elem) {
+                        self.freelist.insert(level, elem);
+                    }
+                }
             }
+        }
+    }
+
+    fn toggle_at(bitset: &mut Bitset, i: usize) {
+        if i != 0 {
+            bitset.toggle_bit(Self::bit_idx(i));
         }
     }
 
@@ -393,42 +489,30 @@ impl BuddyAllocator {
 
     fn alloc_at_level(&mut self, level: usize) -> Option<usize> {
         assert!(level < self.levels);
-        let mut free_block = None;
-        for (level, freelist) in self.freelists[0..=level].iter_mut().enumerate().rev() {
-            if let Some(block) = freelist.pop_front() {
-                free_block = Some((level, block));
-                break;
-            }
-        }
-
-        let (mut block_level, mut block_idx) = free_block?;
+        let (mut block_level, mut block_idx) = self.freelist.pop_smallest(level)?;
 
         // Split block repeatedly, if needed
         while block_level < level {
-            if block_idx != 0 {
-                self.bitset.toggle_bit(Self::bit_idx(block_idx)); // Mark as split
-            }
+            Self::toggle_at(&mut self.bitset, block_idx); // Mark as split
+
             let left_child = Self::child_idx_base(block_idx);
             let right_child = left_child + 1;
 
-            self.freelists[block_level + 1].push_front(right_child);
+            self.freelist.insert(block_level + 1, right_child);
 
             block_idx = left_child;
             block_level += 1;
         }
 
-        if block_idx != 0 {
-            self.bitset.toggle_bit(Self::bit_idx(block_idx)); // Mark as allocated
-        }
+        Self::toggle_at(&mut self.bitset, block_idx); // Mark as allocated
+
         Some(block_idx)
     }
 
     fn free_block(&mut self, mut idx: usize) {
         assert!(idx < (1 << self.levels));
 
-        if idx != 0 {
-            self.bitset.toggle_bit(Self::bit_idx(idx)); // Mark as free
-        }
+        Self::toggle_at(&mut self.bitset, idx); // Mark as free
 
         let mut cur_level = (idx + 1).ilog2();
 
@@ -440,24 +524,19 @@ impl BuddyAllocator {
                 // Can't coalesce further
                 break;
             }
-            if parent != 0 {
-                // Both children are free, so mark the parent as free
-                self.bitset.toggle_bit(Self::bit_idx(parent));
-            }
+
+            // Both children are free, so mark the parent as free
+            Self::toggle_at(&mut self.bitset, parent);
 
             // Remove the sibling from the freelist (coalesce it into the parent)
-            // TODO: efficiency
-            let cur_freelist = &mut self.freelists[cur_level as usize];
-            let sibling_idx = cur_freelist.iter().position(|i| *i == sibling).unwrap();
-            cur_freelist.remove(sibling_idx);
+            self.freelist.remove(cur_level as usize, sibling);
 
             idx = parent;
             cur_level -= 1;
         }
 
-        // TODO: How much does the ordering of the nodes matter?
         // Add the coalesced block to the free list
-        self.freelists[cur_level as usize].push_front(idx);
+        self.freelist.insert(cur_level as usize, idx);
     }
 
     pub fn alloc(&mut self, size: usize, align: usize) -> Option<usize> {
@@ -465,11 +544,13 @@ impl BuddyAllocator {
         let level = self.level_for_size(size)?;
         let idx = self.alloc_at_level(level)?;
         let ptr = self.idx_addr(idx, level);
+        // println!("alloc({size}) -> {ptr:#x}");
         Some(ptr)
     }
 
     pub fn free(&mut self, ptr: usize, size: usize, align: usize) {
         let size = size.clamp(align, usize::MAX);
+        // println!("free({ptr:#x}, {size})");
         let level = self.level_for_size(size).unwrap();
         let idx = self.addr_idx(ptr, level);
         self.free_block(idx);
@@ -498,8 +579,6 @@ impl BuddyAllocator {
             }
             println!();
         }
-        for freelist in self.freelists.iter().enumerate() {
-            println!("{:?}", freelist);
-        }
+        self.freelist.print_freelists();
     }
 }
