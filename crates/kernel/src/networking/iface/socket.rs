@@ -1,11 +1,11 @@
-use crate::networking::repr::Ipv4Packet;
 use crate::networking::iface::{ethernet, ipv4, udp, Interface};
+use crate::networking::repr::Ipv4Packet;
 use crate::networking::socket::{RawSocket, RawType, SocketSet, TaggedSocket, UdpSocket};
 use log::warn;
 
 // NOTE: tcp, tcpsocket does not work right now lol
-use alloc::vec::Vec;
 use crate::networking::{Error, Result};
+use alloc::vec::Vec;
 
 // try to send out as many socket enqueued packets as possible given Interface
 pub fn send(interface: &mut Interface, socket_set: &mut SocketSet) {
@@ -51,6 +51,12 @@ pub fn send(interface: &mut Interface, socket_set: &mut SocketSet) {
 
 fn send_udp_socket(interface: &mut Interface, socket: &mut UdpSocket) -> Result<()> {
     socket.send_dequeue(|ipv4_repr, udp_repr, payload| {
-        udp::send_udp_packet(interface, ipv4_repr.dst_addr, payload.to_vec(), udp_repr.src_port, udp_repr.dst_port)
+        udp::send_udp_packet(
+            interface,
+            ipv4_repr.dst_addr,
+            payload.to_vec(),
+            udp_repr.src_port,
+            udp_repr.dst_port,
+        )
     })
 }

@@ -20,7 +20,7 @@ impl<T> From<Vec<T>> for Ring<T> {
 
 impl<T> Ring<T> {
     // dequeues an element from the head of the buffer, applies the function f on it,
-    // and returns the result. 
+    // and returns the result.
     //
     // returns an error if the buffer is empty
     pub fn dequeue_with<'a, F, R>(&'a mut self, f: F) -> Result<R>
@@ -52,7 +52,7 @@ impl<T> Ring<T> {
     }
 
     // enqueues an element at the head of the buffer, applies the function f to it,
-    // and returns the result. 
+    // and returns the result.
     //
     // returns an error if the buffer is full.
     pub fn enqueue_with<'a, F, R>(&'a mut self, f: F) -> Result<R>
@@ -85,7 +85,7 @@ impl<T> Ring<T> {
     pub fn len(&self) -> usize {
         self.len
     }
-    
+
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }

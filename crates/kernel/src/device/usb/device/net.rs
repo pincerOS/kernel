@@ -1,3 +1,5 @@
+use super::super::usbd::descriptors::*;
+use super::super::usbd::device::*;
 /**
  *
  * usb/device/net.rs
@@ -5,18 +7,16 @@
  *   
  */
 use core::slice;
-use super::super::usbd::descriptors::*;
-use super::super::usbd::device::*;
 
 use crate::device::system_timer;
 
-use crate::networking::repr::*;
-use crate::networking::utils::arp_cache::ArpCache;
-use crate::networking::iface::Interface;
 use crate::networking::iface::cdcecm::CDCECM;
-use crate::networking::iface::{dhcp, arp, udp,ethernet};
-use crate::networking::socket::SocketSet;
 use crate::networking::iface::ethernet::recv_ethernet_frame as recv_ethernet;
+use crate::networking::iface::Interface;
+use crate::networking::iface::*;
+use crate::networking::repr::*;
+use crate::networking::socket::SocketSet;
+use crate::networking::utils::arp_cache::ArpCache;
 
 use crate::device::usb::types::*;
 use crate::device::usb::usbd::endpoint::register_interrupt_endpoint;
@@ -24,7 +24,7 @@ use crate::device::usb::usbd::endpoint::*;
 use crate::device::usb::usbd::request::*;
 use crate::shutdown;
 use alloc::boxed::Box;
-use alloc::vec::Vec;
+use alloc::vec;
 
 use super::rndis::*;
 
@@ -108,12 +108,19 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // TODO: discussion with aaron about format for user, with NetSend/Recv or with my
     // interfce/device system i have set up. as it stands, we are going with the current method
     // with NetSend/Recv, so Interface is more like just acts like an enum of objects for the stack
-    // to work on which is fine. will need to cutdown network stack into just parsing logic 
+    // to work on which is fine. will need to cutdown network stack into just parsing logic
     // so many compiler warnings TT
     // TODO: the mac address may be wrong need to copy from cmplt
-    let DEFAULT_MAC = EthernetAddress::from_u32(OID::OID_802_3_PERMANENT_ADDRESS as u32);
-    
-    
+    // let DEFAULT_MAC = EthernetAddress::from_u32(OID::OID_802_3_PERMANENT_ADDRESS as u32);
+    // let mut b = vec![0u8; 8];
+    // unsafe{
+    //     rndis_query_msg(device, OID::OID_802_3_PERMANENT_ADDRESS, b.as_mut_ptr(), 8);
+    // }
+    //
+    // println!("mac? {:?}", b);
+
+    let DEFAULT_MAC = EthernetAddress::from_bytes(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66]).unwrap();
+
     let dev = CDCECM::new(1500);
     let DEFAULT_IPV4 = Ipv4Address::new([0, 0, 0, 0]); // tell aaron about cidr conventions
     let DEFAULT_IPV4CIDR = Ipv4Cidr::new(DEFAULT_IPV4, 0).unwrap();
@@ -133,7 +140,6 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         INTERFACE = Some(Box::new(default_interface));
     }
 
-
     // TODO: discuss with aaron about typing for receive function, maybe would be better to return
     // an Option or Result<> to handle errors
     // register ethernet receieve
@@ -143,16 +149,30 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 
     RegisterNetReceiveCallback(recv);
 
-
     unsafe {
         NET_DEVICE.device = Some(device);
     }
 
+    // dhcp discover
     let mut dhcp_client = dhcp::DhcpClient::new();
     unsafe {
         dhcp_client.start(INTERFACE.as_mut().unwrap(), system_timer::get_time());
     }
-    
+
+    unsafe {
+        icmp::send_icmp_packet(
+            INTERFACE.as_mut().unwrap(),
+            Ipv4Address::new([192, 168, 1, 1]),
+            IcmpMessage::EchoRequest { id: 420, seq: 1 },
+        );
+    }
+
+    // begin receieve series
+    let buf = vec![0u8; 1500];
+    unsafe {
+        rndis_receive_packet(device, buf.into_boxed_slice(), 1500);
+    }
+
     // let s = "hello";
     // let bytes: Vec<u8> = s.as_bytes().to_vec();
     //

@@ -1,7 +1,7 @@
-use crate::networking::repr::*;
 use crate::networking::iface::{ethernet, Interface};
+use crate::networking::repr::*;
 
-use crate::networking::{Error,Result};
+use crate::networking::{Error, Result};
 
 use log::debug;
 
@@ -20,12 +20,13 @@ pub fn recv_arp_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> R
         return Err(Error::Ignored);
     }
 
-    interface.arp_cache
+    interface
+        .arp_cache
         .set_eth_addr_for_ip(arp_repr.source_proto_addr, arp_repr.source_hw_addr);
 
     match arp_repr.op {
         ArpOperation::Request => {
-            let arp_reply = ArpPacket{
+            let arp_reply = ArpPacket {
                 op: ArpOperation::Reply,
                 source_hw_addr: interface.ethernet_addr,
                 source_proto_addr: *interface.ipv4_addr,

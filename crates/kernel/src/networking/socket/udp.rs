@@ -1,4 +1,4 @@
-use crate::networking::repr::{Ipv4Protocol, Ipv4Packet, UdpPacket};
+use crate::networking::repr::{Ipv4Packet, Ipv4Protocol, UdpPacket};
 use crate::networking::socket::{SocketAddr, SocketAddrLease};
 use crate::networking::utils::{ring::Ring, slice::Slice};
 use crate::networking::{Error, Result};
@@ -35,13 +35,13 @@ impl UdpSocket {
             .enqueue_maybe(|&mut (ref mut buffer, ref mut addr_)| {
                 buffer.try_resize(buffer_len, 0)?;
 
-                for i in 0 .. buffer_len {
+                for i in 0..buffer_len {
                     buffer[i] = 0;
                 }
 
                 *addr_ = addr;
 
-                return Ok(&mut buffer[.. buffer_len]);
+                return Ok(&mut buffer[..buffer_len]);
             })
     }
 
@@ -62,9 +62,20 @@ impl UdpSocket {
         let binding = self.binding.clone();
         self.send_buffer
             .dequeue_maybe(|&mut (ref mut buffer, addr)| {
-                let udp_packet = UdpPacket::new(binding.port, addr.port, buffer.to_vec(), binding.addr, addr.addr);
+                let udp_packet = UdpPacket::new(
+                    binding.port,
+                    addr.port,
+                    buffer.to_vec(),
+                    binding.addr,
+                    addr.addr,
+                );
 
-                let ipv4_packet = Ipv4Packet::new(binding.addr, addr.addr, Ipv4Protocol::UDP, udp_packet.serialize());
+                let ipv4_packet = Ipv4Packet::new(
+                    binding.addr,
+                    addr.addr,
+                    Ipv4Protocol::UDP,
+                    udp_packet.serialize(),
+                );
 
                 f(&ipv4_packet, &udp_packet, &buffer[..])
             })

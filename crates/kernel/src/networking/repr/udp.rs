@@ -1,11 +1,11 @@
-use byteorder::{NetworkEndian, ByteOrder};
+use byteorder::{ByteOrder, NetworkEndian};
 
-use alloc::vec::Vec;
 use alloc::vec;
+use alloc::vec::Vec;
 
-use crate::networking::{Result, Error};
-use crate::networking::utils::checksum::internet_checksum;
 use super::Ipv4Address;
+use crate::networking::utils::checksum::internet_checksum;
+use crate::networking::{Error, Result};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Packet {
@@ -22,9 +22,9 @@ impl Packet {
     pub const HEADER_LEN: usize = 8;
 
     pub fn new(
-        src_port: u16, 
-        dst_port: u16, 
-        payload: Vec<u8>, 
+        src_port: u16,
+        dst_port: u16,
+        payload: Vec<u8>,
         src_ip: Ipv4Address,
         dst_ip: Ipv4Address,
     ) -> Self {
@@ -59,13 +59,12 @@ impl Packet {
         Ok(Packet {
             src_port,
             dst_port,
-            src_ip: Ipv4Address::new([0,0,0,0]),
-            dst_ip: Ipv4Address::new([0,0,0,0]),
+            src_ip: Ipv4Address::new([0, 0, 0, 0]),
+            dst_ip: Ipv4Address::new([0, 0, 0, 0]),
             length,
             checksum,
             payload,
         })
-
     }
 
     // Serialize a UDP packet to a byte vector
@@ -80,11 +79,7 @@ impl Packet {
         buf[8..].copy_from_slice(&self.payload);
 
         // Now compute checksum and overwrite it
-        let checksum = Self::compute_checksum_raw(
-            self.src_ip,
-            self.dst_ip,
-            &buf,
-        );
+        let checksum = Self::compute_checksum_raw(self.src_ip, self.dst_ip, &buf);
 
         println!("udp: {:?}", buf);
 

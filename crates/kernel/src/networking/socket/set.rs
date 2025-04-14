@@ -1,5 +1,5 @@
-use core::slice::IterMut as SliceIterMut;
 use alloc::vec::Vec;
+use core::slice::IterMut as SliceIterMut;
 
 use crate::networking::socket::TaggedSocket;
 
@@ -13,7 +13,7 @@ impl SocketSet {
     // Creates a socket set supporting a maximum number of sockets.
     pub fn new(socket_capacity: usize) -> SocketSet {
         SocketSet {
-            sockets: (0 .. socket_capacity).map(|_| None).collect(),
+            sockets: (0..socket_capacity).map(|_| None).collect(),
             count: 0,
         }
     }
@@ -21,7 +21,7 @@ impl SocketSet {
     // add to set and return handle
     pub fn add_socket(&mut self, socket: TaggedSocket) -> Option<usize> {
         let handle = {
-            (0 .. self.sockets.len())
+            (0..self.sockets.len())
                 .filter(|i| self.sockets[*i].is_none())
                 .next()
         };

@@ -1,5 +1,5 @@
 /* mainly for representation of different protocols
-* 
+*
 * allows for modules to have more locally defined fields, and redefines it to allow other protocols
 * to be able to access them
 *
@@ -17,25 +17,23 @@
 //     pub type Rest = ::std::ops::RangeFrom<usize>;
 // }
 
-mod ethernet;
 mod arp;
-mod ipv4;
-mod icmp;
-mod udp;
-mod dhcp;
 pub mod dev;
+mod dhcp;
+mod ethernet;
+mod icmp;
+mod ipv4;
+mod tcp;
+mod udp;
 
 pub use self::ethernet::{
-    EtherType as EthernetType, Address as EthernetAddress, Frame as EthernetFrame,
+    Address as EthernetAddress, EtherType as EthernetType, Frame as EthernetFrame,
 };
 
-pub use self::arp::{
-    Hardware as ArpHardware, Operation as ArpOperation, Packet as ArpPacket
-};
+pub use self::arp::{Hardware as ArpHardware, Operation as ArpOperation, Packet as ArpPacket};
 
 pub use self::ipv4::{
-    Address as Ipv4Address, AddressCidr as Ipv4Cidr, Packet as Ipv4Packet,
-    Protocol as Ipv4Protocol
+    Address as Ipv4Address, AddressCidr as Ipv4Cidr, Packet as Ipv4Packet, Protocol as Ipv4Protocol,
 };
 
 pub use self::icmp::{
@@ -45,4 +43,6 @@ pub use self::icmp::{
 
 pub use self::udp::Packet as UdpPacket;
 
-pub use self::dhcp::{Packet as DhcpPacket, DhcpOption, MessageType as DhcpMessageType};
+pub use self::dhcp::{DhcpOption, MessageType as DhcpMessageType, Packet as DhcpPacket};
+
+pub use self::tcp::{Flags as TcpFlags, Packet as TcpPacket};

@@ -1,11 +1,11 @@
-use crate::networking::repr::*;
 use crate::networking::iface::{arp, ethernet, icmp, udp, Interface};
+use crate::networking::repr::*;
 use crate::networking::{Error, Result};
 
 use alloc::vec::Vec;
 
 pub fn send_ipv4_packet(
-    interface: &mut Interface, 
+    interface: &mut Interface,
     payload: Vec<u8>,
     protocol: Ipv4Protocol,
     dst_addr: Ipv4Address,
@@ -13,16 +13,16 @@ pub fn send_ipv4_packet(
     let next_hop = ipv4_addr_route(interface, dst_addr);
     let dst_mac = arp::eth_addr_for_ip(interface, next_hop)?;
 
-    // let ipv4_packet = Ipv4Packet::new(*interface.ipv4_addr, Ipv4Address::new([255,255,255,255]), protocol, payload);
-    // ethernet::send_ethernet_frame(interface, ipv4_packet.serialize(), EthernetAddress::from_bytes(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff]).unwrap(), EthernetType::IPV4)
     let ipv4_packet = Ipv4Packet::new(*interface.ipv4_addr, dst_addr, protocol, payload);
-    ethernet::send_ethernet_frame(interface, ipv4_packet.serialize(), dst_mac, EthernetType::IPV4)
+    ethernet::send_ethernet_frame(
+        interface,
+        ipv4_packet.serialize(),
+        dst_mac,
+        EthernetType::IPV4,
+    )
 }
 
-pub fn recv_ip_packet(
-    interface: &mut Interface,
-    eth_frame: EthernetFrame,
-) -> Result<()> {
+pub fn recv_ip_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Result<()> {
     let ipv4_packet = Ipv4Packet::deserialize(eth_frame.payload.as_slice())?;
     if !ipv4_packet.is_valid_checksum() {
         return Err(Error::Checksum);
@@ -44,11 +44,8 @@ pub fn recv_ip_packet(
         // Ipv4Protocol::TCP => tcp::recv_tcp_packet(interface, ipv4_packet.payload),
         Ipv4Protocol::UDP => udp::recv_udp_packet(interface, ipv4_packet),
         Ipv4Protocol::ICMP => icmp::recv_icmp_packet(interface, ipv4_packet),
-        _ => {
-            Err(Error::Ignored)
-        }
+        _ => Err(Error::Ignored),
     }
-
 }
 
 // get next hop for a packet destined to a specified address.

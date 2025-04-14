@@ -1,5 +1,5 @@
-use core::ops::{Deref, DerefMut};
 use alloc::vec::Vec;
+use core::ops::{Deref, DerefMut};
 
 use crate::networking::{Error, Result};
 

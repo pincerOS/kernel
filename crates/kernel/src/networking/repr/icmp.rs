@@ -1,10 +1,10 @@
-use byteorder::{NetworkEndian, ByteOrder};
+use byteorder::{ByteOrder, NetworkEndian};
 
 use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::networking::utils::checksum::internet_checksum;
-use crate::networking::{Result, Error};
+use crate::networking::{Error, Result};
 
 /*
 +-----------------------------------+
@@ -36,14 +36,8 @@ pub enum TimeExceeded {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Message {
-    EchoReply {
-        id: u16,
-        seq: u16,
-    },
-    EchoRequest {
-        id: u16,
-        seq: u16,
-    },
+    EchoReply { id: u16, seq: u16 },
+    EchoRequest { id: u16, seq: u16 },
     DestinationUnreachable(DestinationUnreachable),
     TimeExceeded(TimeExceeded),
     ___Exhaustive,
@@ -96,8 +90,8 @@ impl Packet {
         let seq = NetworkEndian::read_u16(&buf[6..8]);
 
         let message = match icmp_type {
-            0 => Message::EchoReply { id, seq },     // Echo Reply
-            8 => Message::EchoRequest { id, seq },   // Echo Request
+            0 => Message::EchoReply { id, seq },   // Echo Reply
+            8 => Message::EchoRequest { id, seq }, // Echo Request
             3 => {
                 let unreachable_type = match code {
                     3 => DestinationUnreachable::PortUnreachable,
@@ -115,7 +109,12 @@ impl Packet {
             _ => Message::___Exhaustive,
         };
 
-        Ok(Packet { icmp_type, code, checksum, message })
+        Ok(Packet {
+            icmp_type,
+            code,
+            checksum,
+            message,
+        })
     }
 
     pub fn serialize(&self) -> Vec<u8> {
@@ -129,10 +128,10 @@ impl Packet {
 
         match self.message {
             Message::EchoReply { id, seq } | Message::EchoRequest { id, seq } => {
-                buf.push((id >> 8) as u8);  // High byte of identifier
-                buf.push(id as u8);         // Low byte of identifier
+                buf.push((id >> 8) as u8); // High byte of identifier
+                buf.push(id as u8); // Low byte of identifier
                 buf.push((seq >> 8) as u8); // High byte of sequence
-                buf.push(seq as u8);        // Low byte of sequence
+                buf.push(seq as u8); // Low byte of sequence
             }
             Message::DestinationUnreachable(_) | Message::TimeExceeded(_) => {
                 buf.push(0);
@@ -145,7 +144,7 @@ impl Packet {
 
         let checksum = internet_checksum(&buf);
         buf[2] = (checksum >> 8) as u8; // High byte of checksum
-        buf[3] = checksum as u8;        // Low byte of checksum
+        buf[3] = checksum as u8; // Low byte of checksum
 
         buf
     }

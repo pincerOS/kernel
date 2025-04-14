@@ -1,8 +1,8 @@
-use byteorder::{NetworkEndian, ByteOrder};
+use byteorder::{ByteOrder, NetworkEndian};
 
 use core::cmp::Ordering;
-use core::ops::Deref;
 use core::fmt::{Display, Formatter, Result as FmtResult};
+use core::ops::Deref;
 use core::result::Result as StdResult;
 use core::str::FromStr;
 
@@ -34,7 +34,7 @@ impl Address {
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
-    
+
     pub fn from_u32(addr: u32) -> Address {
         let mut bytes = [0; 4];
         NetworkEndian::write_u32(&mut bytes[..], addr);
@@ -80,7 +80,8 @@ impl FromStr for Address {
     type Err = ();
 
     fn from_str(addr: &str) -> StdResult<Address, Self::Err> {
-        let (bytes, unknown): (Vec<_>, Vec<_>) = addr.split(".")
+        let (bytes, unknown): (Vec<_>, Vec<_>) = addr
+            .split(".")
             .map(|token| token.parse::<u8>())
             .partition(|byte| !byte.is_err());
 
@@ -167,16 +168,16 @@ pub enum Protocol {
 }
 
 pub struct Packet {
-    pub version: u8,         // 4 bits (always 4 for IPv4)
-    pub ihl: u8,             // 4 bits (in 32-bit words, min value = 5)
-    pub dscp: u8,            // 6 bits (type of service), we use full 8 bits here
-    pub total_len: u16,      // includes header + payload
-    pub id: u16,             // identification for frag
-    pub flags: u8,           // 3 bits (upper bits of this field)
-    pub frag_offset: u16,    // lower 13 bits used
-    pub ttl: u8,             // time to live
+    pub version: u8,      // 4 bits (always 4 for IPv4)
+    pub ihl: u8,          // 4 bits (in 32-bit words, min value = 5)
+    pub dscp: u8,         // 6 bits (type of service), we use full 8 bits here
+    pub total_len: u16,   // includes header + payload
+    pub id: u16,          // identification for frag
+    pub flags: u8,        // 3 bits (upper bits of this field)
+    pub frag_offset: u16, // lower 13 bits used
+    pub ttl: u8,          // time to live
     pub protocol: Protocol,
-    pub checksum: u16,       // computed on serialization
+    pub checksum: u16, // computed on serialization
     pub src_addr: Address,
     pub dst_addr: Address,
     pub payload: Vec<u8>,
@@ -189,7 +190,7 @@ impl Packet {
     pub fn new(src_addr: Address, dst_addr: Address, protocol: Protocol, payload: Vec<u8>) -> Self {
         Self {
             version: 4,
-            ihl: Self::MIN_HEADER_LEN as u8, 
+            ihl: Self::MIN_HEADER_LEN as u8,
             dscp: 0,
             total_len: (Self::MIN_HEADER_LEN + payload.len()) as u16,
             id: 0,
@@ -321,6 +322,4 @@ impl Packet {
         let computed = internet_checksum(&buf);
         computed == self.checksum
     }
-
 }
-
