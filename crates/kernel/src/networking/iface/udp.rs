@@ -14,6 +14,7 @@ pub fn send_udp_packet(
     src_port: u16,
     dst_port: u16,
 ) -> Result<()> {
+    println!("sending udp {} {} {} {}", src_port, dst_port, *interface.ipv4_addr, dst_addr);
     let udp_packet = UdpPacket::new(src_port, dst_port, payload, *interface.ipv4_addr, dst_addr);
     ipv4::send_ipv4_packet(interface, udp_packet.serialize(), Ipv4Protocol::UDP, dst_addr)
 }

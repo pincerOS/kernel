@@ -6,6 +6,7 @@ pub mod icmp;
 pub mod ipv4;
 pub mod cdcecm;
 pub mod socket;
+pub mod dhcp;
 // pub mod tcp;
 pub mod udp;
 

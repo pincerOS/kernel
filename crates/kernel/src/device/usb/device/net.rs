@@ -4,6 +4,7 @@
  *  By Aaron Lo
  *   
  */
+use core::slice;
 use super::super::usbd::descriptors::*;
 use super::super::usbd::device::*;
 
@@ -13,7 +14,7 @@ use crate::networking::repr::*;
 use crate::networking::utils::arp_cache::ArpCache;
 use crate::networking::iface::Interface;
 use crate::networking::iface::cdcecm::CDCECM;
-use crate::networking::iface::arp;
+use crate::networking::iface::{dhcp, arp, udp,ethernet};
 use crate::networking::socket::SocketSet;
 use crate::networking::iface::ethernet::recv_ethernet_frame as recv_ethernet;
 
@@ -23,13 +24,13 @@ use crate::device::usb::usbd::endpoint::*;
 use crate::device::usb::usbd::request::*;
 use crate::shutdown;
 use alloc::boxed::Box;
+use alloc::vec::Vec;
 
 use super::rndis::*;
 
 pub static mut NET_DEVICE: NetDevice = NetDevice {
     receive_callback: None,
     device: None,
-    default_interface: None,
 };
 
 pub fn NetLoad(bus: &mut UsbBus) {
@@ -112,12 +113,11 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // TODO: the mac address may be wrong need to copy from cmplt
     let DEFAULT_MAC = EthernetAddress::from_u32(OID::OID_802_3_PERMANENT_ADDRESS as u32);
     
-    // try_dhcp();
     
     let dev = CDCECM::new(1500);
-    let DEFAULT_IPV4 = Ipv4Address::new([192, 168, 1, 1]); // tell aaron about cidr conventions
-    let DEFAULT_IPV4CIDR = Ipv4Cidr::new(DEFAULT_IPV4, 24).unwrap();
-    let DEFAULT_GATEWAY = Ipv4Address::new([192, 168, 1, 1]); // change ts bruh
+    let DEFAULT_IPV4 = Ipv4Address::new([0, 0, 0, 0]); // tell aaron about cidr conventions
+    let DEFAULT_IPV4CIDR = Ipv4Cidr::new(DEFAULT_IPV4, 0).unwrap();
+    let DEFAULT_GATEWAY = Ipv4Address::new([0, 0, 0, 0]); // change ts bruh
 
     let default_interface = Interface {
         dev: Box::new(dev),
@@ -130,10 +130,10 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     };
 
     unsafe {
-        NET_DEVICE.default_interface = Some(Box::new(default_interface));
+        INTERFACE = Some(Box::new(default_interface));
     }
 
-    
+
     // TODO: discuss with aaron about typing for receive function, maybe would be better to return
     // an Option or Result<> to handle errors
     // register ethernet receieve
@@ -141,24 +141,49 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 
     println!("[+] sending test packet");
 
+    RegisterNetReceiveCallback(recv);
+
 
     unsafe {
         NET_DEVICE.device = Some(device);
     }
 
-    let arp_packet = ArpPacket {
-        op: ArpOperation::Request,
-        source_hw_addr: DEFAULT_MAC,
-        source_proto_addr: DEFAULT_IPV4,
-        target_hw_addr: EthernetAddress::BROADCAST,
-        target_proto_addr: Ipv4Address::new([192, 168, 1, 2]),
-    };
-
-    unsafe { // :skull:
-        arp::send_arp_packet(NET_DEVICE.default_interface.as_mut().unwrap(), &arp_packet, EthernetAddress::BROADCAST);
+    let mut dhcp_client = dhcp::DhcpClient::new();
+    unsafe {
+        dhcp_client.start(INTERFACE.as_mut().unwrap(), system_timer::get_time());
     }
+    
+    // let s = "hello";
+    // let bytes: Vec<u8> = s.as_bytes().to_vec();
+    //
+    // unsafe {
+    //     udp::send_udp_packet(INTERFACE.as_mut().unwrap(), Ipv4Address::new([255, 255, 255, 255]), bytes, 67, 68);
+    // }
+
+    // let arp_packet = ArpPacket {
+    //     op: ArpOperation::Request,
+    //     source_hw_addr: DEFAULT_MAC,
+    //     source_proto_addr: DEFAULT_IPV4,
+    //     target_hw_addr: EthernetAddress::BROADCAST,
+    //     target_proto_addr: Ipv4Address::new([192, 168, 1, 2]),
+    // };
+    //
+    // unsafe { // :skull:
+    //     arp::send_arp_packet(INTERFACE.as_mut().unwrap(), &arp_packet, EthernetAddress::BROADCAST);
+    // }
 
     return ResultCode::OK;
+}
+
+pub fn recv(buf: *mut u8, buf_len: u32) {
+    let slice: &[u8] = unsafe {
+        // Ensure ptr is not null and valid for `len` bytes
+        slice::from_raw_parts(buf, buf_len as usize)
+    };
+
+    unsafe {
+        ethernet::recv_ethernet_frame(INTERFACE.as_mut().unwrap(), slice, buf_len);
+    }
 }
 
 pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
@@ -209,11 +234,13 @@ pub unsafe fn NetSendPacket(buffer: *mut u8, buffer_length: u32) {
     }
 }
 
+static mut INTERFACE: Option<Box<Interface>> = None;
+
 pub struct NetDevice {
     pub receive_callback: Option<fn(*mut u8, u32)>,
     // pub receive_callback: Option<fn(&mut Interface, &[u8], u32)>,
     pub device: Option<*mut UsbDevice>,
-    pub default_interface: Option<Box<Interface>>,
+    // pub default_interface: Option<Box<Interface>>,
 }
 
 #[repr(u32)]
