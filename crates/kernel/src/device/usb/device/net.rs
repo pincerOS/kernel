@@ -57,7 +57,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
             30,
         );
 
-        rndis_set_msg(device, OID::OID_GEN_CURRENT_PACKET_FILTER, 0xB);
+        rndis_set_msg(device, OID::OID_GEN_CURRENT_PACKET_FILTER, 0xF);
 
         rndis_query_msg(
             device,
@@ -112,14 +112,25 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // so many compiler warnings TT
     // TODO: the mac address may be wrong need to copy from cmplt
     // let DEFAULT_MAC = EthernetAddress::from_u32(OID::OID_802_3_PERMANENT_ADDRESS as u32);
-    // let mut b = vec![0u8; 8];
-    // unsafe{
-    //     rndis_query_msg(device, OID::OID_802_3_PERMANENT_ADDRESS, b.as_mut_ptr(), 8);
-    // }
-    //
-    // println!("mac? {:?}", b);
+    let mut mac_addr: &mut [u8; 6];
+    unsafe{
+        let mut b = vec![0u8; 30];
+        let query = rndis_query_msg(device, OID::OID_802_3_PERMANENT_ADDRESS, b.as_mut_ptr(), 30);
+        
+        if query.0 != ResultCode::OK {
+            panic!("| Net: Error getting MAC address {:#?}", query.0);
+        }
+        
+        let b_offset = query.1;
+        let b_len = query.2;
+        if b_len != 6 {
+            panic!("| Net: Error getting MAC address {}", b_len);
+        }
+        mac_addr = &mut *(b.as_mut_ptr().offset(b_offset as isize) as *mut [u8; 6]);
+    }
 
-    let DEFAULT_MAC = EthernetAddress::from_bytes(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66]).unwrap();
+    println!("| Net: MAC Address: {:x?}", mac_addr);
+    let DEFAULT_MAC = EthernetAddress::from_bytes(mac_addr).unwrap();
 
     let dev = CDCECM::new(1500);
     let DEFAULT_IPV4 = Ipv4Address::new([0, 0, 0, 0]); // tell aaron about cidr conventions
