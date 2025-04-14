@@ -1,5 +1,8 @@
 use byteorder::{NetworkEndian, ByteOrder};
 
+use alloc::vec;
+use alloc::vec::Vec;
+
 use crate::networking::utils::checksum::internet_checksum;
 use crate::networking::{Result, Error};
 
@@ -47,192 +50,79 @@ pub enum Message {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Repr {
+pub struct Packet {
+    pub icmp_type: u8,
+    pub code: u8,
+    pub checksum: u16,
     pub message: Message,
-    pub payload_len: usize,
 }
 
-impl Repr {
-    pub fn buffer_len(&self) -> usize {
-        8 + self.payload_len
-    }
-
-    pub fn deserialize<T>(packet: &Packet<T>) -> Result<Repr>
-    where
-        T: AsRef<[u8]>,
-    {
-        let id  = NetworkEndian::read_u16(&packet.header()[0..2]);
-        let seq = NetworkEndian::read_u16(&packet.header()[2..4]);
-
-        let payload_len = packet.payload().len();
-
-        match (packet._type(), packet.code()) {
-            (0, 0) => Ok(Repr {
-                message: Message::EchoReply { id, seq },
-                payload_len,
-            }),
-            (8, 0) => Ok(Repr {
-                message: Message::EchoRequest { id, seq },
-                payload_len,
-            }),
-            (3, 3) => Ok(Repr {
-                message: Message::DestinationUnreachable(DestinationUnreachable::PortUnreachable),
-                payload_len,
-            }),
-            (11, 0) => Ok(Repr {
-                message: Message::TimeExceeded(TimeExceeded::TTLExpired),
-                payload_len,
-            }),
-            _ => Err(Error::Malformed),
-        }
-    }
-
-    // Serializes the ICMP header into a packet.
-    pub fn serialize<T>(&self, packet: &mut Packet<T>) -> Result<()>
-    where
-        T: AsRef<[u8]> + AsMut<[u8]>,
-    {
-        fn echo<T>(packet: &mut Packet<T>, type_of: u8, id: u16, seq: u16)
-        where
-            T: AsRef<[u8]> + AsMut<[u8]>,
-        {
-            packet.set_type(type_of);
-            packet.set_code(0);
-
-            NetworkEndian::write_u16(&mut packet.header_mut()[0..2], id);
-            NetworkEndian::write_u16(&mut packet.header_mut()[2..4], seq);
-
+impl Packet {
+    pub fn deserialize(buf: &[u8]) -> Result<Self> {
+        if buf.len() < 8 {
+            return Err(Error::Malformed);
         }
 
-        fn error<T>(packet: &mut Packet<T>, type_of: u8, code: u8)
-        where
-            T: AsRef<[u8]> + AsMut<[u8]>,
-        {
-            packet.set_type(type_of);
-            packet.set_code(code);
-            let zeros = [0; 4];
-            packet.header_mut().copy_from_slice(&zeros[..]);
-        }
+        let icmp_type = buf[0];
+        let code = buf[1];
+        let checksum = NetworkEndian::read_u16(&buf[2..4]);
 
-        match self.message {
-            Message::EchoReply { id, seq } => echo(packet, 0, id, seq),
-            Message::EchoRequest { id, seq } => echo(packet, 8, id, seq),
-            Message::DestinationUnreachable(message) => {
-                let code = match message {
-                    DestinationUnreachable::PortUnreachable => 3,
-                    _ => unreachable!(),
+        // Extract identifier and sequence number for EchoRequest/EchoReply
+        let id = NetworkEndian::read_u16(&buf[4..6]);
+        let seq = NetworkEndian::read_u16(&buf[6..8]);
+
+        let message = match icmp_type {
+            0 => Message::EchoReply { id, seq },     // Echo Reply
+            8 => Message::EchoRequest { id, seq },   // Echo Request
+            3 => {
+                let unreachable_type = match code {
+                    3 => DestinationUnreachable::PortUnreachable,
+                    _ => DestinationUnreachable::___Exhaustive,
                 };
-                error(packet, 3, code);
+                Message::DestinationUnreachable(unreachable_type)
             }
-            Message::TimeExceeded(message) => {
-                let code = match message {
-                    TimeExceeded::TTLExpired => 0,
-                    _ => unreachable!(),
+            11 => {
+                let time_exceeded_type = match code {
+                    0 => TimeExceeded::TTLExpired,
+                    _ => TimeExceeded::___Exhaustive,
                 };
-                error(packet, 11, code);
+                Message::TimeExceeded(time_exceeded_type)
             }
-            _ => unreachable!(),
+            _ => Message::___Exhaustive,
         };
 
-        Ok(())
+        Ok(Packet { icmp_type, code, checksum, message })
     }
-}
 
-// https://en.wikipedia.org/wiki/Internet_Control_Message_Protocol
-mod fields {
-    use core::ops::{
-        Range,
-        RangeFrom,
-    };
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(8);
 
-    pub const TYPE: usize = 0;
+        buf.push(self.icmp_type);
+        buf.push(self.code);
 
-    pub const CODE: usize = 1;
+        buf.push(0);
+        buf.push(0);
 
-    pub const CHECKSUM: Range<usize> = 2 .. 4;
-
-    pub const HEADER: Range<usize> = 4 .. 8;
-
-    pub const PAYLOAD: RangeFrom<usize> = 8 ..;
-}
-
-#[derive(Debug)]
-pub struct Packet<T: AsRef<[u8]>> {
-    buffer: T,
-}
-
-impl<T: AsRef<[u8]>> Packet<T> {
-    pub const HEADER_LEN: usize = 8;
-    pub const MAX_PACKET_LEN: usize = 65535;
-
-    // WARN: need to enforce check_encoding() before operating on the packet if source is untrusted
-    pub fn from_bytes(buffer: T) -> Result<Packet<T>> {
-        if buffer.as_ref().len() < Self::HEADER_LEN || buffer.as_ref().len() > Self::MAX_PACKET_LEN
-        {
-            Err(Error::Exhausted)
-        } else {
-            Ok(Packet{ buffer })
+        match self.message {
+            Message::EchoReply { id, seq } | Message::EchoRequest { id, seq } => {
+                buf.push((id >> 8) as u8);  // High byte of identifier
+                buf.push(id as u8);         // Low byte of identifier
+                buf.push((seq >> 8) as u8); // High byte of sequence
+                buf.push(seq as u8);        // Low byte of sequence
+            }
+            Message::DestinationUnreachable(_) | Message::TimeExceeded(_) => {
+                buf.push(0);
+                buf.push(0);
+                buf.push(0);
+                buf.push(0);
+            }
+            _ => {}
         }
-    }
 
-    pub fn buffer_len(payload_len: usize) -> usize {
-        Self::HEADER_LEN + payload_len
-    }
+        let checksum = internet_checksum(&buf);
+        buf[2] = (checksum >> 8) as u8; // High byte of checksum
+        buf[3] = checksum as u8;        // Low byte of checksum
 
-    pub fn check_encoding(&self) -> Result<()> {
-        if internet_checksum(self.buffer.as_ref()) != 0 {
-            Err(Error::Checksum)
-        } else {
-            Ok(())
-        }
+        buf
     }
-
-    pub fn _type(&self) -> u8 {
-        self.buffer.as_ref()[fields::TYPE]
-    }
-
-    pub fn code(&self) -> u8 {
-        self.buffer.as_ref()[fields::CODE]
-    }
-
-    pub fn checksum(&self) -> u16 {
-        NetworkEndian::read_u16(&self.buffer.as_ref()[fields::CHECKSUM])
-    }
-
-    pub fn header(&self) -> &[u8] {
-        &self.buffer.as_ref()[fields::HEADER]
-    }
-
-    pub fn payload(&self) -> &[u8] {
-        &self.buffer.as_ref()[fields::PAYLOAD]
-    }
-}
-
-impl<T: AsRef<[u8]> + AsMut<[u8]>> Packet<T> {
-    pub fn set_type(&mut self, type_of: u8) {
-        self.buffer.as_mut()[fields::TYPE] = type_of
-    }
-
-    pub fn set_code(&mut self, code: u8) {
-        self.buffer.as_mut()[fields::CODE] = code;
-    }
-
-    pub fn set_checksum(&mut self, checksum: u16) {
-        NetworkEndian::write_u16(&mut self.buffer.as_mut()[fields::CHECKSUM], checksum)
-    }
-
-    pub fn header_mut(&mut self) -> &mut [u8] {
-        return &mut self.buffer.as_mut()[fields::HEADER];
-    }
-
-    pub fn payload_mut(&mut self) -> &mut [u8] {
-        return &mut self.buffer.as_mut()[fields::PAYLOAD];
-    }
-
-    pub fn gen_and_set_checksum(&mut self) {
-        self.set_checksum(0);
-        let checksum = internet_checksum(self.buffer.as_ref());
-        self.set_checksum(checksum);
-    }
-
 }
