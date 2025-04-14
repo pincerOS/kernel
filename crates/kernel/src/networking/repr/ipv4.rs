@@ -120,6 +120,7 @@ impl AddressCidr {
         (address.as_u32() & mask) == (self.address.as_u32() & mask)
     }
     pub fn is_broadcast(&self, address: Address) -> bool {
+        println!("self broad {}", self.broadcast());
         address == self.broadcast()
     }
     pub fn broadcast(&self) -> Address {
@@ -216,7 +217,7 @@ impl Packet {
             return Err(Error::Unsupported);
         }
 
-        let header_len = (ihl as usize) * 4;
+        let header_len = ihl as usize;
         if buf.len() < header_len {
             return Err(Error::Malformed);
         }
@@ -267,12 +268,13 @@ impl Packet {
     }
 
     pub fn serialize(&self) -> Vec<u8> {
-        let header_len = (self.ihl as usize) * 4;
+        let header_len = self.ihl as usize;
         let total_len = header_len + self.payload.len();
 
         let mut buf = vec![0u8; total_len];
 
-        buf[0] = (self.version << 4) | (self.ihl & 0x0F);
+        // buf[0] = (self.version << 4) | (self.ihl & 0x0F);
+        buf[0] = (self.version << 4) | ((self.ihl / 4) & 0x0F);
         buf[1] = self.dscp;
         NetworkEndian::write_u16(&mut buf[2..4], total_len as u16);
         NetworkEndian::write_u16(&mut buf[4..6], self.id);
@@ -289,6 +291,9 @@ impl Packet {
         NetworkEndian::write_u16(&mut buf[10..12], checksum);
 
         buf[header_len..].copy_from_slice(&self.payload);
+
+        println!("ip: {:?}", buf);
+
         buf
     }
 

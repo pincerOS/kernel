@@ -44,6 +44,7 @@ pub enum Error {
     Malformed,
     // bad checksum
     Checksum,
+    Timeout,
 }
 
 pub type Result<T> = CoreResult<T, Error>;

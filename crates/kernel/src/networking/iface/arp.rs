@@ -46,6 +46,10 @@ pub fn eth_addr_for_ip(
     interface: &mut Interface,
     ipv4_addr: Ipv4Address,
 ) -> Result<EthernetAddress> {
+    if interface.ipv4_addr.is_broadcast(ipv4_addr) {
+        return Ok(EthernetAddress::BROADCAST);
+    }
+
     match interface.arp_cache.eth_addr_for_ip(ipv4_addr) {
         Some(eth_addr) => Ok(eth_addr),
         None => {

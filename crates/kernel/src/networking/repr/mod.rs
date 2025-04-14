@@ -22,7 +22,7 @@ mod arp;
 mod ipv4;
 mod icmp;
 mod udp;
-// mod dhcp;
+mod dhcp;
 pub mod dev;
 
 pub use self::ethernet::{
@@ -45,4 +45,4 @@ pub use self::icmp::{
 
 pub use self::udp::Packet as UdpPacket;
 
-// pub use self::dhcp::{Packet as DHCPPacket, OpCode as DHCPOp};
+pub use self::dhcp::{Packet as DhcpPacket, DhcpOption, MessageType as DhcpMessageType};
