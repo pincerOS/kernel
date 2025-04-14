@@ -2,8 +2,9 @@ use byteorder::{NetworkEndian, ByteOrder};
 
 use alloc::vec::Vec;
 
-use super::Ipv4Repr;
 use crate::networking::{Result, Error};
+use crate::networking::utils::checksum::internet_checksum;
+use super::Ipv4Address;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Packet {
@@ -15,6 +16,42 @@ pub struct Packet {
 }
 
 impl Packet {
+    pub const HEADER_LEN: usize = 8;
+
+    pub fn new(
+        src_port: u16, 
+        dst_port: u16, 
+        payload: Vec<u8>, 
+        src_ip: Ipv4Address,
+        dst_ip: Ipv4Address,
+    ) -> Self {
+        let length = 8 + payload.len() as u16;
+
+        let mut pseudo_header_and_udp = Vec::with_capacity(8 + 12 + payload.len());
+
+        pseudo_header_and_udp.extend_from_slice(&src_ip.as_bytes());
+        pseudo_header_and_udp.extend_from_slice(&dst_ip.as_bytes());
+        pseudo_header_and_udp.push(0);                 // zero byte
+        pseudo_header_and_udp.push(17);                // protocol number for UDP is 17
+        pseudo_header_and_udp.extend_from_slice(&(length.to_be_bytes())); // UDP length
+
+        pseudo_header_and_udp.extend_from_slice(&src_port.to_be_bytes());
+        pseudo_header_and_udp.extend_from_slice(&dst_port.to_be_bytes());
+        pseudo_header_and_udp.extend_from_slice(&length.to_be_bytes());
+        pseudo_header_and_udp.extend_from_slice(&0u16.to_be_bytes()); // checksum placeholder
+
+        pseudo_header_and_udp.extend_from_slice(&payload);
+
+        let checksum = internet_checksum(&pseudo_header_and_udp);
+
+        Packet {
+            src_port,
+            dst_port,
+            length,
+            checksum,
+            payload,
+        }
+    }
     // Deserialize a UDP packet from a byte buffer
     pub fn deserialize(buf: &[u8]) -> Result<Self> {
         if buf.len() < 8 {

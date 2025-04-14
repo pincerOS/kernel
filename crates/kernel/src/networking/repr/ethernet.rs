@@ -69,7 +69,7 @@ pub mod EtherType {
     pub const ARP: u16 = 0x806;
 }
 
-pub struct EthernetFrame {
+pub struct Frame {
     pub dst: Address,
     pub src: Address,
     pub ethertype: u16,
@@ -77,9 +77,9 @@ pub struct EthernetFrame {
     // pub fcs: Option<u32>,
 }
 
-impl EthernetFrame {
-    const HEADER_LEN: usize = 14;
-    const MIN_BUF_LEN: usize = 46;
+impl Frame {
+    pub const HEADER_LEN: usize = 14;
+    pub const MIN_BUF_LEN: usize = 46;
 
     pub fn deserialize(buf: &[u8]) -> Result<Self> {
         // check if this is a possible ethernet frame
@@ -104,7 +104,7 @@ impl EthernetFrame {
         //     
         // let fcs = Some(raw_fcs);
         
-        Ok(EthernetFrame {
+        Ok(Frame {
             dst,
             src,
             ethertype,

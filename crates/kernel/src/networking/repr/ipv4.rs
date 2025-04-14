@@ -182,7 +182,7 @@ pub struct Packet {
 }
 
 impl Packet {
-    const MIN_HEADER_LEN: usize = 20; // 5 * 4 = 20 bytes, minimum
+    pub const MIN_HEADER_LEN: usize = 20; // 5 * 4 = 20 bytes, minimum
 
     /// Simple constructor for typical user usage
     pub fn new(src_addr: Address, dst_addr: Address, protocol: Protocol, payload: Vec<u8>) -> Self {

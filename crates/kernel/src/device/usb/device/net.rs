@@ -12,7 +12,10 @@ use crate::device::system_timer;
 use crate::networking::repr::*;
 use crate::networking::utils::arp_cache::ArpCache;
 use crate::networking::iface::Interface;
-use crate::networking::iface::ethernet::recv_frame as recv_ethernet;
+use crate::networking::iface::cdcecm::CDCECM;
+use crate::networking::iface::arp;
+use crate::networking::socket::SocketSet;
+use crate::networking::iface::ethernet::recv_ethernet_frame as recv_ethernet;
 
 use crate::device::usb::types::*;
 use crate::device::usb::usbd::endpoint::register_interrupt_endpoint;
@@ -101,26 +104,33 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // 3. initalize and statically set ip address and gateway
     // 4. initialize arp table
 
-    // TODO: create dummy dhcp server instead of statically setting address
     // TODO: discussion with aaron about format for user, with NetSend/Recv or with my
     // interfce/device system i have set up. as it stands, we are going with the current method
     // with NetSend/Recv, so Interface is more like just acts like an enum of objects for the stack
     // to work on which is fine. will need to cutdown network stack into just parsing logic 
     // so many compiler warnings TT
+    // TODO: the mac address may be wrong need to copy from cmplt
     let DEFAULT_MAC = EthernetAddress::from_u32(OID::OID_802_3_PERMANENT_ADDRESS as u32);
+    
+    // try_dhcp();
+    
+    let dev = CDCECM::new(1500);
     let DEFAULT_IPV4 = Ipv4Address::new([192, 168, 1, 1]); // tell aaron about cidr conventions
-    let DEFAULT_IPV4CIDR = Ipv4Cidr::new(DEFAULT_IPV4, 24);
+    let DEFAULT_IPV4CIDR = Ipv4Cidr::new(DEFAULT_IPV4, 24).unwrap();
     let DEFAULT_GATEWAY = Ipv4Address::new([192, 168, 1, 1]); // change ts bruh
 
     let default_interface = Interface {
+        dev: Box::new(dev),
         arp_cache: ArpCache::new(60, system_timer::get_time()),
         ethernet_addr: DEFAULT_MAC,
         ipv4_addr: DEFAULT_IPV4CIDR,
         default_gateway: DEFAULT_GATEWAY,
+        udp_sockets: SocketSet::new(0),
+        tcp_sockets: SocketSet::new(0),
     };
 
     unsafe {
-        NET_DEVICE.default_interface = Some(default_interface);
+        NET_DEVICE.default_interface = Some(Box::new(default_interface));
     }
 
     
@@ -131,6 +141,11 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 
     println!("[+] sending test packet");
 
+
+    unsafe {
+        NET_DEVICE.device = Some(device);
+    }
+
     let arp_packet = ArpPacket {
         op: ArpOperation::Request,
         source_hw_addr: DEFAULT_MAC,
@@ -139,19 +154,8 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         target_proto_addr: Ipv4Address::new([192, 168, 1, 2]),
     };
 
-    let eth_buffer = [0u8; 42];
-    let mut eth_frame = EthernetFrame::try_new(eth_buffer).unwrap();
-    eth_frame.set_src_addr(DEFAULT_MAC);
-    eth_frame.set_dst_addr(EthernetAddress::BROADCAST);
-    eth_frame.set_payload_type(EthernetType::ARP);
-    arp_packet.serialize(eth_frame.payload_mut()).unwrap();
-
-    unsafe {
-        NET_DEVICE.device = Some(device);
-    }
-
     unsafe { // :skull:
-        NetSendPacket(eth_frame.as_mut().as_mut_ptr(), 60);
+        arp::send_arp_packet(NET_DEVICE.default_interface.as_mut().unwrap(), &arp_packet, EthernetAddress::BROADCAST);
     }
 
     return ResultCode::OK;
@@ -209,7 +213,7 @@ pub struct NetDevice {
     pub receive_callback: Option<fn(*mut u8, u32)>,
     // pub receive_callback: Option<fn(&mut Interface, &[u8], u32)>,
     pub device: Option<*mut UsbDevice>,
-    pub default_interface: Option<Interface>,
+    pub default_interface: Option<Box<Interface>>,
 }
 
 #[repr(u32)]

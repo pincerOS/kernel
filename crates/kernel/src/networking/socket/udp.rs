@@ -1,4 +1,4 @@
-use crate::networking::repr::{Ipv4Protocol, Ipv4Repr, UdpPacket, UdpRepr};
+use crate::networking::repr::{Ipv4Protocol, Ipv4Packet, UdpPacket};
 use crate::networking::socket::{SocketAddr, SocketAddrLease};
 use crate::networking::utils::{ring::Ring, slice::Slice};
 use crate::networking::{Error, Result};
@@ -57,35 +57,24 @@ impl UdpSocket {
     // The packet is only dequeued if f does not return an error.
     pub fn send_dequeue<F, R>(&mut self, f: F) -> Result<R>
     where
-        F: FnOnce(&Ipv4Repr, &UdpRepr, &[u8]) -> Result<R>,
+        F: FnOnce(&Ipv4Packet, &UdpPacket, &[u8]) -> Result<R>,
     {
         let binding = self.binding.clone();
         self.send_buffer
             .dequeue_maybe(|&mut (ref mut buffer, addr)| {
-                let payload_len = buffer.len();
+                let udp_packet = UdpPacket::new(binding.port, addr.port, buffer.to_vec(), binding.addr, addr.addr);
 
-                let udp_repr = UdpRepr {
-                    src_port: binding.port,
-                    dst_port: addr.port,
-                    length: UdpPacket::<&[u8]>::buffer_len(payload_len) as u16,
-                };
+                let ipv4_packet = Ipv4Packet::new(binding.addr, addr.addr, Ipv4Protocol::UDP, udp_packet.serialize());
 
-                let ipv4_repr = Ipv4Repr {
-                    src_addr: binding.addr,
-                    dst_addr: addr.addr,
-                    protocol: Ipv4Protocol::UDP,
-                    payload_len: udp_repr.buffer_len() as u16,
-                };
-
-                f(&ipv4_repr, &udp_repr, &buffer[..])
+                f(&ipv4_packet, &udp_packet, &buffer[..])
             })
     }
 
     // Enqueues a packet for receiving.
     pub fn recv_enqueue(
         &mut self,
-        ipv4_repr: &Ipv4Repr,
-        udp_repr: &UdpRepr,
+        ipv4_repr: &Ipv4Packet,
+        udp_repr: &UdpPacket,
         payload: &[u8],
     ) -> Result<()> {
         let binding = self.binding.clone();

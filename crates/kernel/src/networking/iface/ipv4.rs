@@ -1,24 +1,30 @@
-use crate::networking::repr::{EthernetAddress, EthernetType, Ipv4Protocol, EthernetFrame, Ipv4Address, Ipv4Packet, Ipv4Repr};
+use crate::networking::repr::*;
 use crate::networking::iface::{arp, ethernet, icmp, udp, Interface};
 use crate::networking::{Error, Result};
+
+use alloc::vec::Vec;
 
 use log::debug;
 
 pub fn send_ipv4_packet(
     interface: &mut Interface, 
-    payload: 
+    payload: Vec<u8>,
+    protocol: Ipv4Protocol,
     dst_addr: Ipv4Address,
 ) -> Result<()> {
     let next_hop = ipv4_addr_route(interface, dst_addr);
-    let dst_mac = interface.arp_cache.eth_addr_for_ip(next_hop);
-    ethernet::send_frame(interface, ipv4_repr.serialize(), dst_mac, EthernetType::IPV4)
+    let dst_mac = arp::eth_addr_for_ip(interface, next_hop)?;
+
+    let ipv4_packet = Ipv4Packet::new(*interface.ipv4_addr, dst_addr, protocol, payload);
+
+    ethernet::send_ethernet_frame(interface, ipv4_packet.serialize(), dst_mac, EthernetType::IPV4)
 }
 
 pub fn recv_ip_packet(
     interface: &mut Interface,
     eth_frame: EthernetFrame,
 ) -> Result<()> {
-    let ipv4_packet = Ipv4Packet::deserialize(eth_frame.payload)?;
+    let ipv4_packet = Ipv4Packet::deserialize(eth_frame.payload.as_slice())?;
     if !ipv4_packet.is_valid_checksum() {
         return Err(Error::Checksum);
     }
@@ -29,17 +35,17 @@ pub fn recv_ip_packet(
     }
 
     // update arp cache for immediate ICMP echo replies, errors, etc.
-    if eth_frame.src_addr().is_unicast() {
+    if eth_frame.src.is_unicast() {
         interface
             .arp_cache
-            .set_eth_addr_for_ip(ipv4_packet.src_addr, eth_frame.src_addr);
+            .set_eth_addr_for_ip(ipv4_packet.src_addr, eth_frame.src);
     }
 
     match ipv4_packet.protocol {
-        Ipv4Protocol::TCP => tcp::recv_tcp_packet(interface, ipv4_packet.payload),
-        Ipv4Protocol::UDP => udp::recv_udp_packet(interface, ipv4_packet.payload),
+        // Ipv4Protocol::TCP => tcp::recv_tcp_packet(interface, ipv4_packet.payload),
+        Ipv4Protocol::UDP => udp::recv_udp_packet(interface, ipv4_packet),
         Ipv4Protocol::ICMP => icmp::recv_icmp_packet(interface, ipv4_packet),
-        i => {
+        _ => {
             Err(Error::Ignored)
         }
     }

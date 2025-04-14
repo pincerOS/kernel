@@ -58,6 +58,30 @@ pub struct Packet {
 }
 
 impl Packet {
+    pub fn new(message: Message) -> Self {
+        let (icmp_type, code) = match message {
+            Message::EchoReply { .. } => (0, 0),
+            Message::EchoRequest { .. } => (8, 0),
+            Message::DestinationUnreachable(DestinationUnreachable::PortUnreachable) => (3, 3),
+            Message::DestinationUnreachable(_) => (3, 0),
+            Message::TimeExceeded(TimeExceeded::TTLExpired) => (11, 0),
+            Message::TimeExceeded(_) => (11, 0),
+            Message::___Exhaustive => (255, 0),
+        };
+
+        // Create a temporary packet to compute the checksum
+        let mut pkt = Packet {
+            icmp_type,
+            code,
+            checksum: 0,
+            message,
+        };
+
+        let buf = pkt.serialize();
+        pkt.checksum = NetworkEndian::read_u16(&buf[2..4]);
+        pkt
+    }
+
     pub fn deserialize(buf: &[u8]) -> Result<Self> {
         if buf.len() < 8 {
             return Err(Error::Malformed);

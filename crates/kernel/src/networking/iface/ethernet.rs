@@ -1,15 +1,15 @@
-use crate::networking::repr::{EthernetAddress, EthernetType, EthernetFrame};
+use crate::networking::repr::*;
 use crate::networking::iface::{arp, ipv4, Interface};
 use crate::networking::{Error, Result};
 
 use alloc::vec::Vec;
 
 // sends out an ethernet frame over an interface
-pub fn send_frame(
+pub fn send_ethernet_frame(
     interface: &mut Interface, 
     payload: Vec<u8>, 
     dst: EthernetAddress, 
-    ethtype: EthernetType,
+    ethtype: u16,
 ) -> Result<()> {
 
     let ethernet_packet = EthernetFrame {
@@ -19,7 +19,7 @@ pub fn send_frame(
         payload,
     };
 
-    interface.dev.send(ethernet_packet.serialize(), ethernet_packet.size());
+    interface.dev.send(&mut ethernet_packet.serialize(), ethernet_packet.size() as u32);
     Ok(())
 }
 
@@ -39,10 +39,10 @@ pub fn recv_ethernet_frame(
         return Err(Error::Ignored);
     }
 
-    match eth_frame.payload_type() {
+    match eth_frame.ethertype {
         EthernetType::ARP => arp::recv_arp_packet(interface, eth_frame),
         EthernetType::IPV4 => ipv4::recv_ip_packet(interface, eth_frame),
-        i => {
+        _ => {
             Err(Error::Ignored)
         }
     }
