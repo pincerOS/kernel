@@ -15,6 +15,7 @@ use crate::device::usb::UsbControlMessage;
 
 use crate::device::usb::device::net::*;
 use crate::device::usb::PacketId;
+use crate::shutdown;
 use alloc::boxed::Box;
 use alloc::vec;
 
@@ -29,7 +30,7 @@ pub fn rndis_initialize_msg(device: &mut UsbDevice) -> ResultCode {
         request_id: 0,
         major_version: 1,
         minor_version: 0,
-        max_transfer_size: 8,
+        max_transfer_size: 0x4000,
     };
 
     let mut buffer_req = [0u8; 52];
@@ -141,10 +142,10 @@ pub unsafe fn rndis_query_msg(
     oid: OID,
     buffer_req: *mut u8,
     buffer_length: u32,
-) -> ResultCode {
+) -> (ResultCode, u32, u32) {
     if buffer_length < size_of::<RndisQueryMsgCmplt>() as u32 {
         print!("| RNDIS: Buffer length is too small.\n");
-        return ResultCode::ErrorArgument;
+        return (ResultCode::ErrorArgument, 0, 0);
     }
 
     let query_msg = &mut RndisQueryMsg {
@@ -186,7 +187,7 @@ pub unsafe fn rndis_query_msg(
 
     if result != ResultCode::OK {
         print!("| RNDIS: Failed to send query message.\n");
-        return ResultCode::ErrorDevice;
+        return (ResultCode::ErrorDevice, 0, 0);
     }
 
     let result = unsafe {
@@ -218,46 +219,37 @@ pub unsafe fn rndis_query_msg(
 
     if result != ResultCode::OK {
         print!("| RNDIS: Failed to receive query message.\n");
-        return ResultCode::ErrorDevice;
+        return (ResultCode::ErrorDevice, 0, 0);
     }
-    // println!("| RNDIS: Received query message.");
+    let b_msg = unsafe { &mut *(buffer_req as *mut RndisQueryMsgCmplt) };
 
-    // let buffer_req32 = buffer_req as *mut u32;
-    // println!("| RNDIS: Message Type: {:x}", unsafe { *buffer_req32 });
-    // println!("| RNDIS: Message Length: {}", unsafe {
-    //     *buffer_req32.add(1)
-    // });
-    // println!("| RNDIS: Request ID: {:x}", unsafe { *buffer_req32.add(2) });
-    // println!("| RNDIS: Status: {:x}", unsafe { *buffer_req32.add(3) });
-    // println!("| RNDIS: Information Buffer Length: {}", unsafe {
-    //     *buffer_req32.add(4)
-    // });
-    // println!("| RNDIS: Information Buffer Offset: {:x}", unsafe {
-    //     *buffer_req32.add(5)
-    // });
-    // println!("| RNDIS: Start of buffer: {:x}", unsafe {
-    //     *buffer_req32.add(6)
-    // });
+    if b_msg.message_type != 0x80000004 {
+        let message_type = b_msg.message_type;
+        print!("| RNDIS: Message type is not query message. {}\n", message_type);
+        return (ResultCode::ErrorDevice, 0, 0);
+    }
 
-    // //start reading from request id + buffer offset to request id + buffer offset + buffer length
-    // let buffer_length = unsafe { *buffer_req32.add(4) };
-    // let buffer_offset = unsafe { *buffer_req32.add(5) };
-    // let buffer = unsafe { buffer_req.offset(24) as *mut u8 };
+    let status = b_msg.status;
+    if status != RndisStatusValue::RNDIS_STATUS_SUCCESS {
+        print!("| RNDIS: Status is not success.\n");
+        return (ResultCode::ErrorDevice, 0, 0);
+    }
 
-    // println!("| RNDIS: Buffer Length: {}", buffer_length);
-    // println!("| RNDIS: Buffer Offset: {:x}", buffer_offset);
+    if b_msg.request_id != 1 {
+        print!("| RNDIS: Request ID is not 1.\n");
+        return (ResultCode::ErrorDevice, 0, 0);
+    }
 
-    // for i in 0..buffer_length {
-    //     let byte = unsafe { *buffer.offset(i as isize) };
-    //     print!("{:x} ", byte);
-    // }
+    let buffer_offset: u32 = 24; //TODO: FIX, Technically not to spec but this works
+    let buffer_length = b_msg.information_buffer_length;
 
-    return ResultCode::OK;
+
+    return (ResultCode::OK, buffer_offset, buffer_length);
 }
 
 //Technically the value could be more than 4 bytes, but we don't care for now
 //TODO: Fix if relevant
-pub fn rndis_set_msg(device: &mut UsbDevice, oid: OID, value: u32) {
+pub fn rndis_set_msg(device: &mut UsbDevice, oid: OID, value: u32) -> ResultCode {
     let set_msg = &mut RndisSetMsg {
         message_type: 0x00000005,
         message_length: size_of::<RndisSetMsg>() as u32,
@@ -330,18 +322,31 @@ pub fn rndis_set_msg(device: &mut UsbDevice, oid: OID, value: u32) {
 
     if result != ResultCode::OK {
         print!("| RNDIS: Failed to receive set message.\n");
+        return ResultCode::ErrorDevice;
     }
 
-    // let msg_cmplt = unsafe { &*(buffer.as_mut_ptr() as *mut RndisSetMsgCmplt) };
-    // let message_type = buffer.message_type;
-    // let message_length = buffer.message_length;
-    // let request_id = buffer.request_id;
-    // let status = buffer.status;
+    let msg_cmplt = unsafe { &*(buffer as *mut RndisSetMsgCmplt) };
+    let message_type = buffer.message_type;
+    let message_length = buffer.message_length;
+    let request_id = buffer.request_id;
+    let status = buffer.status;
 
-    // println!("| RNDIS: Message Type: {:x}", message_type);
-    // println!("| RNDIS: Message Length: {}", message_length);
-    // println!("| RNDIS: Request ID: {:x}", request_id);
-    // println!("| RNDIS: Status: {:#?}", status);
+    if message_type != 0x80000005 {
+        print!("| RNDIS: Message type is not set message.\n");
+        return ResultCode::ErrorDevice;
+    }
+
+    if request_id != 2 {
+        print!("| RNDIS: Request ID is not 2.\n");
+        return ResultCode::ErrorDevice;
+    }
+
+    if status != RndisStatusValue::RNDIS_STATUS_SUCCESS {
+        print!("| RNDIS: Status is not success.\n");
+        return ResultCode::ErrorDevice;
+    }
+
+    return ResultCode::OK;
 }
 
 pub unsafe fn rndis_send_packet(
@@ -535,7 +540,7 @@ pub struct RndisPacketMsg {
 }
 
 #[repr(u32)]
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RndisStatusValue {
     #[default]
     RNDIS_STATUS_SUCCESS = 0x00000000, /* Success */
