@@ -32,21 +32,22 @@ impl<const N: usize, T> SpscRingBuffer<N, T> {
     }
 
     fn full(head: u32, tail: u32) -> bool {
-        head == tail.wrapping_add(N as u32 - 1)
+        head == tail.wrapping_add(N as u32)
     }
 
     // Safety: must be the only sender for this queue
     pub unsafe fn try_send(&self, event: T) -> Result<(), T> {
-        let cur_head = self.head.load(Relaxed).rem_euclid(N as u32);
+        let cur_head = self.head.load(Relaxed);
         let cur_tail = self.tail.load(SeqCst);
 
         if Self::full(cur_head, cur_tail) {
             return Err(event);
         }
 
-        assert!((cur_head as usize) < N);
+        let head_idx = (cur_head as usize).rem_euclid(N);
+        assert!(head_idx < N);
         let elems = self.elems.get().cast::<T>();
-        let target = elems.wrapping_add(cur_head as usize);
+        let target = elems.wrapping_add(head_idx);
 
         // Safety: cur_head is always within range for the elems array.
         // This does not create an intermediate reference, and just writes
@@ -74,16 +75,17 @@ impl<const N: usize, T> SpscRingBuffer<N, T> {
     // Safety: must be the only reciever for this queue
     pub unsafe fn try_recv(&self) -> Option<T> {
         let cur_head = self.head.load(SeqCst);
-        let cur_tail = self.tail.load(Relaxed).rem_euclid(N as u32);
+        let cur_tail = self.tail.load(Relaxed);
         // TODO: are the above loads enough of a fence?
 
         if Self::empty(cur_head, cur_tail) {
             return None;
         }
 
-        assert!((cur_tail as usize) < N);
-        let elems = self.elems.get().cast::<T>();
-        let target = elems.wrapping_add(cur_tail as usize);
+        let tail_idx = (cur_tail as usize).rem_euclid(N);
+        assert!(tail_idx < N);
+        let elems = self.elems.get().cast::<MaybeUninit<T>>();
+        let target = elems.wrapping_add(tail_idx);
 
         // Safety: cur_tail is always within range for the elems array.
         // This does not create an intermediate reference, and just writes
@@ -94,7 +96,7 @@ impl<const N: usize, T> SpscRingBuffer<N, T> {
         // Correctness: There is a single consumer for this queue;
         // events within the range (head, tail] are all initialized and unchanging.
         // The producer will only reuse the slot once the tail has been incremented.
-        let event = unsafe { target.read_volatile() };
+        let event = unsafe { target.read_volatile().assume_init() };
 
         self.tail.fetch_add(1, SeqCst);
 

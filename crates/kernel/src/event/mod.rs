@@ -60,6 +60,7 @@ where
     SCHEDULER.add_task(ev);
 }
 
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn run_event_loop() -> ! {
     loop {
         let ev = SCHEDULER.wait_for_task();

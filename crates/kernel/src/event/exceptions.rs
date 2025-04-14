@@ -328,7 +328,9 @@ unsafe extern "C" fn exception_handler_user(
                 println!("ttbr0={ttbr0:#010x}");
                 println!("{:#?}", ctx);
             }
-            halt()
+            let thread = CORES.with_current(|core| core.thread.take());
+            let thread = thread.expect("usermode exception without active thread");
+            unsafe { crate::syscall::proc::exit_exception(thread, ctx, u32::MAX) }
         }
     }
 }

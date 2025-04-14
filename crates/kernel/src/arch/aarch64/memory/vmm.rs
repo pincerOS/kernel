@@ -2,6 +2,7 @@ use core::{
     arch::asm,
     fmt::{Display, Formatter},
     ptr::{addr_of, NonNull},
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use crate::arch::memory::palloc::Size4KiB;
@@ -67,13 +68,22 @@ pub fn alloc_top_page_table() -> PageTablePtr {
 
     // TODO: waste less space
     let page = PAGE_ALLOCATOR.get().alloc_mapped_frame::<Size4KiB>();
+    let table = PAGE_ALLOCATOR.get().get_mapped_frame(page.clone());
+    unsafe { core::ptr::write_bytes(table, 0, 1) };
     PageTablePtr::from_partial_page(page, top_level_entries)
 }
 
 pub fn alloc_page_table() -> PageTablePtr {
     let page = PAGE_ALLOCATOR.get().alloc_mapped_frame::<Size4KiB>();
+    let table = PAGE_ALLOCATOR.get().get_mapped_frame(page.clone());
+    unsafe { core::ptr::write_bytes(table, 0, 1) };
     PageTablePtr::from_full_page(page)
 }
+
+pub const DIRECT_MAP_BASE: usize = 0xFFFF100000000000;
+pub const MAPPED_HEAP_BASE: usize = 0xFFFF200000000000;
+
+pub static VMEM_INIT_DONE: AtomicBool = AtomicBool::new(false);
 
 pub unsafe fn init_kernel_48bit() {
     let table: *mut UnifiedTranslationTable = &raw mut KERNEL_UNIFIED_TRANSLATION_TABLE;
@@ -101,6 +111,32 @@ pub unsafe fn init_kernel_48bit() {
     let vaddr = kernel_vmem_base + 15 * 0x20_0000;
     let leaf = TableDescriptor::new(paddr);
     unsafe { set_translation_descriptor(table, vaddr, 2, 0, leaf.into(), true).unwrap() };
+
+    let huge2_page_size = 4096 * 512 * 512; // 1 GiB
+    let huge2_page_level = 1;
+
+    let pmem_start = 0;
+    let pmem_end = 1 << 32; // 4 GiB
+
+    for paddr in (pmem_start..pmem_end).step_by(huge2_page_size) {
+        let vaddr = DIRECT_MAP_BASE + paddr;
+        let leaf = LeafDescriptor::new(paddr)
+            .set_global()
+            .difference(LeafDescriptor::IS_PAGE_DESCRIPTOR);
+        unsafe {
+            set_translation_descriptor(table, vaddr, huge2_page_level, 0, leaf.into(), true)
+                .unwrap()
+        };
+    }
+
+    *crate::heap::ALLOCATOR_HACK.lock() = crate::heap::AllocatorHack::Virt(unsafe {
+        crate::heap::VirtAllocator::new(MAPPED_HEAP_BASE as *mut (), 0x100000000000)
+    });
+
+    // Note that this will *also* be true on the secondary cores in 25 bit mode,
+    // before they switch to 48, which could cause issues.
+    // (They currently do no vmem ops before enabling 48 bit, so it works.)
+    VMEM_INIT_DONE.store(true, Ordering::SeqCst);
 }
 
 /// Must be run on every core
@@ -117,6 +153,10 @@ pub unsafe fn switch_to_kernel_48bit() {
         switch_kernel_vmem(table_paddr, KERNEL48_USER25_TCR_EL1 as usize);
         switch_user_tcr_el1(KERNEL48_USER48_TCR_EL1 as usize);
     }
+
+    // This runs on each core, so after this point all cores should see
+    // this as true, even with relaxed loads.
+    assert!(VMEM_INIT_DONE.load(Ordering::SeqCst));
 }
 
 /// only call once!
@@ -208,6 +248,7 @@ pub unsafe fn get_translation_descriptor(
         }
 
         let intermediate_descriptor = unsafe { descriptor.table };
+        // println!("{intermediate_descriptor:?}, {:#016x} in table {:#x}", unsafe { intermediate_descriptor.bits() }, table.paddr());
         if !intermediate_descriptor.is_valid() {
             return Err(MappingError::LevelEntryUnset(curr_level));
         } else if !intermediate_descriptor.is_table_descriptor() {
