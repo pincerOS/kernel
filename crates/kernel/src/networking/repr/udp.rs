@@ -1,6 +1,7 @@
 use byteorder::{NetworkEndian, ByteOrder};
 
 use alloc::vec::Vec;
+use alloc::vec;
 
 use crate::networking::{Result, Error};
 use crate::networking::utils::checksum::internet_checksum;
@@ -10,6 +11,8 @@ use super::Ipv4Address;
 pub struct Packet {
     pub src_port: u16,
     pub dst_port: u16,
+    pub src_ip: Ipv4Address,
+    pub dst_ip: Ipv4Address,
     pub length: u16,
     pub checksum: u16,
     pub payload: Vec<u8>,
@@ -25,30 +28,14 @@ impl Packet {
         src_ip: Ipv4Address,
         dst_ip: Ipv4Address,
     ) -> Self {
-        let length = 8 + payload.len() as u16;
-
-        let mut pseudo_header_and_udp = Vec::with_capacity(8 + 12 + payload.len());
-
-        pseudo_header_and_udp.extend_from_slice(&src_ip.as_bytes());
-        pseudo_header_and_udp.extend_from_slice(&dst_ip.as_bytes());
-        pseudo_header_and_udp.push(0);                 // zero byte
-        pseudo_header_and_udp.push(17);                // protocol number for UDP is 17
-        pseudo_header_and_udp.extend_from_slice(&(length.to_be_bytes())); // UDP length
-
-        pseudo_header_and_udp.extend_from_slice(&src_port.to_be_bytes());
-        pseudo_header_and_udp.extend_from_slice(&dst_port.to_be_bytes());
-        pseudo_header_and_udp.extend_from_slice(&length.to_be_bytes());
-        pseudo_header_and_udp.extend_from_slice(&0u16.to_be_bytes()); // checksum placeholder
-
-        pseudo_header_and_udp.extend_from_slice(&payload);
-
-        let checksum = internet_checksum(&pseudo_header_and_udp);
-
+        let length = Self::HEADER_LEN as u16 + payload.len() as u16;
         Packet {
             src_port,
             dst_port,
+            src_ip,
+            dst_ip,
             length,
-            checksum,
+            checksum: 0,
             payload,
         }
     }
@@ -63,35 +50,79 @@ impl Packet {
         let length = NetworkEndian::read_u16(&buf[4..6]);
         let checksum = NetworkEndian::read_u16(&buf[6..8]);
 
-        // Ensure the length is at least 8 (minimum UDP header size)
         if length < 8 || buf.len() != length as usize {
             return Err(Error::Malformed);
         }
 
-        let payload = buf[8..].to_vec();
+        let payload = buf[8..length as usize].to_vec();
 
         Ok(Packet {
             src_port,
             dst_port,
+            src_ip: Ipv4Address::new([0,0,0,0]),
+            dst_ip: Ipv4Address::new([0,0,0,0]),
             length,
             checksum,
             payload,
         })
+
     }
 
     // Serialize a UDP packet to a byte vector
     pub fn serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(8 + self.payload.len());
+        let mut buf = vec![0u8; Self::HEADER_LEN + self.payload.len()];
 
-        // Write the UDP header
-        NetworkEndian::write_u16(&mut buf, self.src_port);
-        NetworkEndian::write_u16(&mut buf, self.dst_port);
-        NetworkEndian::write_u16(&mut buf, self.length);
-        NetworkEndian::write_u16(&mut buf, self.checksum);
+        NetworkEndian::write_u16(&mut buf[0..2], self.src_port);
+        NetworkEndian::write_u16(&mut buf[2..4], self.dst_port);
+        NetworkEndian::write_u16(&mut buf[4..6], self.length);
+        NetworkEndian::write_u16(&mut buf[6..8], 0); // temporary checksum = 0
 
-        // Write the payload
-        buf.extend_from_slice(&self.payload);
+        buf[8..].copy_from_slice(&self.payload);
+
+        // Now compute checksum and overwrite it
+        let checksum = Self::compute_checksum_raw(
+            self.src_ip,
+            self.dst_ip,
+            &buf,
+        );
+
+        println!("udp: {:?}", buf);
+
+        NetworkEndian::write_u16(&mut buf[6..8], checksum);
 
         buf
+    }
+
+    fn compute_checksum_raw(src_ip: Ipv4Address, dst_ip: Ipv4Address, udp_segment: &[u8]) -> u16 {
+        let mut pseudo_header = Vec::with_capacity(12);
+        pseudo_header.extend_from_slice(&src_ip.as_bytes());
+        pseudo_header.extend_from_slice(&dst_ip.as_bytes());
+        pseudo_header.push(0);
+        pseudo_header.push(17); // UDP protocol number
+        pseudo_header.extend_from_slice(&(udp_segment.len() as u16).to_be_bytes());
+
+        let mut data = pseudo_header;
+        data.extend_from_slice(udp_segment);
+
+        if data.len() % 2 != 0 {
+            data.push(0);
+        }
+
+        let mut sum = 0u32;
+        for chunk in data.chunks(2) {
+            let word = u16::from_be_bytes([chunk[0], chunk[1]]);
+            sum = sum.wrapping_add(word as u32);
+        }
+
+        while (sum >> 16) != 0 {
+            sum = (sum & 0xFFFF) + (sum >> 16);
+        }
+
+        let checksum = !(sum as u16);
+        if checksum == 0 {
+            0xFFFF
+        } else {
+            checksum
+        }
     }
 }
