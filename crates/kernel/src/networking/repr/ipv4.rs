@@ -105,7 +105,7 @@ pub struct AddressCidr {
 
 impl AddressCidr {
     pub fn new(address: Address, subnet_len: u32) -> Result<AddressCidr> {
-        if subnet_len <= 32 {
+        if subnet_len > 32 {
             return Err(Error::Malformed);
         }
 
