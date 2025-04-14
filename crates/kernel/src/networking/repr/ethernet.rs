@@ -1,22 +1,17 @@
 /*
 +-------------------+-------------------+-------------------+
-|  Preamble (7B)   |  SFD (1B)         | Destination MAC (6B) |
-+-------------------+-------------------+-------------------+
 | Source MAC (6B)  | EtherType/Length (2B)                  |
 +-------------------+----------------------------------------+
 |                  Payload (46 - 1500B)                     |
 +-----------------------------------------------------------+
 |                  Frame Check Sequence (FCS - 4B)         |
 +-----------------------------------------------------------+
-
-ethernet is the lowest layer (in this stack), other physical data transfer layers are not 
-implemented (e.g 802.11) 
-
-this file mainly lays out the specifications and representation for ethernet
 */
 
 use byteorder::{ByteOrder, NetworkEndian};
 use core::fmt;
+use alloc::vec;
+use alloc::vec::Vec;
 
 use crate::networking::{Result, Error};
 
@@ -26,7 +21,6 @@ pub struct Address([u8; 6]);
 impl Address {
     pub const BROADCAST: Address = Address([0xFF; 6]);
     
-    // converts bytes to address
     pub fn from_bytes(data: &[u8]) -> Result<Address> {
         if data.len() != 6 {
             return Err(Error::Malformed);
@@ -69,98 +63,100 @@ impl fmt::Display for Address {
     }
 }
 
-// NOTE: add to here if you want to add more supported protocols
-pub mod eth_types {
+#[allow(non_snake_case)]
+pub mod EtherType {
     pub const IPV4: u16 = 0x800;
     pub const ARP: u16 = 0x806;
 }
 
-mod fields {
-    use core::ops::{Range, RangeFrom};
-
-    pub const DST_ADDR: Range<usize> = 0 .. 6;
-    pub const SRC_ADDR: Range<usize> = 6 .. 12;
-    pub const PAYLOAD_TYPE: Range<usize> = 12 .. 14;
-    pub const PAYLOAD: RangeFrom<usize> = 14 ..;
+pub struct EthernetFrame {
+    pub dst: Address,
+    pub src: Address,
+    pub ethertype: u16,
+    pub payload: Vec<u8>,
+    // pub fcs: Option<u32>,
 }
 
-// NOTE: ty smoltcp for this hack, this lets us basically use any representation for the actual
-// data in the packet and handle just the logic around it
-#[derive(Debug)]
-pub struct Frame<T: AsRef<[u8]>> {
-    buffer: T,
-}
+impl EthernetFrame {
+    const HEADER_LEN: usize = 14;
+    const MIN_BUF_LEN: usize = 46;
 
-// calling .as_ref() will give us a &[u8] from the buffer to work with
-impl<T: AsRef<[u8]>> AsRef<[u8]> for Frame<T> {
-    fn as_ref(&self) -> &[u8] {
-        self.buffer.as_ref()
-    }
-}
-
-// calling .as_mut() will give us a &[u8] mutable, also it will only exist when T is mutable
-impl<T: AsRef<[u8]> + AsMut<[u8]>> AsMut<[u8]> for Frame<T> {
-    fn as_mut(&mut self) -> &mut [u8] {
-        self.buffer.as_mut()
-    }
-}
-
-impl<T: AsRef<[u8]>> Frame<T> {
-    pub const HEADER_LEN: usize = 14;
-    pub const MAX_FRAME_LEN: usize = 1518;
-
-    // byte buffer -> ethernet frame
-    pub fn try_new(buffer: T) -> Result<Frame<T>> {
-        if buffer.as_ref().len() < Self::HEADER_LEN || buffer.as_ref().len() > Self::MAX_FRAME_LEN {
-            Err(Error::Malformed)
-        } else {
-            Ok(Frame{buffer})
+    pub fn deserialize(buf: &[u8]) -> Result<Self> {
+        // check if this is a possible ethernet frame
+        if buf.len() < Self::HEADER_LEN + Self::MIN_BUF_LEN { 
+            return Err(Error::Malformed);
         }
+
+        let dst = Address::from_bytes(&buf[0..6])?;
+        let src = Address::from_bytes(&buf[6..12])?;
+        
+        let ethertype = NetworkEndian::read_u16(&buf[12..14]);
+        
+        let payload_end = buf.len() - 4;
+        let payload = buf[14..payload_end].to_vec();
+        
+        // let raw_fcs = u32::from_be_bytes([
+        //     buf[payload_end], 
+        //     buf[payload_end + 1], 
+        //     buf[payload_end + 2], 
+        //     buf[payload_end + 3]
+        // ]);
+        //     
+        // let fcs = Some(raw_fcs);
+        
+        Ok(EthernetFrame {
+            dst,
+            src,
+            ethertype,
+            payload,
+        })
     }
 
-    pub fn buffer_len(payload_len: usize) -> usize {
+    pub fn serialize(&self) -> Vec<u8> {
+        let payload_len = self.payload.len().max(Self::MIN_BUF_LEN);
+        let total_len = Self::HEADER_LEN + payload_len;
+
+        let mut buf = vec![0u8; total_len];
+
+        buf[0..6].copy_from_slice(&self.dst.as_bytes());
+        buf[6..12].copy_from_slice(&self.src.as_bytes());
+
+        NetworkEndian::write_u16(&mut buf[12..14], self.ethertype);
+
+        buf[14..14 + self.payload.len()].copy_from_slice(&self.payload);
+
+        buf
+    }
+
+    pub fn size(&self) -> usize {
+        let payload_len = self.payload.len().max(Self::MIN_BUF_LEN);
         Self::HEADER_LEN + payload_len
     }
 
-    pub fn dst_addr(&self) -> Address {
-        let data = self.buffer.as_ref();
-        Address::from_bytes(&data[fields::DST_ADDR]).unwrap()
-    }
-
-    pub fn src_addr(&self) -> Address {
-        let data = self.buffer.as_ref();
-        Address::from_bytes(&data[fields::SRC_ADDR]).unwrap()
-    }
-
-    pub fn payload_type(&self) -> u16 {
-        let data = self.buffer.as_ref();
-        NetworkEndian::read_u16(&data[fields::PAYLOAD_TYPE])
-    }
-
-    pub fn payload(&self) -> &[u8] {
-        &self.buffer.as_ref()[fields::PAYLOAD]
-    }
+    // pub fn calculate_and_fill_fcs(&mut self) { }
+    // 
+    // pub fn verify_fcs(&self) -> bool { }
 }
 
-impl<T: AsRef<[u8]> + AsMut<[u8]>> Frame<T> {
-    pub fn set_dst_addr(&mut self, addr: Address) {
-        let data = self.buffer.as_mut();
-        data[fields::DST_ADDR].copy_from_slice(addr.as_bytes())
+fn calculate_crc32(data: &[u8]) -> u32 {
+    const CRC32_POLYNOMIAL: u32 = 0x04C11DB7;
+    
+    let mut crc: u32 = 0xFFFFFFFF;
+    
+    for &byte in data {
+        crc ^= (byte as u32) << 24;
+        
+        for _ in 0..8 {
+            if (crc & 0x80000000) != 0 {
+                crc = (crc << 1) ^ CRC32_POLYNOMIAL;
+            } else {
+                crc <<= 1;
+            }
+        }
     }
-
-    pub fn set_src_addr(&mut self, addr: Address) {
-        let data = self.buffer.as_mut();
-        data[fields::SRC_ADDR].copy_from_slice(addr.as_bytes())
-    }
-
-    pub fn set_payload_type(&mut self, payload_type: u16) {
-        let data = self.buffer.as_mut();
-        NetworkEndian::write_u16(&mut data[fields::PAYLOAD_TYPE], payload_type.into())
-
-    }
-
-    pub fn payload_mut(&mut self) -> &mut [u8] {
-        &mut self.buffer.as_mut()[fields::PAYLOAD]
-    }
+    
+    crc ^= 0xFFFFFFFF;
+    
+    crc
 }
 
