@@ -1,10 +1,9 @@
-use byteorder::{ByteOrder, NetworkEndian};
 use alloc::vec;
 use alloc::vec::Vec;
+use byteorder::{ByteOrder, NetworkEndian};
 
-use crate::networking::{Error, Result};
 use super::{EthernetAddress, Ipv4Address};
-
+use crate::networking::{Error, Result};
 
 #[repr(u16)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,8 +83,8 @@ impl Packet {
         // currently this is what we support lol
         NetworkEndian::write_u16(&mut buffer[0..2], Hardware::ETHERNET);
         NetworkEndian::write_u16(&mut buffer[2..4], Protocols::IPV4);
-        buffer[4] = 6;  // Ethernet address length
-        buffer[5] = 4;  // IPv4 address length
+        buffer[4] = 6; // Ethernet address length
+        buffer[5] = 4; // IPv4 address length
 
         let op = match self.op {
             Operation::Request => 0x0001,
@@ -101,4 +100,3 @@ impl Packet {
         buffer
     }
 }
-

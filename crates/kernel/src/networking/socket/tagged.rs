@@ -1,4 +1,4 @@
-use crate::networking::socket::{ RawSocket, UdpSocket };
+use crate::networking::socket::{RawSocket, UdpSocket};
 
 // One of many types of sockets.
 pub enum TaggedSocket {
@@ -21,4 +21,11 @@ impl TaggedSocket {
             _ => panic!("Not a UDP socket!"),
         }
     }
+
+    // pub fn as_tcp_socket(&mut self) -> &mut TcpSocket {
+    //     match *self {
+    //         TaggedSocket::Tcp(ref mut socket) => socket,
+    //         _ => panic!("Not a TCP socket!"),
+    //     }
+    // }
 }

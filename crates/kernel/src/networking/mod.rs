@@ -4,10 +4,10 @@ extern crate log;
 // #[macro_use]
 // extern crate alloc;
 
-pub mod utils;
+pub mod iface;
 pub mod repr;
 pub mod socket;
-pub mod iface;
+pub mod utils;
 
 // extern crate std;
 // use std::io::Error as IOError;
@@ -48,5 +48,3 @@ pub enum Error {
 }
 
 pub type Result<T> = CoreResult<T, Error>;
-
-

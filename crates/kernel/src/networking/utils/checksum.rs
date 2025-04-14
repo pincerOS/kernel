@@ -12,10 +12,10 @@
 //
 //     if buffer.len() % 2 != 0 {
 //         let last_byte = buffer[buffer.len() - 1] as u32;
-//         sum += last_byte << 8; 
+//         sum += last_byte << 8;
 //     }
 //
-//     // fold carry bits into lower 16 
+//     // fold carry bits into lower 16
 //     while (sum >> 16) > 0 {
 //         sum = (sum & 0xFFFF) + (sum >> 16);
 //     }
@@ -45,5 +45,3 @@ pub fn internet_checksum(buffer: &[u8]) -> u16 {
 
     !(sum as u16)
 }
-
-
