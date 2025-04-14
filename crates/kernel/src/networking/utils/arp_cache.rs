@@ -1,5 +1,5 @@
-use alloc::collections::BTreeMap;
 use crate::device::system_timer;
+use alloc::collections::BTreeMap;
 
 use crate::networking::repr::{EthernetAddress, Ipv4Address};
 // use crate::networking::utils::arp_cache::u64;
@@ -54,7 +54,9 @@ impl ArpCache {
         // If the cache has been in use for longer than the expiration period
         if now > self.in_cache_since_min + (self.expiration.as_micros() as u64) {
             let expiration = self.expiration;
-            self.entries.retain(|_, entry| now.saturating_sub(entry.in_cache_since) <= (expiration.as_micros() as u64));
+            self.entries.retain(|_, entry| {
+                now.saturating_sub(entry.in_cache_since) <= (expiration.as_micros() as u64)
+            });
 
             // Update the minimum in_cache_since timestamp
             let in_cache_since = self.entries.iter().map(|(_, entry)| entry.in_cache_since);

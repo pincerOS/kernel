@@ -1,5 +1,5 @@
-use crate::networking::repr::{EthernetFrame, Ipv4Address, Ipv4Packet, UdpPacket};
 use crate::networking::iface::Interface;
+use crate::networking::repr::{EthernetFrame, Ipv4Address, Ipv4Packet, UdpPacket};
 use crate::networking::socket::{Bindings, RawSocket, RawType, SocketAddr, UdpSocket};
 use crate::networking::utils::{ring::Ring, slice::Slice};
 use crate::networking::Result;
@@ -29,9 +29,7 @@ impl SocketEnv {
     pub fn raw_socket(&self, raw_type: RawType) -> RawSocket {
         let header_len = match raw_type {
             RawType::Ethernet => EthernetFrame::HEADER_LEN,
-            RawType::Ipv4 => {
-                EthernetFrame::HEADER_LEN + Ipv4Packet::MIN_HEADER_LEN
-            }
+            RawType::Ipv4 => EthernetFrame::HEADER_LEN + Ipv4Packet::MIN_HEADER_LEN,
         };
 
         let payload_len = self.interface_mtu.checked_sub(header_len).unwrap();
@@ -47,8 +45,8 @@ impl SocketEnv {
     pub fn udp_socket(&self, socket_addr: SocketAddr) -> Result<UdpSocket> {
         let binding = self.bindings.bind_udp(socket_addr)?;
 
-        let header_len = EthernetFrame::HEADER_LEN + Ipv4Packet::MIN_HEADER_LEN
-            + UdpPacket::HEADER_LEN;
+        let header_len =
+            EthernetFrame::HEADER_LEN + Ipv4Packet::MIN_HEADER_LEN + UdpPacket::HEADER_LEN;
 
         let payload_len = self.interface_mtu.checked_sub(header_len).unwrap();
 
@@ -72,4 +70,3 @@ impl SocketEnv {
     //     ))
     // }
 }
-

@@ -1,8 +1,8 @@
-use byteorder::{ByteOrder, NetworkEndian};
+use super::{EthernetAddress, Ipv4Address};
+use crate::networking::{Error, Result};
 use alloc::vec;
 use alloc::vec::Vec;
-use crate::networking::{Error, Result};
-use super::{EthernetAddress, Ipv4Address};
+use byteorder::{ByteOrder, NetworkEndian};
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,19 +24,19 @@ pub mod Hardware {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Packet {
-    pub op: u8,  // 1 = BOOTREQUEST, 2 = BOOTREPLY
-    pub htype: u8,  // Hardware address type (1 = Ethernet)
-    pub hlen: u8,  // Hardware address length (6 for Ethernet)
-    pub hops: u8,  // Used by relay agents
-    pub xid: u32,  // Transaction ID
-    pub secs: u16,  // Seconds elapsed since client began acquisition
-    pub flags: u16,  // Flags
-    pub ciaddr: Ipv4Address,  // Client IP address
-    pub yiaddr: Ipv4Address,  // Your (client) IP address
-    pub siaddr: Ipv4Address,  // Next server IP address
-    pub giaddr: Ipv4Address,  // Relay agent IP address
+    pub op: u8,                   // 1 = BOOTREQUEST, 2 = BOOTREPLY
+    pub htype: u8,                // Hardware address type (1 = Ethernet)
+    pub hlen: u8,                 // Hardware address length (6 for Ethernet)
+    pub hops: u8,                 // Used by relay agents
+    pub xid: u32,                 // Transaction ID
+    pub secs: u16,                // Seconds elapsed since client began acquisition
+    pub flags: u16,               // Flags
+    pub ciaddr: Ipv4Address,      // Client IP address
+    pub yiaddr: Ipv4Address,      // Your (client) IP address
+    pub siaddr: Ipv4Address,      // Next server IP address
+    pub giaddr: Ipv4Address,      // Relay agent IP address
     pub chaddr: EthernetAddress,  // Client hardware address
-    pub options: Vec<DhcpOption>,  // DHCP options
+    pub options: Vec<DhcpOption>, // DHCP options
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -92,11 +92,11 @@ impl DhcpOption {
 impl Packet {
     // DHCP packet has a fixed-size header of 236 bytes before options
     const MIN_PACKET_LEN: usize = 236;
-    const MAGIC_COOKIE: [u8; 4] = [99, 130, 83, 99];  // RFC 1497 magic cookie
+    const MAGIC_COOKIE: [u8; 4] = [99, 130, 83, 99]; // RFC 1497 magic cookie
 
     pub fn new_discover(xid: u32, client_mac: EthernetAddress) -> Self {
         let mut packet = Packet {
-            op: 1,  // BOOTREQUEST
+            op: 1, // BOOTREQUEST
             htype: Hardware::ETHERNET,
             hlen: 6,
             hops: 0,
@@ -110,15 +110,22 @@ impl Packet {
             chaddr: client_mac,
             options: Vec::new(),
         };
-        
-        packet.options.push(DhcpOption::message_type(MessageType::Discover));
+
+        packet
+            .options
+            .push(DhcpOption::message_type(MessageType::Discover));
         packet.options.push(DhcpOption::end());
         packet
     }
 
-    pub fn new_request(xid: u32, client_mac: EthernetAddress, requested_ip: Ipv4Address, server_ip: Ipv4Address) -> Self {
+    pub fn new_request(
+        xid: u32,
+        client_mac: EthernetAddress,
+        requested_ip: Ipv4Address,
+        server_ip: Ipv4Address,
+    ) -> Self {
         let mut packet = Packet {
-            op: 1,  // BOOTREQUEST
+            op: 1, // BOOTREQUEST
             htype: Hardware::ETHERNET,
             hlen: 6,
             hops: 0,
@@ -132,10 +139,14 @@ impl Packet {
             chaddr: client_mac,
             options: Vec::new(),
         };
-        
-        packet.options.push(DhcpOption::message_type(MessageType::Request));
+
+        packet
+            .options
+            .push(DhcpOption::message_type(MessageType::Request));
         packet.options.push(DhcpOption::requested_ip(requested_ip));
-        packet.options.push(DhcpOption::server_identifier(server_ip));
+        packet
+            .options
+            .push(DhcpOption::server_identifier(server_ip));
         packet.options.push(DhcpOption::end());
         packet
     }
@@ -156,12 +167,16 @@ impl Packet {
         let yiaddr = Ipv4Address::from_bytes(&buffer[16..20])?;
         let siaddr = Ipv4Address::from_bytes(&buffer[20..24])?;
         let giaddr = Ipv4Address::from_bytes(&buffer[24..28])?;
-        
+
         let mut chaddr_bytes = [0u8; 6];
         chaddr_bytes.copy_from_slice(&buffer[28..34]);
         let chaddr = EthernetAddress::from_bytes(&[
-            chaddr_bytes[0], chaddr_bytes[1], chaddr_bytes[2],
-            chaddr_bytes[3], chaddr_bytes[4], chaddr_bytes[5]
+            chaddr_bytes[0],
+            chaddr_bytes[1],
+            chaddr_bytes[2],
+            chaddr_bytes[3],
+            chaddr_bytes[4],
+            chaddr_bytes[5],
         ]);
 
         if buffer.len() < 240 || buffer[236..240] != Self::MAGIC_COOKIE {
@@ -170,57 +185,70 @@ impl Packet {
 
         let mut options = Vec::new();
         let mut i = 240;
-        
+
         while i < buffer.len() {
             let code = buffer[i];
             i += 1;
-            
-            if code == 0 {  // Padding
+
+            if code == 0 {
+                // Padding
                 continue;
             }
-            
-            if code == 255 {  // End of options
+
+            if code == 255 {
+                // End of options
                 options.push(DhcpOption::end());
                 break;
             }
-            
+
             if i >= buffer.len() {
                 return Err(Error::Malformed);
             }
-            
+
             let len = buffer[i] as usize;
             i += 1;
-            
+
             if i + len > buffer.len() {
                 return Err(Error::Malformed);
             }
-            
+
             let mut data = vec![0u8; len];
-            data.copy_from_slice(&buffer[i..i+len]);
+            data.copy_from_slice(&buffer[i..i + len]);
             options.push(DhcpOption::new(code, data));
-            
+
             i += len;
         }
 
         Ok(Packet {
-            op, htype, hlen, hops, xid, secs, flags,
-            ciaddr, yiaddr, siaddr, giaddr, chaddr: chaddr.unwrap(),
+            op,
+            htype,
+            hlen,
+            hops,
+            xid,
+            secs,
+            flags,
+            ciaddr,
+            yiaddr,
+            siaddr,
+            giaddr,
+            chaddr: chaddr.unwrap(),
             options,
         })
     }
 
     pub fn serialize(&self) -> Vec<u8> {
-        let mut options_size = 5;  // 4 bytes for magic cookie + 1 byte for end option
+        let mut options_size = 5; // 4 bytes for magic cookie + 1 byte for end option
         for option in &self.options {
-            if option.code == 255 {  // End option
+            if option.code == 255 {
+                // End option
                 continue;
             }
-            options_size += 2 + option.data.len();  // Code + length + data
+            options_size += 2 + option.data.len(); // Code + length + data
         }
 
         let total_size = Self::MIN_PACKET_LEN + options_size;
         let mut buffer = vec![0u8; total_size];
-        
+
         // Fixed header
         buffer[0] = self.op;
         buffer[1] = self.htype;
@@ -234,32 +262,33 @@ impl Packet {
         buffer[20..24].copy_from_slice(&self.siaddr.as_bytes());
         buffer[24..28].copy_from_slice(&self.giaddr.as_bytes());
         buffer[28..34].copy_from_slice(&self.chaddr.as_bytes());
-        
+
         // sname and file fields are left as zeros
-        
+
         // Magic cookie
         buffer[236..240].copy_from_slice(&Self::MAGIC_COOKIE);
-        
+
         // Options
         let mut pos = 240;
         for option in &self.options {
-            if option.code == 255 {  // End option
+            if option.code == 255 {
+                // End option
                 continue;
             }
-            
+
             buffer[pos] = option.code;
             pos += 1;
-            
+
             buffer[pos] = option.data.len() as u8;
             pos += 1;
-            
-            buffer[pos..pos+option.data.len()].copy_from_slice(&option.data);
+
+            buffer[pos..pos + option.data.len()].copy_from_slice(&option.data);
             pos += option.data.len();
         }
-        
+
         // End option
         buffer[pos] = 255;
-        
+
         buffer
     }
 
@@ -341,7 +370,7 @@ impl Packet {
         if let Some(data) = self.get_option(6) {
             if data.len() % 4 == 0 {
                 for i in (0..data.len()).step_by(4) {
-                    if let Ok(ip) = Ipv4Address::from_bytes(&data[i..i+4]) {
+                    if let Ok(ip) = Ipv4Address::from_bytes(&data[i..i + 4]) {
                         servers.push(ip);
                     }
                 }

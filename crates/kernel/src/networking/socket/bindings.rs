@@ -1,17 +1,13 @@
-use core::cell::RefCell;
-use core::fmt::{
-    Display,
-    Formatter,
-    Result as FmtResult,
-};
-use core::ops::Deref;
-use core::hash::Hash;
-use core::cmp::Ordering;
-use alloc::rc::Rc;
 use alloc::collections::btree_set::BTreeSet;
+use alloc::rc::Rc;
+use core::cell::RefCell;
+use core::cmp::Ordering;
+use core::fmt::{Display, Formatter, Result as FmtResult};
+use core::hash::Hash;
+use core::ops::Deref;
 
 use crate::networking::repr::Ipv4Address;
-use crate::networking::{ Error, Result };
+use crate::networking::{Error, Result};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 // An IPv4 + port socket address.
@@ -52,7 +48,7 @@ impl Ord for TaggedSocketAddr {
                 }
                 // Then compare ports
                 addr1.port.cmp(&addr2.port)
-            },
+            }
             // For future extension with TCP support:
             // (TaggedSocketAddr::Tcp(addr1), TaggedSocketAddr::Tcp(addr2)) => {
             //     // First compare IP addresses as bytes
@@ -170,4 +166,3 @@ impl Bindings {
         }
     }
 }
-

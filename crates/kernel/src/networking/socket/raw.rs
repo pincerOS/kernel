@@ -1,5 +1,5 @@
 use crate::networking::utils::{ring::Ring, slice::Slice};
-use crate::networking::{Result};
+use crate::networking::Result;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RawType {
@@ -32,11 +32,11 @@ impl RawSocket {
         self.send_buffer.enqueue_maybe(|buffer| {
             buffer.try_resize(buffer_len, 0)?;
 
-            for i in 0 .. buffer_len {
+            for i in 0..buffer_len {
                 buffer[i] = 0;
             }
 
-            return Ok(&mut buffer[.. buffer_len]);
+            return Ok(&mut buffer[..buffer_len]);
         })
     }
 

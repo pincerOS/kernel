@@ -8,19 +8,19 @@
 +-----------------------------------------------------------+
 */
 
-use byteorder::{ByteOrder, NetworkEndian};
-use core::fmt;
 use alloc::vec;
 use alloc::vec::Vec;
+use byteorder::{ByteOrder, NetworkEndian};
+use core::fmt;
 
-use crate::networking::{Result, Error};
+use crate::networking::{Error, Result};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Address([u8; 6]);
 
 impl Address {
     pub const BROADCAST: Address = Address([0xFF; 6]);
-    
+
     pub fn from_bytes(data: &[u8]) -> Result<Address> {
         if data.len() != 6 {
             return Err(Error::Malformed);
@@ -58,8 +58,11 @@ impl Address {
 
 impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "MAC: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-            self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5])
+        write!(
+            f,
+            "MAC: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+            self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5]
+        )
     }
 }
 
@@ -83,27 +86,27 @@ impl Frame {
 
     pub fn deserialize(buf: &[u8]) -> Result<Self> {
         // check if this is a possible ethernet frame
-        if buf.len() < Self::HEADER_LEN + Self::MIN_BUF_LEN { 
+        if buf.len() < Self::HEADER_LEN + Self::MIN_BUF_LEN {
             return Err(Error::Malformed);
         }
 
         let dst = Address::from_bytes(&buf[0..6])?;
         let src = Address::from_bytes(&buf[6..12])?;
-        
+
         let ethertype = NetworkEndian::read_u16(&buf[12..14]);
-        
+
         let payload_end = buf.len() - 4;
         let payload = buf[14..payload_end].to_vec();
-        
+
         // let raw_fcs = u32::from_be_bytes([
-        //     buf[payload_end], 
-        //     buf[payload_end + 1], 
-        //     buf[payload_end + 2], 
+        //     buf[payload_end],
+        //     buf[payload_end + 1],
+        //     buf[payload_end + 2],
         //     buf[payload_end + 3]
         // ]);
-        //     
+        //
         // let fcs = Some(raw_fcs);
-        
+
         Ok(Frame {
             dst,
             src,
@@ -134,18 +137,18 @@ impl Frame {
     }
 
     // pub fn calculate_and_fill_fcs(&mut self) { }
-    // 
+    //
     // pub fn verify_fcs(&self) -> bool { }
 }
 
 fn calculate_crc32(data: &[u8]) -> u32 {
     const CRC32_POLYNOMIAL: u32 = 0x04C11DB7;
-    
+
     let mut crc: u32 = 0xFFFFFFFF;
-    
+
     for &byte in data {
         crc ^= (byte as u32) << 24;
-        
+
         for _ in 0..8 {
             if (crc & 0x80000000) != 0 {
                 crc = (crc << 1) ^ CRC32_POLYNOMIAL;
@@ -154,9 +157,8 @@ fn calculate_crc32(data: &[u8]) -> u32 {
             }
         }
     }
-    
+
     crc ^= 0xFFFFFFFF;
-    
+
     crc
 }
-
