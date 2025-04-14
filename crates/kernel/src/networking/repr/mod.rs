@@ -22,11 +22,11 @@ mod arp;
 mod ipv4;
 mod icmp;
 mod udp;
-mod dhcp;
+// mod dhcp;
 pub mod dev;
 
 pub use self::ethernet::{
-    eth_types as EthernetType, Address as EthernetAddress, Frame as EthernetFrame,
+    EtherType as EthernetType, Address as EthernetAddress, Frame as EthernetFrame,
 };
 
 pub use self::arp::{
@@ -35,14 +35,14 @@ pub use self::arp::{
 
 pub use self::ipv4::{
     Address as Ipv4Address, AddressCidr as Ipv4Cidr, Packet as Ipv4Packet,
-    Repr as Ipv4Repr, Protocol as Ipv4Protocol
+    Protocol as Ipv4Protocol
 };
 
 pub use self::icmp::{
     DestinationUnreachable as IcmpDstUnreachable, Message as IcmpMessage, Packet as IcmpPacket,
-    Repr as IcmpRepr, TimeExceeded as IcmpTimeExceeded,
+    TimeExceeded as IcmpTimeExceeded,
 };
 
-pub use self::udp::{Packet as UdpPacket, Repr as UdpRepr};
+pub use self::udp::Packet as UdpPacket;
 
-pub use self::dhcp::{Packet as DHCPPacket, OpCode as DHCPOp};
+// pub use self::dhcp::{Packet as DHCPPacket, OpCode as DHCPOp};
