@@ -1,5 +1,5 @@
-use crate::networking::repr::{EthernetType, ArpPacket, ArpOperation, EthernetAddress, EthernetFrame, Ipv4Address};
-use crate::networking::iface::{ethernet,Interface};
+use crate::networking::repr::*;
+use crate::networking::iface::{ethernet, Interface};
 
 use crate::networking::{Error,Result};
 
@@ -10,11 +10,11 @@ pub fn send_arp_packet(
     arp_repr: &ArpPacket,
     dst_addr: EthernetAddress,
 ) -> Result<()> {
-    ethernet::send_frame(interface, arp_repr.serialize(), dst_addr, EthernetType::ARP)
+    ethernet::send_ethernet_frame(interface, arp_repr.serialize(), dst_addr, EthernetType::ARP)
 }
 
 pub fn recv_arp_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Result<()> {
-    let arp_repr = ArpPacket::deserialize(eth_frame.payload)?;
+    let arp_repr = ArpPacket::deserialize(eth_frame.payload.as_slice())?;
 
     if arp_repr.target_proto_addr != *interface.ipv4_addr {
         return Err(Error::Ignored);

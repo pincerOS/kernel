@@ -22,15 +22,15 @@ impl SocketEnv {
     pub fn new(interface: &Interface) -> SocketEnv {
         SocketEnv {
             bindings: Bindings::new(),
-            interface_mtu: 1500,
+            interface_mtu: interface.dev.mtu(),
         }
     }
 
     pub fn raw_socket(&self, raw_type: RawType) -> RawSocket {
         let header_len = match raw_type {
-            RawType::Ethernet => EthernetFrame::<&[u8]>::HEADER_LEN,
+            RawType::Ethernet => EthernetFrame::HEADER_LEN,
             RawType::Ipv4 => {
-                EthernetFrame::<&[u8]>::HEADER_LEN + Ipv4Packet::<&[u8]>::MIN_HEADER_LEN
+                EthernetFrame::HEADER_LEN + Ipv4Packet::MIN_HEADER_LEN
             }
         };
 
@@ -47,8 +47,8 @@ impl SocketEnv {
     pub fn udp_socket(&self, socket_addr: SocketAddr) -> Result<UdpSocket> {
         let binding = self.bindings.bind_udp(socket_addr)?;
 
-        let header_len = EthernetFrame::<&[u8]>::HEADER_LEN + Ipv4Packet::<&[u8]>::MIN_HEADER_LEN
-            + UdpPacket::<&[u8]>::HEADER_LEN;
+        let header_len = EthernetFrame::HEADER_LEN + Ipv4Packet::MIN_HEADER_LEN
+            + UdpPacket::HEADER_LEN;
 
         let payload_len = self.interface_mtu.checked_sub(header_len).unwrap();
 
