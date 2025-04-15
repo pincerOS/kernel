@@ -6,6 +6,7 @@ pub mod gic;
 pub mod gpio;
 pub mod mailbox;
 pub mod rng;
+pub mod sdcard;
 pub mod system_timer;
 pub mod usb;
 pub mod watchdog;
