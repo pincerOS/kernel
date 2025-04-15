@@ -14,7 +14,7 @@ impl TaggedSocket {
     //         _ => panic!("Not a raw socket!"),
     //     }
     // }
-
+    #[allow(unreachable_patterns)]
     pub fn as_udp_socket(&mut self) -> &mut UdpSocket {
         match *self {
             TaggedSocket::Udp(ref mut socket) => socket,

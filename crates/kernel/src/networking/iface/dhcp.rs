@@ -3,7 +3,6 @@ use crate::networking::repr::*;
 use crate::networking::{Error, Result};
 use alloc::vec;
 use alloc::vec::Vec;
-use core::time::Duration;
 use log::{debug, info};
 
 const DHCP_SERVER_PORT: u16 = 67;
