@@ -71,6 +71,7 @@ dependencies = [
  "device-tree",
  "elf",
  "endian",
+ "filesystem",
  "initfs",
  "linked_list_allocator",
  "smallbox",

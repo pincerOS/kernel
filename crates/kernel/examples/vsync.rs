@@ -4,8 +4,12 @@
 extern crate alloc;
 extern crate kernel;
 
-use device::{discover_compatible, find_device_addr, mailbox};
-use kernel::*;
+use device::{discover_compatible, find_device_addr, mailbox, sdcard};
+use kernel::{
+    device::{sdcard::SD, MAILBOX},
+    sync::SpinLock,
+    *,
+};
 
 #[no_mangle]
 extern "Rust" fn kernel_main(tree: device_tree::DeviceTree<'static>) {
@@ -17,16 +21,26 @@ extern "Rust" fn kernel_main(tree: device_tree::DeviceTree<'static>) {
 }
 
 async fn main(tree: device_tree::DeviceTree<'static>) {
-    let mailbox = discover_compatible(&tree, b"brcm,bcm2835-mbox")
+    // Should use this on hardware
+    // let sdcard = discover_compatible(&tree, b"brcm,bcm2711-emmc2")
+    //         .unwrap()
+    //         .next()
+    //         .unwrap();
+    // The bcm2835-sdhci requires additional gpio pin initialization which could possibly conflict with other drivers that need those pinss
+    let sdcard = discover_compatible(&tree, b"brcm,bcm2835-sdhci")
         .unwrap()
         .next()
         .unwrap();
-    let (mailbox_addr, _) = find_device_addr(mailbox).unwrap().unwrap();
-    let mailbox_base = unsafe { memory::map_device(mailbox_addr) }.as_ptr();
-    let mut mailbox = unsafe { mailbox::VideoCoreMailbox::init(mailbox_base) };
+    let (sdcard_addr, _) = find_device_addr(sdcard).unwrap().unwrap();
+    let sdcard_base = unsafe { memory::map_device(sdcard_addr) }.as_ptr();
+    println!("| SD Card controller addr: {:#010x}", sdcard_addr as usize);
+    println!("| SD Card controller base: {:#010x}", sdcard_base as usize);
+    let sdcard = unsafe { sdcard::bcm2711_emmc2_driver::init(sdcard_base) };
+    unsafe { SD.init(SpinLock::new(sdcard)) };
+    println!("| initialized SD Card");
 
     println!("| acquiring framebuffer");
-    let mut surface = unsafe { mailbox.map_framebuffer_kernel(640, 480) };
+    let mut surface = unsafe { MAILBOX.get().lock().map_framebuffer_kernel(640, 480) };
 
     println!("| starting vsync demo; make sure to run with 'just run-ui'");
     vsync_tearing_demo(&mut surface).await;
@@ -50,5 +64,7 @@ async fn vsync_tearing_demo(surface: &mut mailbox::Surface) {
 
         surface.present();
         surface.wait_for_frame().await;
+        // println!("SD Capacity: {}", SD.get().lock().get_capacity());
+        // println!("SD Block Size: {}", SD.get().lock().get_block_size());
     }
 }
