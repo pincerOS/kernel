@@ -1,4 +1,6 @@
-use crate::sync::{InterruptSpinLock, UnsafeInit, Volatile};
+use crate::sync::{spin_sleep, InterruptSpinLock, UnsafeInit, Volatile};
+
+use super::MAILBOX;
 
 // https://documentation-service.arm.com/static/5e8e36c2fd977155116a90b5
 
@@ -67,6 +69,20 @@ impl UARTInner {
             //     while ( (mmio_read(MBOX_STATUS) & 0x40000000) || mmio_read(MBOX_READ) != r ) { }
             // }
 
+            let mut buffer = [0u128; 3];
+            let words: &mut [u32] = bytemuck::cast_slice_mut::<_, u32>(&mut buffer);
+            // let buffer_size = (words.len() * size_of::<u32>()) as u32;
+            let data: [u32; 9] = [36, 0, 0x00038002, 12, 0x8, 2, 3000000, 0, 0];
+            words[..data.len()].copy_from_slice(&data);
+            MAILBOX.get().lock().mailbox_call(8, &mut buffer).unwrap();
+
+            spin_sleep(1000000);
+
+            // panic!();
+
+            // let words: &[u32; BUFFER_WORDS] =
+            //     bytemuck::cast_slice::<_, u32>(&buffer).try_into().unwrap();
+
             // Divider = 3000000 / (16 * 115200) = 1.627 = ~1.
             this.reg(Self::UART_IBRD).write(1);
             // Fractional part register = (.627 * 64) + 0.5 = 40.6 = ~40.
@@ -105,6 +121,10 @@ impl UARTInner {
         (unsafe { self.reg(Self::UART_FR).read() } & (1 << 4) > 0)
     }
     pub fn writec(&mut self, c: u8) {
+        if super::LED_OUT.is_initialized() {
+            super::LED_OUT.get().put(c);
+            // crate::sync::spin_sleep(33 * 1000);
+        }
         unsafe {
             while self.transmit_fifo_full() {}
             self.reg(Self::UART_DR).write(c as u32);
@@ -152,17 +172,17 @@ impl core::fmt::Write for &UARTLock {
     }
 }
 
-#[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => {{
-        use core::fmt::Write;
-        write!($crate::device::uart::UART.get(), $($arg)*).ok();
-    }};
-}
-#[macro_export]
-macro_rules! println {
-    ($($arg:tt)*) => {{
-        use core::fmt::Write;
-        writeln!($crate::device::uart::UART.get(), $($arg)*).ok();
-    }};
-}
+// #[macro_export]
+// macro_rules! print {
+//     ($($arg:tt)*) => {{
+//         use core::fmt::Write;
+//         write!($crate::device::uart::UART.get(), $($arg)*).ok();
+//     }};
+// }
+// #[macro_export]
+// macro_rules! println {
+//     ($($arg:tt)*) => {{
+//         use core::fmt::Write;
+//         writeln!($crate::device::uart::UART.get(), $($arg)*).ok();
+//     }};
+// }

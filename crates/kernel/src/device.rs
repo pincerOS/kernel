@@ -1,5 +1,6 @@
 #[macro_use]
 pub mod uart;
+#[macro_use]
 pub mod bcm2835_aux;
 pub mod bcm2836_intc;
 pub mod gic;
@@ -11,7 +12,6 @@ pub mod usb;
 pub mod watchdog;
 
 use crate::device::usb::usbd::device::UsbBus;
-use crate::memory;
 use crate::memory::{map_device, map_device_block};
 use crate::sync::{SpinLock, UnsafeInit};
 use alloc::boxed::Box;
@@ -103,8 +103,69 @@ pub static MAILBOX: UnsafeInit<SpinLock<mailbox::VideoCoreMailbox>> =
 
 pub static BOX: UnsafeInit<Box<UsbBus>> = unsafe { UnsafeInit::uninit() };
 
+pub static LED_OUT: UnsafeInit<LEDDebugger> = unsafe { UnsafeInit::uninit() };
+
+pub struct LEDDebugger {
+    pins: [u8; 8],
+}
+impl LEDDebugger {
+    pub fn init(pins: [u8; 8]) -> Self {
+        let mut gpio = GPIO.get().lock();
+        for pin in pins {
+            gpio.set_function(pin, gpio::GpioFunction::Output);
+        }
+        Self { pins }
+    }
+    pub fn put(&self, value: u8) {
+        let mut gpio = GPIO.get().lock();
+        let mut value = value;
+        for pin in self.pins.iter().rev().copied() {
+            if (value & 1) == 0 {
+                gpio.set_low(pin);
+            } else {
+                gpio.set_high(pin);
+            }
+            value >>= 1;
+        }
+    }
+    pub fn sleep(&self, time: u64) {
+        let timer = system_timer::SYSTEM_TIMER.get();
+        let target = timer.get_time() + time;
+        while timer.get_time() < target {
+            core::hint::spin_loop();
+        }
+    }
+}
+
 pub fn init_devices(tree: &DeviceTree<'_>) {
     let mut init_fns: Vec<InitTask> = Vec::new();
+
+    {
+        let gpio = discover_compatible(tree, b"brcm,bcm2711-gpio")
+            .unwrap()
+            .next()
+            .unwrap();
+        let (gpio_addr, _) = find_device_addr(gpio).unwrap().unwrap();
+        let gpio_base = unsafe { map_device(gpio_addr) }.as_ptr();
+        let gpio = unsafe { gpio::bcm2711_gpio_driver::init_with_defaults(gpio_base, true) };
+        unsafe { GPIO.init(SpinLock::new(gpio)) };
+    }
+
+    let debug = LEDDebugger::init([16, 20, 21, 6, 5, 22, 27, 17]);
+    unsafe { LED_OUT.init(debug) };
+
+    {
+        let mailbox = discover_compatible(&tree, b"brcm,bcm2835-mbox")
+            .unwrap()
+            .next()
+            .unwrap();
+        let (mailbox_addr, _) = find_device_addr(mailbox).unwrap().unwrap();
+        let mailbox_base = unsafe { map_device(mailbox_addr) }.as_ptr();
+        let mailbox = unsafe { mailbox::VideoCoreMailbox::init(mailbox_base) };
+        unsafe {
+            MAILBOX.init(SpinLock::new(mailbox));
+        }
+    }
 
     let mut uarts = discover_compatible(tree, b"arm,pl011").unwrap();
     {
@@ -113,16 +174,18 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let uart_base = unsafe { map_device(uart_addr) }.as_ptr();
 
         unsafe { uart::UART.init(uart::UARTLock::new(uart::UARTInner::new(uart_base))) };
-        println!("| initialized UART");
+        // println!("| initialized UART");
     }
 
     let mut miniuarts = discover_compatible(tree, b"brcm,bcm2835-aux").unwrap();
     if let Some(miniuart) = miniuarts.next() {
-        use core::fmt::Write;
         let (miniuart_addr, _) = find_device_addr(miniuart).unwrap().unwrap();
         let miniuart_base = unsafe { map_device(miniuart_addr) }.as_ptr();
-        let mut miniuart = unsafe { bcm2835_aux::MiniUart::new(miniuart_base) };
-        writeln!(miniuart, "| initialized Mini UART (bcm2835-aux)").ok();
+        // let mut miniuart = unsafe { bcm2835_aux::MiniUart::new(miniuart_base) };
+        unsafe {
+            bcm2835_aux::MINI_UART.init(SpinLock::new(bcm2835_aux::MiniUart::new(miniuart_base)))
+        };
+        // writeln!(miniuart, "| initialized Mini UART (bcm2835-aux)").ok();
         println!("| initialized Mini UART");
     }
 
@@ -143,15 +206,17 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
     }
 
     {
-        let mailbox = discover_compatible(&tree, b"brcm,bcm2835-mbox")
+        println!("| initializing timer");
+        let timer_iter = discover_compatible(tree, b"brcm,bcm2835-system-timer")
             .unwrap()
             .next()
             .unwrap();
-        let (mailbox_addr, _) = find_device_addr(mailbox).unwrap().unwrap();
-        let mailbox_base = unsafe { memory::map_device(mailbox_addr) }.as_ptr();
-        unsafe {
-            MAILBOX.init(SpinLock::new(mailbox::VideoCoreMailbox::init(mailbox_base)));
-        }
+        let (timer_addr, _) = find_device_addr(timer_iter).unwrap().unwrap();
+        let timer_base = unsafe { map_device(timer_addr) }.as_ptr();
+        println!("| timer addr: {:#010x}", timer_addr);
+        unsafe { system_timer::initialize_system_timer(timer_base) };
+        let time = system_timer::get_time();
+        println!("| timer initialized, time: {time}");
     }
 
     if let Some(gic) = discover_compatible(tree, b"arm,gic-400").unwrap().next() {
@@ -160,7 +225,6 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let gic_base = unsafe { map_device_block(gic_addr, 0x8000) }.as_ptr();
 
         println!("| GIC-400 addr: {:#010x}", gic_addr);
-        println!("| GIC-400 base: {:#010x}", gic_base as usize);
 
         let gic = unsafe { gic::Gic400Driver::init(gic_base) };
         unsafe { gic::GIC.init(gic) };
@@ -187,34 +251,6 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
                 bcm2836_intc::exception_handler_bcm2836_intc_irq,
             )
         }
-    }
-
-    {
-        println!("| initializing timer");
-        let timer_iter = discover_compatible(tree, b"brcm,bcm2835-system-timer")
-            .unwrap()
-            .next()
-            .unwrap();
-        let (timer_addr, _) = find_device_addr(timer_iter).unwrap().unwrap();
-        let timer_base = unsafe { map_device(timer_addr) }.as_ptr();
-        println!("| timer addr: {:#010x}", timer_addr);
-        unsafe { system_timer::initialize_system_timer(timer_base) };
-        let time = system_timer::get_time();
-        println!("| timer initialized, time: {time}");
-    }
-
-    {
-        let gpio = discover_compatible(tree, b"brcm,bcm2711-gpio")
-            .unwrap()
-            .next()
-            .unwrap();
-        let (gpio_addr, _) = find_device_addr(gpio).unwrap().unwrap();
-        let gpio_base = unsafe { map_device(gpio_addr) }.as_ptr();
-        println!("| GPIO controller addr: {:#010x}", gpio_addr);
-        println!("| GPIO controller base: {:#010x}", gpio_base as usize);
-        let gpio = unsafe { gpio::bcm2711_gpio_driver::init_with_defaults(gpio_base, true) };
-        unsafe { GPIO.init(SpinLock::new(gpio)) };
-        println!("| initialized GPIO");
     }
 
     if ENABLE_USB {
@@ -283,6 +319,8 @@ pub fn timer_handler(ctx: &mut crate::event::context::Context) {
 
 /// Discovers and starts all cores, and returns the number of cores found.
 pub fn enable_cpus(tree: &device_tree::DeviceTree<'_>, start_fn: unsafe extern "C" fn()) -> usize {
+    // return 1;
+
     use crate::memory::map_physical;
     use device_tree::format::StructEntry;
     use device_tree::util::find_node;
