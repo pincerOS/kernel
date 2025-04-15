@@ -15,6 +15,32 @@ pub extern "C" fn main() {
     let root_fd = 3;
     let path = b"shell.elf";
     let file = ulib::sys::openat(root_fd, path, 0, 0).unwrap();
+    
+    let test_file_path = b"test.txt";
+    let test_text_file = ulib::sys::openat(root_fd, test_file_path, 0, 0).unwrap();
+
+    static HELLO_CHARS: [u8; 5] = *b"hello";
+    //TODO: add mmap options flags to ulib 
+    let mmap_addr: *mut u8 = unsafe { ulib::sys::mmap(0, 4096, 0, 0, test_text_file, 0).unwrap() } as *mut u8;
+    println!("Memory range is mmaped!");    
+    /*
+    let mut val: usize = 0;
+    let val_ptr: *mut usize = &mut val;
+    //For debug
+    for i in 0..1000 {
+        let temp: usize = unsafe { val_ptr.read_volatile() };
+        println!("Read val: {}", temp);
+        unsafe { val_ptr.write_volatile(temp + 1)};
+    }
+    */
+    for i in 0..5 {
+        let curr_char: u8 = unsafe { *(mmap_addr.wrapping_add(i)) };
+        if curr_char != HELLO_CHARS[i] {
+            panic!("mmap filed file has an error at index {}! Expected {} got {}", i, HELLO_CHARS[i], curr_char);
+        }
+    }
+
+    println!("mmap of test file succeeded!");
 
     let child = spawn_elf(&ulib::sys::SpawnArgs {
         fd: file,
