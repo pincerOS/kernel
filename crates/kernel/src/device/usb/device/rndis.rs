@@ -15,7 +15,6 @@ use crate::device::usb::UsbControlMessage;
 
 use crate::device::usb::device::net::*;
 use crate::device::usb::PacketId;
-use crate::shutdown;
 use alloc::boxed::Box;
 use alloc::vec;
 
