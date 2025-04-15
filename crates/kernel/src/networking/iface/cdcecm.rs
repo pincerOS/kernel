@@ -1,6 +1,5 @@
-use crate::device::usb::device::rndis::rndis_receive_packet;
+
 use crate::networking::repr::dev::Device;
-use crate::networking::{Error, Result};
 
 use crate::device::usb::device::net::*;
 

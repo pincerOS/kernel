@@ -11,7 +11,6 @@ use core::slice;
 use crate::device::system_timer;
 
 use crate::networking::iface::cdcecm::CDCECM;
-use crate::networking::iface::ethernet::recv_ethernet_frame as recv_ethernet;
 use crate::networking::iface::Interface;
 use crate::networking::iface::*;
 use crate::networking::repr::*;
