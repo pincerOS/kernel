@@ -9,11 +9,11 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::ops::ControlFlow;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests;
 
-// #[cfg(feature = "std")]
-// pub mod linux;
+#[cfg(feature = "std")]
+pub mod linux;
 
 pub const SECTOR_SIZE: usize = 512;
 
