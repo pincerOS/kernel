@@ -39,6 +39,16 @@ pub struct Packet {
     pub options: Vec<DhcpOption>, // DHCP options
 }
 
+pub enum DhcpParam {
+    SubnetMask = 1,
+    TimeOffset = 2,
+    Router = 3,
+    DNS = 6,
+    Hostname = 12,
+    DomainName = 15,
+    BroadcastAddr = 28,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DhcpOption {
     pub code: u8,
@@ -54,34 +64,8 @@ impl DhcpOption {
         DhcpOption::new(53, vec![msg_type as u8])
     }
 
-    pub fn server_identifier(ip: Ipv4Address) -> Self {
-        DhcpOption::new(54, ip.as_bytes().to_vec())
-    }
-
-    pub fn requested_ip(ip: Ipv4Address) -> Self {
-        DhcpOption::new(50, ip.as_bytes().to_vec())
-    }
-
-    pub fn lease_time(seconds: u32) -> Self {
-        let mut data = vec![0u8; 4];
-        NetworkEndian::write_u32(&mut data, seconds);
-        DhcpOption::new(51, data)
-    }
-
-    pub fn subnet_mask(mask: Ipv4Address) -> Self {
-        DhcpOption::new(1, mask.as_bytes().to_vec())
-    }
-
-    pub fn router(router: Ipv4Address) -> Self {
-        DhcpOption::new(3, router.as_bytes().to_vec())
-    }
-
-    pub fn dns_servers(servers: &[Ipv4Address]) -> Self {
-        let mut data = Vec::with_capacity(servers.len() * 4);
-        for server in servers {
-            data.extend_from_slice(&server.as_bytes());
-        }
-        DhcpOption::new(6, data)
+    pub fn parameters(params: Vec<DhcpParam>) -> Self {
+        DhcpOption::new(55, params.into_iter().map(|p| p as u8).collect())
     }
 
     pub fn end() -> Self {
@@ -93,63 +77,6 @@ impl Packet {
     // DHCP packet has a fixed-size header of 236 bytes before options
     const MIN_PACKET_LEN: usize = 236;
     const MAGIC_COOKIE: [u8; 4] = [99, 130, 83, 99]; // RFC 1497 magic cookie
-
-    pub fn new_discover(xid: u32, client_mac: EthernetAddress) -> Self {
-        let mut packet = Packet {
-            op: 1, // BOOTREQUEST
-            htype: Hardware::ETHERNET,
-            hlen: 6,
-            hops: 0,
-            xid,
-            secs: 0,
-            flags: 0,
-            ciaddr: Ipv4Address::new([0, 0, 0, 0]),
-            yiaddr: Ipv4Address::new([0, 0, 0, 0]),
-            siaddr: Ipv4Address::new([0, 0, 0, 0]),
-            giaddr: Ipv4Address::new([0, 0, 0, 0]),
-            chaddr: client_mac,
-            options: Vec::new(),
-        };
-
-        packet
-            .options
-            .push(DhcpOption::message_type(MessageType::Discover));
-        packet.options.push(DhcpOption::end());
-        packet
-    }
-
-    pub fn new_request(
-        xid: u32,
-        client_mac: EthernetAddress,
-        requested_ip: Ipv4Address,
-        server_ip: Ipv4Address,
-    ) -> Self {
-        let mut packet = Packet {
-            op: 1, // BOOTREQUEST
-            htype: Hardware::ETHERNET,
-            hlen: 6,
-            hops: 0,
-            xid,
-            secs: 0,
-            flags: 0,
-            ciaddr: Ipv4Address::new([0, 0, 0, 0]),
-            yiaddr: Ipv4Address::new([0, 0, 0, 0]),
-            siaddr: Ipv4Address::new([0, 0, 0, 0]),
-            giaddr: Ipv4Address::new([0, 0, 0, 0]),
-            chaddr: client_mac,
-            options: Vec::new(),
-        };
-
-        packet
-            .options
-            .push(DhcpOption::message_type(MessageType::Request));
-        packet.options.push(DhcpOption::requested_ip(requested_ip));
-        packet
-            .options
-            .push(DhcpOption::server_identifier(server_ip));
-        packet.options.push(DhcpOption::end());
-        packet
-    }
 
     pub fn deserialize(buffer: &[u8]) -> Result<Self> {
         if buffer.len() < Self::MIN_PACKET_LEN {
@@ -237,16 +164,21 @@ impl Packet {
     }
 
     pub fn serialize(&self) -> Vec<u8> {
-        let mut options_size = 5; // 4 bytes for magic cookie + 1 byte for end option
+        let mut options_size = 4;
         for option in &self.options {
             if option.code == 255 {
-                // End option
-                continue;
+                options_size += 1;
+            } else {
+                options_size += 2 + option.data.len(); // TLV
             }
-            options_size += 2 + option.data.len(); // Code + length + data
         }
 
-        let total_size = Self::MIN_PACKET_LEN + options_size;
+        // 236 + 4 + 3 + 9 + 1
+        println!("options_size {}", options_size);
+
+        let padding = 4 - ((Self::MIN_PACKET_LEN + options_size) % 4);
+
+        let total_size = Self::MIN_PACKET_LEN + options_size + padding;
         let mut buffer = vec![0u8; total_size];
 
         // Fixed header
@@ -257,22 +189,23 @@ impl Packet {
         NetworkEndian::write_u32(&mut buffer[4..8], self.xid);
         NetworkEndian::write_u16(&mut buffer[8..10], self.secs);
         NetworkEndian::write_u16(&mut buffer[10..12], self.flags);
+
         buffer[12..16].copy_from_slice(&self.ciaddr.as_bytes());
         buffer[16..20].copy_from_slice(&self.yiaddr.as_bytes());
         buffer[20..24].copy_from_slice(&self.siaddr.as_bytes());
         buffer[24..28].copy_from_slice(&self.giaddr.as_bytes());
+
         buffer[28..34].copy_from_slice(&self.chaddr.as_bytes());
 
-        // sname and file fields are left as zeros
+        // 34 -> 44 is padding for mac addr (must be 16B)
+        // 44 -> 108 server address is blank
+        // 108 -> 236 no boot file is blank
 
-        // Magic cookie
         buffer[236..240].copy_from_slice(&Self::MAGIC_COOKIE);
 
-        // Options
         let mut pos = 240;
         for option in &self.options {
             if option.code == 255 {
-                // End option
                 continue;
             }
 
@@ -286,7 +219,6 @@ impl Packet {
             pos += option.data.len();
         }
 
-        // End option
         buffer[pos] = 255;
 
         buffer
