@@ -15,6 +15,8 @@ use crate::networking::socket::SocketSet;
 use crate::networking::utils::arp_cache::ArpCache;
 use dhcp::DhcpClient;
 
+use alloc::vec::Vec;
+
 // based this interface setup off of: https://github.com/ykskb/rust-user-net
 
 // HACK: idk how to solve compile time device diff without generics, foudn this on stack exchange
@@ -24,6 +26,7 @@ pub struct Interface {
     pub ethernet_addr: EthernetAddress,
     pub ipv4_addr: Ipv4Cidr,
     pub default_gateway: Ipv4Address,
+    pub dns: Vec<Ipv4Address>,
 
     // TODO: supprt raw
     pub udp_sockets: SocketSet,
