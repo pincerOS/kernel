@@ -35,7 +35,6 @@ pub fn recv_udp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Re
     println!("\t received udp packet");
     let udp_packet = UdpPacket::deserialize(ipv4_packet.payload.as_slice())?;
 
-
     // let dst_socket_addr = SocketAddr {
     //     addr: ipv4_packet.dst_addr,
     //     port: udp_packet.dst_port,
@@ -67,12 +66,14 @@ pub fn recv_udp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Re
     //     }
     // };
 
-
-    if udp_packet.payload.len() >= 240 && (&udp_packet.payload[236..240] == &[0x63, 0x82, 0x53, 0x63]) {
-            let dhcp_packet = DhcpPacket::deserialize(udp_packet.payload.as_slice()).unwrap();
-            interface.dhcp.process_dhcp_packet(get_interface(), dhcp_packet);
+    if udp_packet.payload.len() >= 240
+        && (&udp_packet.payload[236..240] == &[0x63, 0x82, 0x53, 0x63])
+    {
+        let dhcp_packet = DhcpPacket::deserialize(udp_packet.payload.as_slice()).unwrap();
+        interface
+            .dhcp
+            .process_dhcp_packet(get_interface(), dhcp_packet);
     }
 
     Ok(())
-
 }
