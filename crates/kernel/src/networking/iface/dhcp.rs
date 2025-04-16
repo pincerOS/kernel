@@ -48,8 +48,8 @@ pub struct DhcpClient {
 
 impl DhcpClient {
     pub fn is_transacting(&mut self) -> bool {
-        self.state == DhcpState::Idle 
-            || self.state == DhcpState::Discovering 
+        self.state == DhcpState::Idle
+            || self.state == DhcpState::Discovering
             || self.state == DhcpState::Requesting
     }
     pub fn new() -> Self {
@@ -142,8 +142,8 @@ impl DhcpClient {
                     self.last_action_time = system_timer::get_time();
                     self.retries = DEFAULT_LEASE_RETRY;
 
-                    // send_dhcp_request(interface, self.xid, offered_ip, server_id)?;
-                    send_dhcp_packet_workaround(interface, self.xid, offered_ip, server_id, packet)?;
+                    send_dhcp_request(interface, self.xid, offered_ip, server_id)?;
+                    // send_dhcp_packet_workaround(interface, self.xid, offered_ip, server_id, packet)?;
                 } else {
                     return Err(Error::Malformed);
                 }
@@ -191,9 +191,9 @@ impl DhcpClient {
                 self.state = DhcpState::Bound;
                 self.last_action_time = system_timer::get_time();
 
-                info!(
-                    "DHCP: Bound to IP {} with lease time {} seconds",
-                    packet.yiaddr,
+                println!(
+                    "\t[+] DHCP: Bound to IP {} with lease time {} seconds",
+                    interface.ipv4_addr,
                     self.lease_time.unwrap_or(0)
                 );
             }
@@ -408,7 +408,13 @@ fn send_dhcp_packet(interface: &mut Interface, packet: &DhcpPacket) -> Result<()
     )
 }
 
-fn send_dhcp_packet_workaround(interface: &mut Interface, xid: u32, requested_ip: Ipv4Address, server_id: Ipv4Address, packet: DhcpPacket) -> Result<()> {
+fn send_dhcp_packet_workaround(
+    interface: &mut Interface,
+    xid: u32,
+    requested_ip: Ipv4Address,
+    server_id: Ipv4Address,
+    packet: DhcpPacket,
+) -> Result<()> {
     let sub_mask = packet.get_subnet_mask().unwrap();
     let mask_bytes = sub_mask.as_bytes();
     let mut count = 0;
@@ -424,15 +430,12 @@ fn send_dhcp_packet_workaround(interface: &mut Interface, xid: u32, requested_ip
     interface.ipv4_addr = Ipv4Cidr::new(packet.yiaddr, count as u32).unwrap();
 
     if let Some(router) = packet.get_router() {
-         interface.default_gateway = router;
+        interface.default_gateway = router;
     }
 
     interface.dns = packet.get_dns_servers();
 
-    println!(
-        "DHCP: Bound to IP {}",
-        interface.ipv4_addr,
-    );
+    println!("DHCP: Bound to IP {}", interface.ipv4_addr,);
 
     let packet = DhcpPacket {
         op: 1,    // BOOTREQUEST
@@ -467,13 +470,20 @@ fn send_dhcp_packet_workaround(interface: &mut Interface, xid: u32, requested_ip
     let src_addr = Ipv4Address::new([0, 0, 0, 0]);
     let dst_addr = Ipv4Address::new([255, 255, 255, 255]);
 
-    let udp_packet = UdpPacket::new(DHCP_CLIENT_PORT, DHCP_SERVER_PORT, 
-        packet.serialize(), 
+    let udp_packet = UdpPacket::new(
+        DHCP_CLIENT_PORT,
+        DHCP_SERVER_PORT,
+        packet.serialize(),
         src_addr,
-        dst_addr
+        dst_addr,
     );
 
-    let ipv4_packet = Ipv4Packet::new(src_addr, dst_addr, Ipv4Protocol::UDP, udp_packet.serialize());
+    let ipv4_packet = Ipv4Packet::new(
+        src_addr,
+        dst_addr,
+        Ipv4Protocol::UDP,
+        udp_packet.serialize(),
+    );
 
     ethernet::send_ethernet_frame(
         interface,

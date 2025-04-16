@@ -30,7 +30,7 @@ pub fn recv_ip_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Re
     }
 
     // TODO: broadcast
-    if ipv4_packet.dst_addr != *interface.ipv4_addr 
+    if ipv4_packet.dst_addr != *interface.ipv4_addr
         && !interface.ipv4_addr.is_member(ipv4_packet.dst_addr)
         && !interface.ipv4_addr.is_broadcast(ipv4_packet.dst_addr)
         && !interface.dhcp.is_transacting()
