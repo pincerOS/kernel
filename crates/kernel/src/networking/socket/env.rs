@@ -59,6 +59,7 @@ impl SocketEnv {
             Ring::from(vec![(payload, addr); UDP_SOCKET_PACKETS])
         };
 
+        // Ok(UdpSocket::new(binding, buffer(), buffer()))
         Ok(UdpSocket::new(binding, buffer(), buffer()))
     }
 

@@ -28,6 +28,8 @@ pub fn recv_ip_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Re
         return Err(Error::Checksum);
     }
 
+    println!("Receeived IP packet");
+
     // TODO: broadcast
     if ipv4_packet.dst_addr != *interface.ipv4_addr {
         return Err(Error::Ignored);

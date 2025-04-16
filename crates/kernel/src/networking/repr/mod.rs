@@ -43,6 +43,6 @@ pub use self::icmp::{
 
 pub use self::udp::Packet as UdpPacket;
 
-pub use self::dhcp::{DhcpOption, MessageType as DhcpMessageType, Packet as DhcpPacket};
+pub use self::dhcp::{DhcpOption, DhcpParam, MessageType as DhcpMessageType, Packet as DhcpPacket};
 
 pub use self::tcp::{Flags as TcpFlags, Packet as TcpPacket};

@@ -1,6 +1,9 @@
 use crate::networking::iface::{udp, Interface};
 use crate::networking::repr::*;
 use crate::networking::{Error, Result};
+use crate::device::system_timer;
+use crate::device::usb::device::net::interface;
+
 use alloc::vec;
 use alloc::vec::Vec;
 use log::{debug, info};
@@ -58,21 +61,22 @@ impl DhcpClient {
             router: None,
             dns_servers: Vec::new(),
         }
+
     }
 
-    pub fn start(&mut self, interface: &mut Interface, current_time: u64) -> Result<()> {
+    pub fn start(&mut self) -> Result<()> {
         if self.state != DhcpState::Idle && self.state != DhcpState::Released {
-            return Ok(());
+            return Ok(()); // already in progress
         }
 
-        // Generate a random transaction ID
-        // In a real implementation, you'd use a secure random generator
-        self.xid = current_time as u32 ^ 0xABCD1234;
+        let time = system_timer::get_time();
+
+        self.xid = time as u32 ^ 0xDEADBEEF;
 
         self.state = DhcpState::Discovering;
-        self.last_action_time = current_time;
+        self.last_action_time = time;
 
-        send_dhcp_discover(interface, self.xid)
+        send_dhcp_discover(self.xid)
     }
 
     pub fn release(&mut self, interface: &mut Interface) -> Result<()> {
@@ -99,7 +103,7 @@ impl DhcpClient {
                     if self.retries > 0 {
                         self.retries -= 1;
                         self.last_action_time = current_time;
-                        send_dhcp_discover(interface, self.xid)?;
+                        send_dhcp_discover(self.xid)?;
                     } else {
                         // Too many retries, give up
                         self.state = DhcpState::Idle;
@@ -126,7 +130,7 @@ impl DhcpClient {
                         self.state = DhcpState::Discovering;
                         self.retries = DEFAULT_LEASE_RETRY;
                         self.last_action_time = current_time;
-                        send_dhcp_discover(interface, self.xid)?;
+                        send_dhcp_discover(self.xid)?;
                     }
                 }
             }
@@ -170,7 +174,7 @@ impl DhcpClient {
                     self.retries = DEFAULT_LEASE_RETRY;
                     self.xid = current_time as u32 ^ 0xABCD5678;
 
-                    send_dhcp_discover(interface, self.xid)?;
+                    send_dhcp_discover(self.xid)?;
                 }
             }
             _ => {} // No action needed for Idle or Released states
@@ -179,7 +183,6 @@ impl DhcpClient {
         Ok(())
     }
 
-    // TODO: connect this to UDP
     pub fn process_dhcp_packet(
         &mut self,
         interface: &mut Interface,
@@ -276,7 +279,7 @@ impl DhcpClient {
                 self.retries = DEFAULT_LEASE_RETRY;
                 self.xid = current_time as u32 ^ 0xEFEF1212;
 
-                send_dhcp_discover(interface, self.xid)?;
+                send_dhcp_discover(self.xid)?;
             }
             _ => {
                 // Ignore unexpected messages
@@ -292,8 +295,8 @@ impl DhcpClient {
     }
 }
 
-pub fn send_dhcp_discover(interface: &mut Interface, xid: u32) -> Result<()> {
-    debug!("DHCP: Sending DISCOVER");
+pub fn send_dhcp_discover(xid: u32) -> Result<()> {
+    println!("DHCP: Sending DISCOVER");
 
     let packet = DhcpPacket {
         op: 1,    // BOOTREQUEST
@@ -302,19 +305,28 @@ pub fn send_dhcp_discover(interface: &mut Interface, xid: u32) -> Result<()> {
         hops: 0,
         xid,
         secs: 0,
-        flags: 0x8000, // Broadcast flag
+        flags: 0x0000, 
         ciaddr: Ipv4Address::new([0, 0, 0, 0]),
         yiaddr: Ipv4Address::new([0, 0, 0, 0]),
         siaddr: Ipv4Address::new([0, 0, 0, 0]),
         giaddr: Ipv4Address::new([0, 0, 0, 0]),
-        chaddr: interface.ethernet_addr,
+        chaddr: interface().ethernet_addr,
         options: vec![
             DhcpOption::message_type(DhcpMessageType::Discover),
+            DhcpOption::parameters(vec![
+                DhcpParam::SubnetMask,
+                DhcpParam::BroadcastAddr,
+                DhcpParam::TimeOffset,
+                DhcpParam::Router,
+                DhcpParam::DomainName,
+                DhcpParam::DNS,
+                DhcpParam::Hostname,
+            ]),
             DhcpOption::end(),
         ],
     };
 
-    send_dhcp_packet(interface, &packet)
+    send_dhcp_packet(interface(), &packet)
 }
 
 pub fn send_dhcp_request(
@@ -340,8 +352,8 @@ pub fn send_dhcp_request(
         chaddr: interface.ethernet_addr,
         options: vec![
             DhcpOption::message_type(DhcpMessageType::Request),
-            DhcpOption::requested_ip(requested_ip),
-            DhcpOption::server_identifier(server_id),
+            // DhcpOption::requested_ip(requested_ip),
+            // DhcpOption::server_identifier(server_id),
             DhcpOption::end(),
         ],
     };
@@ -372,7 +384,7 @@ pub fn send_dhcp_renew(
         chaddr: interface.ethernet_addr,
         options: vec![
             DhcpOption::message_type(DhcpMessageType::Request),
-            DhcpOption::server_identifier(server_id),
+            // DhcpOption::server_identifier(server_id),
             DhcpOption::end(),
         ],
     };
@@ -433,7 +445,7 @@ pub fn send_dhcp_release(
         chaddr: interface.ethernet_addr,
         options: vec![
             DhcpOption::message_type(DhcpMessageType::Release),
-            DhcpOption::server_identifier(server_id),
+            // DhcpOption::server_identifier(server_id),
             DhcpOption::end(),
         ],
     };
@@ -443,16 +455,14 @@ pub fn send_dhcp_release(
 }
 
 fn send_dhcp_packet(interface: &mut Interface, packet: &DhcpPacket) -> Result<()> {
-    println!("woof!!!");
     let data = packet.serialize();
-    println!("meow!!!");
 
     udp::send_udp_packet(
         interface,
         interface.ipv4_addr.broadcast(),
         data,
-        DHCP_SERVER_PORT,
         DHCP_CLIENT_PORT,
+        DHCP_SERVER_PORT,
     )
 }
 
