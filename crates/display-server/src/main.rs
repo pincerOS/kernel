@@ -11,12 +11,7 @@ use alloc::vec::Vec;
 use proto::BufferHandle;
 use ulib::sys::{dup3, mmap, recv_nonblock, send, FileDesc};
 
-#[no_mangle]
-fn main() {
-    let fb = init_fb(640, 480);
-    let server_socket = 13;
-    handle_conns(fb, server_socket);
-}
+mod framebuffer;
 
 struct BufferInfo {
     fd: u32,
@@ -25,11 +20,26 @@ struct BufferInfo {
     mapped: *mut proto::BufferHeader,
 }
 
-fn handle_incoming(_msg: ulib::sys::Message, _buf: &[u8], resp_socket: FileDesc) -> BufferHandle {
+struct Client {
+    pos: (u16, u16),
+    handle: BufferHandle,
+}
+
+#[no_mangle]
+fn main() {
+    let fb = framebuffer::init_fb(640, 480);
+    let server_socket = 13;
+    handle_conns(fb, server_socket);
+}
+
+fn handle_incoming(_msg: ulib::sys::Message, buf: &[u8], resp_socket: FileDesc) -> Client {
     // TODO: proper listen + connect sockets
     // (this just broadcasts a response to all listeners and hopes that there aren't race conditions)
 
-    let buffer = init_buffer(640, 480);
+    let width = u16::from_ne_bytes(buf[0..2].try_into().unwrap()); // TODO: don't panic
+    let height = u16::from_ne_bytes(buf[2..4].try_into().unwrap()); // TODO: don't panic
+
+    let buffer = init_buffer(width as usize, height as usize);
 
     let fds = [buffer.fd, buffer.present_sem_fd];
     let handle = unsafe { proto::BufferHandle::new(buffer.mapped, &fds) };
@@ -52,7 +62,10 @@ fn handle_incoming(_msg: ulib::sys::Message, _buf: &[u8], resp_socket: FileDesc)
         0,
     );
 
-    handle
+    Client {
+        handle,
+        pos: (0, 0),
+    }
 }
 
 fn init_buffer(width: usize, height: usize) -> BufferInfo {
@@ -111,51 +124,7 @@ fn init_buffer(width: usize, height: usize) -> BufferInfo {
     }
 }
 
-fn present(fb: &mut Framebuffer, buf: &[u128]) {
-    proto::memcpy128(&mut fb.data, &buf);
-    // Force writes to go through
-    core::hint::black_box(&mut *fb);
-}
-
-#[allow(unused)]
-struct Framebuffer {
-    fd: usize,
-    width: usize,
-    height: usize,
-    stride: usize,
-    data: &'static mut [u128],
-}
-
-fn init_fb(width: usize, height: usize) -> Framebuffer {
-    let mut fb = ulib::sys::RawFB {
-        fd: 0,
-        size: 0,
-        pitch: 0,
-        width: 0,
-        height: 0,
-    };
-    let buffer_fd = unsafe { ulib::sys::sys_acquire_fb(width, height, &mut fb) };
-    println!("Buffer: {:?}", buffer_fd);
-    println!(
-        "buffer_size {}, width {}, height {}, pitch {}",
-        fb.size, fb.width, fb.height, fb.pitch
-    );
-
-    let mapped = unsafe { ulib::sys::mmap(0, fb.size, 0, 0, buffer_fd as u32, 0).unwrap() };
-    let framebuf = unsafe {
-        core::slice::from_raw_parts_mut::<u128>(mapped.cast(), fb.size / size_of::<u128>())
-    };
-
-    Framebuffer {
-        fd: buffer_fd as usize,
-        width: fb.width,
-        height: fb.height,
-        stride: fb.pitch / size_of::<u32>(),
-        data: framebuf,
-    }
-}
-
-fn handle_conns(mut fb: Framebuffer, server_socket: FileDesc) {
+fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
     let mut clients = Vec::new();
 
     // TODO: synchronization approach
@@ -171,17 +140,23 @@ fn handle_conns(mut fb: Framebuffer, server_socket: FileDesc) {
 
     let mut to_remove = Vec::<usize>::new();
 
+    let mut intermediate_fb = alloc::vec![0u128; fb.data.len()];
+
+    let mut active = 0;
+
     loop {
         let mut buf = [0u64; 32];
         while let Ok((len, msg)) = recv_nonblock(server_socket, bytemuck::bytes_of_mut(&mut buf)) {
             let buf = handle_incoming(msg, &bytemuck::bytes_of(&buf)[..len], server_socket);
+            active = clients.len(); // Select the newest window
             clients.push(buf);
         }
 
-        let client_count = clients.len();
-        for (i, buf) in clients.iter_mut().enumerate() {
+        let mut any_updated = false;
+
+        for (i, client) in clients.iter_mut().enumerate() {
             let mut ev_limit = 10;
-            while let Some(msg) = buf.client_to_server_queue().try_recv() {
+            while let Some(msg) = client.handle.client_to_server_queue().try_recv() {
                 if ev_limit == 0 {
                     break;
                 }
@@ -189,21 +164,45 @@ fn handle_conns(mut fb: Framebuffer, server_socket: FileDesc) {
                 match msg.kind {
                     proto::EventKind::PRESENT => {
                         // HACK: treat newest window as active
-                        if i == client_count - 1 {
-                            use proto::EventData;
-                            let proto::PresentEvent = proto::PresentEvent::parse(&msg).unwrap();
+                        use proto::EventData;
+                        let proto::PresentEvent = proto::PresentEvent::parse(&msg).unwrap();
 
-                            present(&mut fb, &buf.video_mem_u128());
-
-                            // TODO: better sync system here? this will accumulate if client
-                            // isn't waiting for acks
-                            ulib::sys::sem_up(buf.get_sem_fd(buf.present_sem)).unwrap();
-
-                            // TODO: better scheduling for this
-                            handle_key_events(&mut *buf);
-                        } else {
-                            ulib::sys::sem_up(buf.get_sem_fd(buf.present_sem)).unwrap();
+                        match i {
+                            0 => client.pos = (0, 0),
+                            1 => client.pos = (320, 0),
+                            2 => client.pos = (0, 240),
+                            3 => client.pos = (320, 240),
+                            _ => (),
                         }
+
+                        let window_x = client.pos.0 as usize;
+                        let window_y = client.pos.1 as usize;
+
+                        let out = bytemuck::cast_slice_mut(&mut intermediate_fb);
+                        let client_width = client.handle.video_meta.width as usize;
+                        let client_height = client.handle.video_meta.height as usize;
+                        let client_row_stride =
+                            client.handle.video_meta.row_stride as usize / size_of::<u32>();
+                        let client_fb = &*client.handle.video_mem();
+                        blit_buffer(
+                            out,
+                            fb.width,
+                            fb.height,
+                            fb.stride,
+                            window_x,
+                            window_y,
+                            client_fb,
+                            client_width,
+                            client_height,
+                            client_row_stride,
+                        );
+
+                        any_updated = true;
+
+                        // TODO: better sync system here? this will accumulate if client
+                        // isn't waiting for acks
+                        ulib::sys::sem_up(client.handle.get_sem_fd(client.handle.present_sem))
+                            .unwrap();
                     }
                     proto::EventKind::DISCONNECT => {
                         // TODO: auto-disconnect on process exit?
@@ -215,6 +214,48 @@ fn handle_conns(mut fb: Framebuffer, server_socket: FileDesc) {
                         // println!("{:?} {:?}", msg.kind.0, msg.data);
                     }
                 }
+            }
+        }
+
+        if any_updated {
+            framebuffer::present(&mut fb, &intermediate_fb);
+        }
+
+        // TODO: better scheduling for this
+        loop {
+            let key = unsafe { ulib::sys::sys_poll_key_event() };
+            if key < 0 {
+                break;
+            }
+            let pressed = (key & 0x100) != 0;
+            let code = key & 0xFF;
+            let code = remap_keycode(code);
+
+            match (code, pressed) {
+                (proto::ScanCode::TAB, true) => {
+                    // TODO: modifiers
+                    if clients.is_empty() {
+                        active = 0;
+                    } else {
+                        active = (active + 1) % clients.len();
+                    }
+                    println!("Switched active; active: {active}");
+                    continue;
+                }
+                _ => (),
+            }
+
+            let active = active.min(clients.len().saturating_sub(1));
+            if let Some(client) = clients.get_mut(active) {
+                let event = proto::InputEvent {
+                    kind: proto::InputEvent::KIND_KEY,
+                    data1: if pressed { 1 } else { 2 },
+                    data2: code.0,
+                    data3: 0,
+                    data4: 0,
+                };
+                let queue = client.handle.server_to_client_queue();
+                queue.try_send_data(event).map_err(drop).unwrap();
             }
         }
 
@@ -231,26 +272,24 @@ fn handle_conns(mut fb: Framebuffer, server_socket: FileDesc) {
     }
 }
 
-fn handle_key_events(buf: &mut proto::BufferHandle) {
-    loop {
-        let key = unsafe { ulib::sys::sys_poll_key_event() };
-        if key < 0 {
-            break;
-        }
-        let pressed = (key & 0x100) != 0;
-        let code = key & 0xFF;
-        let code = remap_keycode(code);
-        let event = proto::InputEvent {
-            kind: proto::InputEvent::KIND_KEY,
-            data1: if pressed { 1 } else { 2 },
-            data2: code.0,
-            data3: 0,
-            data4: 0,
-        };
-        buf.server_to_client_queue()
-            .try_send_data(event)
-            .map_err(drop)
-            .unwrap();
+fn blit_buffer(
+    dst: &mut [u32],
+    dst_w: usize,
+    dst_h: usize,
+    dst_stride: usize,
+    dst_x: usize,
+    dst_y: usize,
+    src: &[u32],
+    src_w: usize,
+    src_h: usize,
+    src_stride: usize,
+) {
+    let effective_width = src_w.min(dst_w.saturating_sub(dst_x));
+    let effective_height = src_h.min(dst_h.saturating_sub(dst_y));
+    for r in 0..effective_height {
+        let src_row = &src[r * src_stride..][..effective_width];
+        let dst_row = &mut dst[(r + dst_y) * dst_stride + dst_x..][..effective_width];
+        dst_row.copy_from_slice(src_row);
     }
 }
 

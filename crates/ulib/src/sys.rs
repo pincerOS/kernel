@@ -89,9 +89,9 @@ syscall!(22 => pub fn sys_sleep_ms(time: usize));
 pub struct RawFB {
     pub fd: usize,
     pub size: usize,
-    pub pitch: usize,
     pub width: usize,
     pub height: usize,
+    pub pitch: usize,
 }
 
 core::arch::global_asm!(
@@ -100,17 +100,17 @@ core::arch::global_asm!(
     "svc #{num}",
     "str x0, [x7, {fd_offset}]",
     "str x1, [x7, {size_offset}]",
-    "str x2, [x7, {pitch_offset}]",
-    "str x3, [x7, {width_offset}]",
-    "str x4, [x7, {height_offset}]",
+    "str x2, [x7, {width_offset}]",
+    "str x3, [x7, {height_offset}]",
+    "str x4, [x7, {pitch_offset}]",
     "ret",
     name = sym sys_acquire_fb,
     num = const 23,
     fd_offset = const offset_of!(RawFB, fd),
     size_offset = const offset_of!(RawFB, size),
-    pitch_offset = const offset_of!(RawFB, pitch),
     width_offset = const offset_of!(RawFB, width),
     height_offset = const offset_of!(RawFB, height),
+    pitch_offset = const offset_of!(RawFB, pitch),
 );
 unsafe extern "C" {
     pub fn sys_acquire_fb(width: usize, height: usize, res: *mut RawFB) -> isize;
