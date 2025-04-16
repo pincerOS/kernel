@@ -327,8 +327,6 @@ impl Packet {
 
         buf[header_len..].copy_from_slice(&self.payload);
 
-        println!("ip: {:?}", buf);
-
         buf
     }
 

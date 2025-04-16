@@ -466,20 +466,19 @@ fn send_dhcp_packet_workaround(interface: &mut Interface, xid: u32, requested_ip
 
     let src_addr = Ipv4Address::new([0, 0, 0, 0]);
     let dst_addr = Ipv4Address::new([255, 255, 255, 255]);
+
     let udp_packet = UdpPacket::new(DHCP_CLIENT_PORT, DHCP_SERVER_PORT, 
         packet.serialize(), 
         src_addr,
         dst_addr
     );
 
-    let next_hop = ipv4::ipv4_addr_route(interface, dst_addr);
-    let dst_mac = arp::eth_addr_for_ip(interface, next_hop)?;
     let ipv4_packet = Ipv4Packet::new(src_addr, dst_addr, Ipv4Protocol::UDP, udp_packet.serialize());
 
     ethernet::send_ethernet_frame(
         interface,
         ipv4_packet.serialize(),
-        dst_mac,
+        EthernetAddress::from_bytes(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff]).unwrap(),
         EthernetType::IPV4,
     )
 }
