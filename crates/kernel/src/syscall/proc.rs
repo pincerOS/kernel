@@ -2,7 +2,7 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 
 use crate::event::async_handler::{run_async_handler, run_event_handler, HandlerContext};
-use crate::event::context::{deschedule_thread, Context, DescheduleAction};
+use crate::event::context::{deschedule_thread, Context, DescheduleAction, CORES};
 use crate::event::thread::Thread;
 use crate::process::fd::{self, FileDescriptor};
 use crate::process::ExitStatus;
@@ -15,12 +15,20 @@ pub unsafe fn sys_shutdown(ctx: &mut Context) -> *mut Context {
     })
 }
 
-pub unsafe fn exit_exception(mut thread: Box<Thread>, ctx: &mut Context, status: u32) -> ! {
-    let exit_code = &thread.process.as_ref().unwrap().exit_code;
-    exit_code.set(crate::process::ExitStatus {
-        status: status as u32,
-    });
+pub unsafe fn exit_current_user_thread(ctx: &mut Context, status: u32) -> ! {
+    let thread = CORES.with_current(|core| core.thread.take());
+    let mut thread = thread.expect("usermode syscall without active thread");
+
+    thread.last_context = core::ptr::NonNull::from(&mut *ctx);
+    unsafe { thread.save_user_regs() };
     unsafe { thread.save_context(ctx.into(), false) };
+
+    unsafe { crate::sync::enable_interrupts() };
+    unsafe { exit_user_thread(thread, status) }
+}
+
+pub unsafe fn exit_user_thread(mut thread: Box<Thread>, status: u32) -> ! {
+    thread.set_exited(status);
     unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
 }
 
