@@ -374,6 +374,7 @@ fn create_archive(
             compress_mode = 0;
         }
 
+        println!("Name: {:?}", std::str::from_utf8(&name_inline).unwrap());
         files.push(initfs::FileHeader {
             inode: i,
             mode: stat.mode(),

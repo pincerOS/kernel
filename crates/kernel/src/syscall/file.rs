@@ -293,10 +293,13 @@ pub unsafe fn sys_chdir(ctx: &mut Context) -> *mut Context {
             Err(_e) => return context.resume_return(-1i64 as usize),
         };
 
+        if new_fd.kind() != FileKind::Directory {
+            return context.resume_return(-2i64 as usize);
+        }
+
         let fd_idx = proc.file_descriptors.lock().insert(new_fd);
 
         *proc.current_dir.lock() = fd_idx;
-
         context.resume_return(fd_idx)
     })
 }

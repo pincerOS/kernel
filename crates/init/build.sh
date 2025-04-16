@@ -14,7 +14,7 @@ mkdir -p fs
 # cp ls.elf fs/
 
 cargo run -q -p initfs --bin util \
-    -- create --compress --out fs.arc --root fs fs
+    -- create --compress --out fs.arc --root fs fs --verbose
 
 # cargo clean
 cargo rustc --profile="${PROFILE}" \

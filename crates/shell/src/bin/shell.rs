@@ -123,8 +123,14 @@ fn main() {
             let first = line.split_ascii_whitespace().next().unwrap_or(line);
             if first.eq("cd") {
                 let err = ulib::sys::chdir( line[3..].as_bytes());
-                if err.is_err() {
-                    println!("cd: no such file or directory: {}", &line[3..]);
+                if let Err(err1) = err {
+                    if (err1 as i32) == -1 {
+                        println!("cd: no such file or directory: {}", &line[3..]);
+                    } else if(err1 as i32) == -2 {
+                        println!("cd: not a directory: {}", &line[3..]);
+                    } else {
+                        println!("cd: unknown error: {}", err1);
+                    }
                 }
             }
             else if let Ok(file) = ulib::sys::openat(root_fd, first.as_bytes(), 0, 0) {
