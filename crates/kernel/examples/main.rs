@@ -27,7 +27,7 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     barrier.sync_blocking();
     println!("End of preemption test");
 
-    for i in 0..count {
+    for i in 0..128 {
         sync::spin_sleep(1000_00);
     }
 }

@@ -116,6 +116,39 @@ impl AddressCidr {
         })
     }
 
+    pub fn from_mask(address: Address, subnet_mask: Address) -> Result<AddressCidr> {
+        let mask_bytes = Address::as_bytes(&subnet_mask);
+
+        // Convert the mask into a u32
+        let mask_u32 = (mask_bytes[0] as u32) << 24
+            | (mask_bytes[1] as u32) << 16
+            | (mask_bytes[2] as u32) << 8
+            | (mask_bytes[3] as u32);
+
+        // Compute subnet length manually
+        let mut subnet_len = 0;
+        let mut found_zero = false;
+
+        for i in 0..32 {
+            let bit = (mask_u32 >> (31 - i)) & 1;
+
+            if bit == 1 {
+                if found_zero {
+                    // Non-contiguous mask (e.g., 11110111), invalid
+                    return Err(Error::Malformed);
+                }
+                subnet_len += 1;
+            } else {
+                found_zero = true;
+            }
+        }
+
+        Ok(AddressCidr {
+            address,
+            subnet_len,
+        })
+    }
+
     pub fn is_member(&self, address: Address) -> bool {
         let mask = !(0xFFFFFFFF >> self.subnet_len);
         (address.as_u32() & mask) == (self.address.as_u32() & mask)
@@ -249,7 +282,8 @@ impl Packet {
             return Err(Error::Malformed);
         }
 
-        let payload = buf[header_len..(total_len as usize)].to_vec();
+        let start = header_len * 4;
+        let payload = buf[start ..(total_len as usize)].to_vec();
 
         Ok(Packet {
             version,

@@ -1,7 +1,8 @@
 use alloc::vec::Vec;
-use core::slice::IterMut as SliceIterMut;
+use core::{slice::IterMut as SliceIterMut};
 
 use crate::networking::socket::TaggedSocket;
+use crate::networking::SocketAddr;
 
 // A set of sockets with stable integral handles.
 pub struct SocketSet {
@@ -17,6 +18,28 @@ impl SocketSet {
             count: 0,
         }
     }
+
+    pub fn port_open_udp(&mut self, dst_socket_addr: SocketAddr) -> Option<usize> {
+        for (i, socket_opt) in self.sockets.iter_mut().enumerate() {
+            if let Some(sock) = socket_opt {
+                if sock.as_udp_socket().accepts(dst_socket_addr) {
+                    return Some(i);
+                }
+            }
+        }
+        None
+    }
+
+    // pub fn port_open(&mut self, dst_socket_addr: SocketAddr, u8) -> Option<usize> {
+    //     for (i, socket_opt) in self.sockets.iter_mut().enumerate() {
+    //         if let Some(sock) = socket_opt {
+    //             if sock.accepts(&dst_socket_addr) {
+    //                 return Some(i);
+    //             }
+    //         }
+    //     }
+    //     None
+    // }
 
     // add to set and return handle
     pub fn add_socket(&mut self, socket: TaggedSocket) -> Option<usize> {

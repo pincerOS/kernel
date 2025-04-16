@@ -50,6 +50,7 @@ impl Packet {
         let length = NetworkEndian::read_u16(&buf[4..6]);
         let checksum = NetworkEndian::read_u16(&buf[6..8]);
 
+        println!("length {} buf length {}", length, buf.len());
         if length < 8 || buf.len() != length as usize {
             return Err(Error::Malformed);
         }
@@ -80,8 +81,6 @@ impl Packet {
 
         // Now compute checksum and overwrite it
         let checksum = Self::compute_checksum_raw(self.src_ip, self.dst_ip, &buf);
-
-        println!("udp: {:?}", buf);
 
         NetworkEndian::write_u16(&mut buf[6..8], checksum);
 

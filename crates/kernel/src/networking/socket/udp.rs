@@ -1,48 +1,60 @@
+use crate::networking::iface::udp;
 use crate::networking::repr::{Ipv4Packet, Ipv4Protocol, UdpPacket};
-use crate::networking::socket::{SocketAddr, SocketAddrLease};
+use crate::networking::socket::SocketAddr;
 use crate::networking::utils::{ring::Ring, slice::Slice};
 use crate::networking::{Error, Result};
 
+use crate::event::thread;
+use crate::device::usb::device::net::interface;
+
+use alloc::vec::Vec;
+use alloc::vec;
+
+fn new_ring_packet_buffer(capacity: usize) -> Ring<(Vec<u8>, SocketAddr)> {
+    let default_entry = (Vec::new(), SocketAddr::default()); // or some placeholder address
+    let buffer = vec![default_entry; capacity];
+    Ring::from(buffer)
+}
+
 // A UDP socket
 pub struct UdpSocket {
-    binding: SocketAddrLease,
-    send_buffer: Ring<(Slice<u8>, SocketAddr)>,
-    recv_buffer: Ring<(Slice<u8>, SocketAddr)>,
+    binding: SocketAddr,
+    send_buffer: Ring<(Vec<u8>, SocketAddr)>,
+    recv_buffer: Ring<(Vec<u8>, SocketAddr)>,
 }
 
 impl UdpSocket {
     pub fn new(
-        binding: SocketAddrLease,
-        send_buffer: Ring<(Slice<u8>, SocketAddr)>,
-        recv_buffer: Ring<(Slice<u8>, SocketAddr)>,
+        binding: SocketAddr,
+        capacity: usize,
     ) -> UdpSocket {
         UdpSocket {
             binding,
-            send_buffer,
-            recv_buffer,
+            send_buffer: new_ring_packet_buffer(capacity),
+            recv_buffer: new_ring_packet_buffer(capacity),
         }
     }
 
-    // is socket receiving to dest?
-    pub fn accepts(&self, dst_addr: &SocketAddr) -> bool {
-        &(*self.binding) == dst_addr
+    pub fn accepts(&self, dst_addr: SocketAddr) -> bool {
+        self.binding == dst_addr
     }
 
-    // Enqueues a packet with a payload_len bytes payload for sending to the
-    // specified address.
-    pub fn send(&mut self, buffer_len: usize, addr: SocketAddr) -> Result<&mut [u8]> {
-        self.send_buffer
-            .enqueue_maybe(|&mut (ref mut buffer, ref mut addr_)| {
-                buffer.try_resize(buffer_len, 0)?;
+    pub fn send(&mut self, payload: Vec<u8>, dest: SocketAddr) -> Result<()> {
+        let src_port = self.binding.port;
+        let payload_clone = payload.clone(); 
 
-                for i in 0..buffer_len {
-                    buffer[i] = 0;
-                }
+        self.recv_buffer.enqueue_maybe(|(buffer, addr)| {
+            *buffer = payload; 
+            *addr = dest;
+            Ok(())
+        });
+        
+        thread::thread(move || {
+            udp::send_udp_packet(interface(), dest.addr, payload_clone, src_port, dest.port);
+        });
 
-                *addr_ = addr;
 
-                return Ok(&mut buffer[..buffer_len]);
-            })
+        Ok(())
     }
 
     // Dequeues a received packet along with it's source address from the
@@ -52,64 +64,28 @@ impl UdpSocket {
             .dequeue_with(|&mut (ref buffer, ref addr)| (&buffer[..], addr.clone()))
     }
 
-    // Dequeues a packet enqueued for sending via function f.
-    //
-    // The packet is only dequeued if f does not return an error.
-    pub fn send_dequeue<F, R>(&mut self, f: F) -> Result<R>
-    where
-        F: FnOnce(&Ipv4Packet, &UdpPacket, &[u8]) -> Result<R>,
-    {
-        let binding = self.binding.clone();
-        self.send_buffer
-            .dequeue_maybe(|&mut (ref mut buffer, addr)| {
-                let udp_packet = UdpPacket::new(
-                    binding.port,
-                    addr.port,
-                    buffer.to_vec(),
-                    binding.addr,
-                    addr.addr,
-                );
-
-                let ipv4_packet = Ipv4Packet::new(
-                    binding.addr,
-                    addr.addr,
-                    Ipv4Protocol::UDP,
-                    udp_packet.serialize(),
-                );
-
-                f(&ipv4_packet, &udp_packet, &buffer[..])
-            })
-    }
-
     // Enqueues a packet for receiving.
-    pub fn recv_enqueue(
+    pub fn recv_enqueue (
         &mut self,
-        ipv4_repr: &Ipv4Packet,
-        udp_repr: &UdpPacket,
-        payload: &[u8],
+        payload: Vec<u8>,
+        sender: SocketAddr,
     ) -> Result<()> {
-        let binding = self.binding.clone();
-        self.recv_buffer
-            .enqueue_maybe(|&mut (ref mut buffer, ref mut addr)| {
-                if ipv4_repr.dst_addr != binding.addr || udp_repr.dst_port != binding.port {
-                    Err(Error::Ignored)
-                } else {
-                    buffer.try_resize(payload.len(), 0)?;
-                    buffer.copy_from_slice(payload);
-                    addr.addr = ipv4_repr.src_addr;
-                    addr.port = udp_repr.src_port;
-                    Ok(())
-                }
-            })
+
+        self.recv_buffer.enqueue_maybe(|(buffer, addr)| {
+            *buffer = payload; 
+            *addr = sender;
+            Ok(())
+        })
+
     }
 
     // Returns the number of packets enqueued for sending.
-    pub fn send_enqueued(&self) -> usize {
+    pub fn num_send_enqueued(&self) -> usize {
         self.send_buffer.len()
     }
 
     // Returns the number of packets enqueued for receiving.
-    pub fn recv_enqueued(&self) -> usize {
+    pub fn num_recv_enqueued(&self) -> usize {
         self.recv_buffer.len()
     }
 }
