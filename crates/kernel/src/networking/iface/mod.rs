@@ -14,6 +14,7 @@ use crate::networking::repr::dev::Device;
 use crate::networking::repr::{EthernetAddress, Ipv4Address, Ipv4Cidr};
 use crate::networking::socket::SocketSet;
 use crate::networking::utils::arp_cache::ArpCache;
+use dhcp::DhcpClient;
 
 // based this interface setup off of: https://github.com/ykskb/rust-user-net
 
@@ -25,8 +26,9 @@ pub struct Interface {
     pub ipv4_addr: Ipv4Cidr,
     pub default_gateway: Ipv4Address,
 
-    // TODO: supprt raw ip
-    // ip_sockets:
+    // TODO: supprt raw
     pub udp_sockets: SocketSet,
     pub tcp_sockets: SocketSet,
+
+    pub dhcp: DhcpClient,
 }

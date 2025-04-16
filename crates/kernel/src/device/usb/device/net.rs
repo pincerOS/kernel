@@ -11,10 +11,9 @@ use core::slice;
 use crate::device::system_timer;
 
 use crate::networking::iface::cdcecm::CDCECM;
-use crate::networking::iface::Interface;
 use crate::networking::iface::*;
 use crate::networking::repr::*;
-use crate::networking::socket::SocketSet;
+use crate::networking::socket::*;
 use crate::networking::utils::arp_cache::ArpCache;
 
 use crate::device::usb::types::*;
@@ -31,6 +30,19 @@ pub static mut NET_DEVICE: NetDevice = NetDevice {
     receive_callback: None,
     device: None,
 };
+
+pub static mut INTERFACE: Option<Interface> = None;
+
+pub fn interface() -> &'static mut Interface {
+    unsafe {
+        match INTERFACE {
+            Some(ref mut iface) => iface,
+            None => panic!("meow"),
+        }
+
+    }
+}
+
 
 pub fn NetLoad(bus: &mut UsbBus) {
     bus.interface_class_attach[InterfaceClass::InterfaceClassCommunications as usize] =
@@ -104,13 +116,6 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // 3. initalize and statically set ip address and gateway
     // 4. initialize arp table
 
-    // TODO: discussion with aaron about format for user, with NetSend/Recv or with my
-    // interfce/device system i have set up. as it stands, we are going with the current method
-    // with NetSend/Recv, so Interface is more like just acts like an enum of objects for the stack
-    // to work on which is fine. will need to cutdown network stack into just parsing logic
-    // so many compiler warnings TT
-    // TODO: the mac address may be wrong need to copy from cmplt
-    // let DEFAULT_MAC = EthernetAddress::from_u32(OID::OID_802_3_PERMANENT_ADDRESS as u32);
     let mut mac_addr: &mut [u8; 6];
     unsafe{
         let mut b = vec![0u8; 30];
@@ -144,10 +149,11 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         default_gateway: DEFAULT_GATEWAY,
         udp_sockets: SocketSet::new(0),
         tcp_sockets: SocketSet::new(0),
+        dhcp: dhcp::DhcpClient::new(),
     };
 
     unsafe {
-        INTERFACE = Some(Box::new(default_interface));
+        INTERFACE = Some(default_interface);
     }
 
     // TODO: discuss with aaron about typing for receive function, maybe would be better to return
@@ -163,44 +169,14 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         NET_DEVICE.device = Some(device);
     }
 
-    // dhcp discover
-    let mut dhcp_client = dhcp::DhcpClient::new();
-    unsafe {
-        dhcp_client.start(INTERFACE.as_mut().unwrap(), system_timer::get_time());
-    }
-
-    unsafe {
-        icmp::send_icmp_packet(
-            INTERFACE.as_mut().unwrap(),
-            Ipv4Address::new([192, 168, 1, 1]),
-            IcmpMessage::EchoRequest { id: 420, seq: 1 },
-        );
-    }
+    // start dhcp
+    interface().dhcp.start();
 
     // begin receieve series
     let buf = vec![0u8; 1500];
     unsafe {
         rndis_receive_packet(device, buf.into_boxed_slice(), 1500);
     }
-
-    // let s = "hello";
-    // let bytes: Vec<u8> = s.as_bytes().to_vec();
-    //
-    // unsafe {
-    //     udp::send_udp_packet(INTERFACE.as_mut().unwrap(), Ipv4Address::new([255, 255, 255, 255]), bytes, 67, 68);
-    // }
-
-    // let arp_packet = ArpPacket {
-    //     op: ArpOperation::Request,
-    //     source_hw_addr: DEFAULT_MAC,
-    //     source_proto_addr: DEFAULT_IPV4,
-    //     target_hw_addr: EthernetAddress::BROADCAST,
-    //     target_proto_addr: Ipv4Address::new([192, 168, 1, 2]),
-    // };
-    //
-    // unsafe { // :skull:
-    //     arp::send_arp_packet(INTERFACE.as_mut().unwrap(), &arp_packet, EthernetAddress::BROADCAST);
-    // }
 
     return ResultCode::OK;
 }
@@ -212,7 +188,7 @@ pub fn recv(buf: *mut u8, buf_len: u32) {
     };
 
     unsafe {
-        ethernet::recv_ethernet_frame(INTERFACE.as_mut().unwrap(), slice, buf_len);
+        ethernet::recv_ethernet_frame(interface(), slice, buf_len);
     }
 }
 
@@ -263,8 +239,6 @@ pub unsafe fn NetSendPacket(buffer: *mut u8, buffer_length: u32) {
         }
     }
 }
-
-static mut INTERFACE: Option<Box<Interface>> = None;
 
 pub struct NetDevice {
     pub receive_callback: Option<fn(*mut u8, u32)>,

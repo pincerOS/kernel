@@ -10,7 +10,6 @@ use crate::networking::repr::Ipv4Address;
 use crate::networking::{Error, Result};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-// An IPv4 + port socket address.
 pub struct SocketAddr {
     pub addr: Ipv4Address,
     pub port: u16,
