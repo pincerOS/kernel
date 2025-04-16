@@ -47,6 +47,11 @@ pub struct DhcpClient {
 }
 
 impl DhcpClient {
+    pub fn is_transacting(&mut self) -> bool {
+        self.state == DhcpState::Idle 
+            || self.state == DhcpState::Discovering 
+            || self.state == DhcpState::Requesting
+    }
     pub fn new() -> Self {
         Self {
             state: DhcpState::Idle,
