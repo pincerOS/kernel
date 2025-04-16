@@ -1,3 +1,5 @@
+use alloc::vec;
+
 use crate::event::async_handler::{run_async_handler, HandlerContext};
 use crate::event::context::Context;
 use crate::process::mem::{MappingKind, UserAddrSpace};
@@ -13,13 +15,14 @@ struct StringPair {
     ptr: *const u8,
 }
 
+// using usize to smuggle pointer into async callbacks
 struct ExecArgs {
     fd: usize,
     _flags: ExecFlags,
     args_len: usize,
-    args_ptr: *const StringPair,
+    args_ptr: usize,
     env_len: usize,
-    env_ptr: *const StringPair,
+    env_ptr: usize,
 }
 unsafe impl Send for ExecArgs {}
 
@@ -38,6 +41,13 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
     let args_len = ctx.regs[4];
     let args_ptr = ctx.regs[5] as *const StringPair;
 
+    // actually the shell doesn't currently give argv so here's a hardcoded test
+    let args_len = 1;
+    let args_ptr = &StringPair {
+        len: 5,
+        ptr: b"a.out\0".as_ptr(),
+    } as *const StringPair as usize;
+
     let env_len = ctx.regs[4];
     let env_ptr = ctx.regs[5] as *const StringPair;
 
@@ -52,7 +62,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
         args_len,
         args_ptr,
         env_len,
-        env_ptr,
+        env_ptr: env_ptr as usize,
     };
 
     run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
@@ -69,12 +79,22 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
             let _args = if arg_data.args_len == 0 {
                 &[]
             } else {
-                unsafe { core::slice::from_raw_parts(arg_data.args_ptr, arg_data.args_len) }
+                unsafe {
+                    core::slice::from_raw_parts(
+                        arg_data.args_ptr as *const StringPair,
+                        arg_data.args_len,
+                    )
+                }
             };
             let _env = if arg_data.env_len == 0 {
                 &[]
             } else {
-                unsafe { core::slice::from_raw_parts(arg_data.env_ptr, arg_data.env_len) }
+                unsafe {
+                    core::slice::from_raw_parts(
+                        arg_data.env_ptr as *const StringPair,
+                        arg_data.env_len,
+                    )
+                }
             };
         });
 
@@ -137,11 +157,63 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
             )
             .unwrap();
 
+        let mut user_sp = stack_start;
+
+        let setup_stack = async {
+            println!("In stack callback");
+            let stack_vme = new_mem.get_vme(stack_start - stack_size).unwrap();
+            new_mem
+                .populate_range(stack_vme, stack_start - stack_size, stack_size)
+                .await
+                .unwrap();
+
+            let mut user_args = vec![];
+            for i in (0..arg_data.args_len).rev() {
+                let arg = unsafe { &(*(arg_data.args_ptr as *const StringPair).add(i)) };
+                user_sp -= core::mem::size_of::<u8>();
+                let ptr = (user_sp) as *mut u8;
+                println!("Writing the null terminator at addr {}", user_sp);
+                unsafe { ptr.write_volatile(b'\0') };
+                for j in (0..arg.len).rev() {
+                    let char = unsafe { *(arg.ptr.add(j)) };
+                    user_sp -= core::mem::size_of::<u8>();
+                    let ptr = (user_sp) as *mut u8;
+                    println!("Copying char {} at pos {} to addr {}", char, j, user_sp);
+                    unsafe { ptr.write_volatile(char) };
+                }
+                user_args.push(user_sp);
+            }
+            // align sp
+            user_sp &= !0b111;
+            user_sp -= core::mem::size_of::<usize>();
+            let ptr = (user_sp) as *mut usize;
+            println!("Writing NULL at addr {}", user_sp);
+            unsafe { ptr.write_volatile(0) };
+            for arg_ptr in user_args.iter() {
+                user_sp -= core::mem::size_of::<usize>();
+                let ptr = (user_sp) as *mut usize;
+                println!("Writing arg pointer {} at addr {}", *arg_ptr, user_sp);
+                unsafe { ptr.write_volatile(*arg_ptr) };
+            }
+            let argv = user_sp;
+            user_sp -= core::mem::size_of::<usize>();
+            let ptr = (user_sp) as *mut usize;
+            println!("Writing argv {} at addr {}", argv, user_sp);
+            unsafe { ptr.write_volatile(argv as usize) };
+
+            user_sp -= core::mem::size_of::<usize>();
+            let ptr = (user_sp) as *mut usize;
+            println!("Writing argc {} at addr {}", arg_data.args_len, user_sp);
+            unsafe { ptr.write_volatile(arg_data.args_len) };
+            println!("Stack has been set up!");
+        };
+
+        unsafe { crate::memory::with_user_vmem_async(ttbr0, setup_stack).await };
+
         let old = core::mem::replace(&mut *proc.mem.lock(), new_mem);
         drop(old);
 
         let user_entry = elf.elf_header().e_entry();
-        let user_sp = stack_start;
 
         {
             let mut regs = context.regs();
@@ -152,9 +224,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
             context.user_regs().as_mut().unwrap().ttbr0_el1 = ttbr0;
         }
 
-        // TODO: initial stack setup
-        // (argc, argv, envp, auxv)
-
+        println!("Jumping to user entry point: {user_entry:#x}");
         context.resume_final()
     })
 }
