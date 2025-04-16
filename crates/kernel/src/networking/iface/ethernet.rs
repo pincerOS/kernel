@@ -37,12 +37,12 @@ pub fn recv_ethernet_frame(interface: &mut Interface, eth_buffer: &[u8], len: u3
     let eth_frame = EthernetFrame::deserialize(&eth_buffer[44..])?;
 
     // not for us
-    // if eth_frame.dst != interface.ethernet_addr
-    //     && !eth_frame.dst.is_broadcast()
-    //     && !eth_frame.dst.is_multicast()
-    // {
-    //     return Err(Error::Ignored);
-    // }
+    if eth_frame.dst != interface.ethernet_addr
+        && !eth_frame.dst.is_broadcast()
+        && !eth_frame.dst.is_multicast()
+    {
+        return Err(Error::Ignored);
+    }
 
     let res = match eth_frame.ethertype {
         EthernetType::ARP => arp::recv_arp_packet(interface, eth_frame),
