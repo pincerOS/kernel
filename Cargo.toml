@@ -13,7 +13,7 @@ members = [
     "crates/initfs",
     "crates/kernel",
     "crates/lz4",
-    "crates/shell-utils",
+    "crates/shell",
     "crates/ulib",
 ]
 
