@@ -298,10 +298,12 @@ pub fn sem_down(fd: FileDesc) -> Result<(), usize> {
     int_to_error(res).map(|_| ())
 }
 
-pub struct SpawnArgs {
+pub struct SpawnArgs<'a> {
     pub fd: FileDesc,
     pub stdin: Option<FileDesc>,
     pub stdout: Option<FileDesc>,
+    pub stderr: Option<FileDesc>,
+    pub args: &'a [ArgStr],
 }
 
 pub fn spawn_elf(args: &SpawnArgs) -> Result<FileDesc, usize> {
@@ -328,9 +330,12 @@ extern "C" fn exec_child(spawn_args: *const SpawnArgs) -> ! {
     if let Some(fd) = spawn_args.stdout {
         dup3(fd, 1, 0).unwrap();
     }
+    if let Some(fd) = spawn_args.stderr {
+        dup3(fd, 2, 0).unwrap();
+    }
 
     let flags = 0;
-    let args = &[];
+    let args = spawn_args.args;
     let env = &[];
     let _res = unsafe { execve_fd(spawn_args.fd, flags, args, env) };
     // TODO: notify parent of spawn failure

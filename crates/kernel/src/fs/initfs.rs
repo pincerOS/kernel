@@ -31,8 +31,8 @@ use crate::sync::SpinLock;
 //     }
 // }
 
-#[derive(PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct Inode(u64);
+#[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Copy, Clone)]
+pub struct Inode(u64);
 
 pub struct InitFs {
     this: Weak<InitFs>,
@@ -84,9 +84,9 @@ impl InitFs {
     }
 }
 
-struct InitFsFile {
+pub struct InitFsFile {
     fs: Arc<InitFs>,
-    inode: Inode,
+    pub inode: Inode,
     header: initfs::FileHeader,
     // TODO: OnceCell
     data: SpinLock<Option<Vec<u8>>>,
@@ -200,10 +200,8 @@ impl FileDescriptor for InitFsFile {
         boxed_future(async move { Ok(size as u64).into() })
     }
     fn open<'a>(&'a self, name: &'a [u8]) -> SmallFuture<'a, Result<ArcFd, ()>> {
-        // println!("Opening {:?}", core::str::from_utf8(name).unwrap());
         if self.header.is_dir() {
             let cur_name = self.fs.inner.get_file_name(&self.header).unwrap();
-            // println!("cur dir {:?}", core::str::from_utf8(cur_name).unwrap());
             let pfx_len = if cur_name.is_empty() {
                 0
             } else {
