@@ -23,6 +23,7 @@ use crate::device::usb::usbd::request::*;
 use crate::shutdown;
 use alloc::boxed::Box;
 use alloc::vec;
+use alloc::vec::Vec;
 
 use super::rndis::*;
 
@@ -39,8 +40,10 @@ pub fn interface() -> &'static mut Interface {
             Some(ref mut iface) => iface,
             None => panic!("meow"),
         }
+
     }
 }
+
 
 pub fn NetLoad(bus: &mut UsbBus) {
     bus.interface_class_attach[InterfaceClass::InterfaceClassCommunications as usize] =
@@ -115,14 +118,14 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // 4. initialize arp table
 
     let mut mac_addr: &mut [u8; 6];
-    unsafe {
+    unsafe{
         let mut b = vec![0u8; 30];
         let query = rndis_query_msg(device, OID::OID_802_3_PERMANENT_ADDRESS, b.as_mut_ptr(), 30);
-
+        
         if query.0 != ResultCode::OK {
             panic!("| Net: Error getting MAC address {:#?}", query.0);
         }
-
+        
         let b_offset = query.1;
         let b_len = query.2;
         if b_len != 6 {
@@ -145,6 +148,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         ethernet_addr: DEFAULT_MAC,
         ipv4_addr: DEFAULT_IPV4CIDR,
         default_gateway: DEFAULT_GATEWAY,
+        dns: Vec::new(),
         udp_sockets: SocketSet::new(0),
         tcp_sockets: SocketSet::new(0),
         dhcp: dhcp::DhcpClient::new(),

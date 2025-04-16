@@ -1,6 +1,6 @@
 use crate::device::system_timer;
 use crate::device::usb::device::net::interface;
-use crate::networking::iface::{udp, Interface};
+use crate::networking::iface::*;
 use crate::networking::repr::*;
 use crate::networking::socket::{TaggedSocket, UdpSocket};
 use crate::networking::SocketAddr;
@@ -142,7 +142,8 @@ impl DhcpClient {
                     self.last_action_time = system_timer::get_time();
                     self.retries = DEFAULT_LEASE_RETRY;
 
-                    send_dhcp_request(interface, self.xid, offered_ip, server_id)?;
+                    // send_dhcp_request(interface, self.xid, offered_ip, server_id)?;
+                    send_dhcp_packet_workaround(interface, self.xid, offered_ip, server_id, packet)?;
                 } else {
                     return Err(Error::Malformed);
                 }
@@ -404,6 +405,82 @@ fn send_dhcp_packet(interface: &mut Interface, packet: &DhcpPacket) -> Result<()
         data,
         DHCP_CLIENT_PORT,
         DHCP_SERVER_PORT,
+    )
+}
+
+fn send_dhcp_packet_workaround(interface: &mut Interface, xid: u32, requested_ip: Ipv4Address, server_id: Ipv4Address, packet: DhcpPacket) -> Result<()> {
+    let sub_mask = packet.get_subnet_mask().unwrap();
+    let mask_bytes = sub_mask.as_bytes();
+    let mut count = 0;
+
+    for &byte in mask_bytes {
+        let mut b = byte;
+        while b > 0 {
+            count += b & 1;
+            b >>= 1;
+        }
+    }
+
+    interface.ipv4_addr = Ipv4Cidr::new(packet.yiaddr, count as u32).unwrap();
+
+    if let Some(router) = packet.get_router() {
+         interface.default_gateway = router;
+    }
+
+    interface.dns = packet.get_dns_servers();
+
+    println!(
+        "DHCP: Bound to IP {}",
+        interface.ipv4_addr,
+    );
+
+    let packet = DhcpPacket {
+        op: 1,    // BOOTREQUEST
+        htype: 1, // Ethernet
+        hlen: 6,  // MAC address length
+        hops: 0,
+        xid,
+        secs: 0,
+        flags: 0x0000,
+        ciaddr: Ipv4Address::new([0, 0, 0, 0]),
+        yiaddr: Ipv4Address::new([0, 0, 0, 0]),
+        siaddr: Ipv4Address::new([0, 0, 0, 0]),
+        giaddr: Ipv4Address::new([0, 0, 0, 0]),
+        chaddr: interface.ethernet_addr,
+        options: vec![
+            DhcpOption::message_type(DhcpMessageType::Request),
+            DhcpOption::server_identifier(server_id),
+            DhcpOption::requested_ip(requested_ip),
+            DhcpOption::parameters(vec![
+                DhcpParam::SubnetMask,
+                DhcpParam::BroadcastAddr,
+                DhcpParam::TimeOffset,
+                DhcpParam::Router,
+                DhcpParam::DomainName,
+                DhcpParam::DNS,
+                DhcpParam::Hostname,
+            ]),
+            DhcpOption::end(),
+        ],
+    };
+
+    let src_addr = Ipv4Address::new([0, 0, 0, 0]);
+    let dst_addr = Ipv4Address::new([255, 255, 255, 255]);
+    let udp_packet = UdpPacket::new(DHCP_CLIENT_PORT, DHCP_SERVER_PORT, 
+        packet.serialize(), 
+        src_addr,
+        dst_addr
+    );
+
+    let next_hop = ipv4::ipv4_addr_route(interface, dst_addr);
+    let dst_mac = arp::eth_addr_for_ip(interface, next_hop)?;
+    let ipv4_packet = Ipv4Packet::new(src_addr, dst_addr, Ipv4Protocol::UDP, udp_packet.serialize());
+
+    ethernet::send_ethernet_frame(
+        interface,
+        ipv4_packet.serialize(),
+        dst_mac,
+        EthernetType::IPV4,
     )
 }
 
