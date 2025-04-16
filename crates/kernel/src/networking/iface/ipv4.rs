@@ -30,9 +30,13 @@ pub fn recv_ip_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Re
     }
 
     // TODO: broadcast
-    // if ipv4_packet.dst_addr != *interface.ipv4_addr {
-    //     return Err(Error::Ignored);
-    // }
+    if ipv4_packet.dst_addr != *interface.ipv4_addr 
+        && !interface.ipv4_addr.is_member(ipv4_packet.dst_addr)
+        && !interface.ipv4_addr.is_broadcast(ipv4_packet.dst_addr)
+        && !interface.dhcp.is_transacting()
+    {
+        return Err(Error::Ignored);
+    }
 
     // update arp cache for immediate ICMP echo replies, errors, etc.
     if eth_frame.src.is_unicast() {
