@@ -73,7 +73,7 @@ async fn main() {
     let root = fs.root();
 
     process.root = Some(root.clone());
-    process.current_dir.lock().replace(root.clone());
+    *process.current_dir.lock() = 3; //TODO: fix this
 
     {
         let mut fds = process.file_descriptors.lock();

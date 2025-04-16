@@ -151,7 +151,42 @@ bitflags::bitflags! {
 }
 
 pub unsafe fn sys_open(ctx: &mut Context) -> *mut Context {
-    
+    let path_len = ctx.regs[0];
+    let path_ptr = ctx.regs[1] as *const u8;
+
+    let arg_data = OpenAtArgs {
+        dir_fd: 0,
+        path_len,
+        path_ptr,
+        _flags: OpenFlags::empty(),
+        _mode: OpenMode::empty(),
+    };
+
+    run_async_handler(ctx, async move |context: HandlerContext<'_>| {
+        let proc = context.cur_process().unwrap();
+        let cur_dir = *proc.current_dir.lock();
+        let dir = proc.file_descriptors.lock().get(cur_dir).cloned();
+        let Some(dir) = dir else {
+            return context.resume_return(-1i64 as usize);
+        };
+
+        let path = context.with_user_vmem(move || {
+            let arg_data = &arg_data;
+            // TODO: soundness, check user args
+            let path = unsafe { core::slice::from_raw_parts(arg_data.path_ptr, arg_data.path_len) };
+            alloc::vec::Vec::from(path)
+        });
+
+        // TODO: file creation?
+        let new_fd = match resolve_path(proc.root.as_ref(), dir, &path).await {
+            Ok(f) => f,
+            Err(_e) => return context.resume_return(-1i64 as usize),
+        };
+
+        // TODO: close on exec, etc?
+        let fd_idx = proc.file_descriptors.lock().insert(new_fd);
+        context.resume_return(fd_idx)
+    })
 }
 
 // TODO: impl this like openat2? (man openat2(2))
@@ -238,6 +273,12 @@ pub unsafe fn sys_chdir(ctx: &mut Context) -> *mut Context {
 
     run_async_handler(ctx, async move |context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
+        let cur_dir = *proc.current_dir.lock();
+        let dir = proc.file_descriptors.lock().get(cur_dir).cloned();
+
+        let Some(dir) = dir else {
+            return context.resume_return(-1i64 as usize);
+        };
 
         let path = context.with_user_vmem(move || {
             let arg_data = &arg_data;
@@ -247,21 +288,16 @@ pub unsafe fn sys_chdir(ctx: &mut Context) -> *mut Context {
         });
 
         //TODO: Requires current_dir to be set to a valid directory
-        let cur_dir = proc.current_dir.lock().as_ref().unwrap().clone();
-        let new_fd = match resolve_path(proc.root.as_ref(), cur_dir, &path).await {
+        let new_fd = match resolve_path(proc.root.as_ref(), dir, &path).await {
             Ok(f) => f,
             Err(_e) => return context.resume_return(-1i64 as usize),
         };
 
-        println!("Changing current dir to {:?}", core::str::from_utf8(&path).unwrap());
-        let cur_dir = proc.current_dir.lock().as_ref().unwrap().clone();
-        println!("are they equal? {:?}", new_fd.is_same_file(&*cur_dir));
+        let fd_idx = proc.file_descriptors.lock().insert(new_fd);
 
-        proc.current_dir.lock()
-            .replace(new_fd.clone())
-            .expect("TODO: chdir on root dir");
+        *proc.current_dir.lock() = fd_idx;
 
-        context.resume_return(1)
+        context.resume_return(fd_idx)
     })
 }
 
@@ -345,6 +381,7 @@ async fn resolve_path(
                 PathSegment::RootDir => root.map(|f| f.clone()).ok_or(ResolveError::MissingRoot)?,
                 PathSegment::CurDir => cur.clone(),
                 PathSegment::ParentDir => {
+                    println!("Parent dir");
                     // TODO: ".." must be handled kernel side:
                     // - mounted filesystems
                     // - chroot (if cur is root, .. goes to root)
@@ -353,6 +390,7 @@ async fn resolve_path(
                         .map(|r| r.is_same_file(&*cur))
                         .unwrap_or(false);
                     if !is_root {
+                        println!("Not root");
                         cur.open(b"..")
                             .await
                             .map_err(|()| ResolveError::AncestorNotFound)?

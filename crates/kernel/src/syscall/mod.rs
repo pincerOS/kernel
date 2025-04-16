@@ -44,6 +44,7 @@ pub unsafe fn register_syscalls() {
         register_syscall_handler(27, semaphore::sys_sem_up);
         register_syscall_handler(28, semaphore::sys_sem_down);
 
+        register_syscall_handler(31, file::sys_open);
         register_syscall_handler(32, file::sys_chdir);
     }
 }
