@@ -158,7 +158,8 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
             .unwrap();
 
         let mut user_sp = stack_start;
-
+        let mut argc = 0;
+        let mut argv = 0;
         let setup_stack = async {
             println!("In stack callback");
             let stack_vme = new_mem.get_vme(stack_start - stack_size).unwrap();
@@ -195,7 +196,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                 println!("Writing arg pointer {} at addr {}", *arg_ptr, user_sp);
                 unsafe { ptr.write_volatile(*arg_ptr) };
             }
-            let argv = user_sp;
+            argv = user_sp;
             user_sp -= core::mem::size_of::<usize>();
             let ptr = (user_sp) as *mut usize;
             println!("Writing argv {} at addr {}", argv, user_sp);
@@ -206,6 +207,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
             println!("Writing argc {} at addr {}", arg_data.args_len, user_sp);
             unsafe { ptr.write_volatile(arg_data.args_len) };
             println!("Stack has been set up!");
+            argc = arg_data.args_len;
         };
 
         unsafe { crate::memory::with_user_vmem_async(ttbr0, setup_stack).await };
@@ -218,6 +220,8 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
         {
             let mut regs = context.regs();
             regs.regs = [0; 31];
+            regs.regs[0] = argc;
+            regs.regs[1] = argv;
             regs.elr = user_entry as usize;
             regs.spsr = 0b0000; // TODO: standardize initial SPSR values
             regs.sp_el0 = user_sp;
