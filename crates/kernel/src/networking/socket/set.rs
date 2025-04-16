@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use core::{slice::IterMut as SliceIterMut};
+use core::slice::IterMut as SliceIterMut;
 
 use crate::networking::socket::TaggedSocket;
 use crate::networking::SocketAddr;

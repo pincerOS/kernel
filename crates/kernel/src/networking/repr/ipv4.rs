@@ -283,7 +283,7 @@ impl Packet {
         }
 
         let start = header_len * 4;
-        let payload = buf[start ..(total_len as usize)].to_vec();
+        let payload = buf[start..(total_len as usize)].to_vec();
 
         Ok(Packet {
             version,

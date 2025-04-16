@@ -1,11 +1,10 @@
-use crate::networking::iface::{udp, Interface};
-use crate::networking::repr::*;
-use crate::networking::{Error, Result};
-use crate::networking::SocketAddr;
-use crate::networking::socket::{UdpSocket, TaggedSocket};
 use crate::device::system_timer;
 use crate::device::usb::device::net::interface;
-
+use crate::networking::iface::{udp, Interface};
+use crate::networking::repr::*;
+use crate::networking::socket::{TaggedSocket, UdpSocket};
+use crate::networking::SocketAddr;
+use crate::networking::{Error, Result};
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -66,7 +65,6 @@ impl DhcpClient {
             dns_servers: Vec::new(),
             udp_socket: None,
         }
-
     }
 
     pub fn start(&mut self) -> Result<()> {
@@ -76,11 +74,13 @@ impl DhcpClient {
 
         let socketaddr = SocketAddr {
             addr: *interface().ipv4_addr,
-            port: DHCP_CLIENT_PORT
+            port: DHCP_CLIENT_PORT,
         };
 
         let udp_socket = UdpSocket::new(socketaddr, 128);
-        interface().udp_sockets.add_socket(TaggedSocket::Udp(udp_socket));
+        interface()
+            .udp_sockets
+            .add_socket(TaggedSocket::Udp(udp_socket));
 
         let time = system_timer::get_time();
 
@@ -232,7 +232,7 @@ pub fn send_dhcp_discover(xid: u32) -> Result<()> {
         hops: 0,
         xid,
         secs: 0,
-        flags: 0x0000, 
+        flags: 0x0000,
         ciaddr: Ipv4Address::new([0, 0, 0, 0]),
         yiaddr: Ipv4Address::new([0, 0, 0, 0]),
         siaddr: Ipv4Address::new([0, 0, 0, 0]),
@@ -271,7 +271,7 @@ pub fn send_dhcp_request(
         hops: 0,
         xid,
         secs: 0,
-        flags: 0x0000, 
+        flags: 0x0000,
         ciaddr: Ipv4Address::new([0, 0, 0, 0]),
         yiaddr: Ipv4Address::new([0, 0, 0, 0]),
         siaddr: Ipv4Address::new([0, 0, 0, 0]),
@@ -408,8 +408,8 @@ fn send_dhcp_packet(interface: &mut Interface, packet: &DhcpPacket) -> Result<()
 //         addr:  interface.ipv4_addr.broadcast(),
 //         port: DHCP_SERVER_PORT
 //     };
-//     
-//     
+//
+//
 //     interface.dhcp.udp_socket.as_mut().unwrap().send(data, dest);
 //     Ok(())
 // }

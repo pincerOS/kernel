@@ -4,11 +4,11 @@ use crate::networking::socket::SocketAddr;
 use crate::networking::utils::{ring::Ring, slice::Slice};
 use crate::networking::{Error, Result};
 
-use crate::event::thread;
 use crate::device::usb::device::net::interface;
+use crate::event::thread;
 
-use alloc::vec::Vec;
 use alloc::vec;
+use alloc::vec::Vec;
 
 fn new_ring_packet_buffer(capacity: usize) -> Ring<(Vec<u8>, SocketAddr)> {
     let default_entry = (Vec::new(), SocketAddr::default()); // or some placeholder address
@@ -24,10 +24,7 @@ pub struct UdpSocket {
 }
 
 impl UdpSocket {
-    pub fn new(
-        binding: SocketAddr,
-        capacity: usize,
-    ) -> UdpSocket {
+    pub fn new(binding: SocketAddr, capacity: usize) -> UdpSocket {
         UdpSocket {
             binding,
             send_buffer: new_ring_packet_buffer(capacity),
@@ -41,18 +38,17 @@ impl UdpSocket {
 
     pub fn send(&mut self, payload: Vec<u8>, dest: SocketAddr) -> Result<()> {
         let src_port = self.binding.port;
-        let payload_clone = payload.clone(); 
+        let payload_clone = payload.clone();
 
         self.recv_buffer.enqueue_maybe(|(buffer, addr)| {
-            *buffer = payload; 
+            *buffer = payload;
             *addr = dest;
             Ok(())
         });
-        
+
         thread::thread(move || {
             udp::send_udp_packet(interface(), dest.addr, payload_clone, src_port, dest.port);
         });
-
 
         Ok(())
     }
@@ -65,18 +61,12 @@ impl UdpSocket {
     }
 
     // Enqueues a packet for receiving.
-    pub fn recv_enqueue (
-        &mut self,
-        payload: Vec<u8>,
-        sender: SocketAddr,
-    ) -> Result<()> {
-
+    pub fn recv_enqueue(&mut self, payload: Vec<u8>, sender: SocketAddr) -> Result<()> {
         self.recv_buffer.enqueue_maybe(|(buffer, addr)| {
-            *buffer = payload; 
+            *buffer = payload;
             *addr = sender;
             Ok(())
         })
-
     }
 
     // Returns the number of packets enqueued for sending.

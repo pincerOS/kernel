@@ -13,7 +13,7 @@ impl SocketAddr {
     pub fn default() -> Self {
         SocketAddr {
             addr: Ipv4Address::new([0, 0, 0, 0]),
-            port: 0
+            port: 0,
         }
     }
 }
@@ -23,4 +23,3 @@ impl Display for SocketAddr {
         write!(f, "{}:{}", self.addr, self.port)
     }
 }
-
