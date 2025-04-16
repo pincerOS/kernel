@@ -95,7 +95,7 @@ impl Frame {
 
         let ethertype = NetworkEndian::read_u16(&buf[12..14]);
 
-        let payload_end = buf.len() - 4;
+        let payload_end = buf.len();
         let payload = buf[14..payload_end].to_vec();
 
         // let raw_fcs = u32::from_be_bytes([
