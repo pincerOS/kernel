@@ -31,8 +31,8 @@ use crate::sync::SpinLock;
 //     }
 // }
 
-#[derive(PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct Inode(u64);
+#[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Copy, Clone)]
+pub struct Inode(u64);
 
 pub struct InitFs {
     this: Weak<InitFs>,
@@ -84,9 +84,9 @@ impl InitFs {
     }
 }
 
-struct InitFsFile {
+pub struct InitFsFile {
     fs: Arc<InitFs>,
-    inode: Inode,
+    pub inode: Inode,
     header: initfs::FileHeader,
     // TODO: OnceCell
     data: SpinLock<Option<Vec<u8>>>,

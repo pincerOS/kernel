@@ -20,6 +20,7 @@ pub struct ExitStatus {
 pub struct Process {
     pub mem: SpinLock<mem::UserAddrSpace>,
     pub root: Option<fd::ArcFd>,
+    pub current_dir: SpinLock<Option<fd::ArcFd>>,
     pub file_descriptors: SpinLock<FileDescriptorList>,
     pub exit_code: Arc<BlockingOnceCell<ExitStatus>>,
 }
@@ -31,6 +32,7 @@ impl Process {
         Process {
             mem: SpinLock::new(mem),
             root: None,
+            current_dir: SpinLock::new(None),
             file_descriptors: SpinLock::new(FileDescriptorList { desc: Vec::new() }),
             exit_code: Arc::new(BlockingOnceCell::new()),
         }
@@ -59,6 +61,7 @@ impl Process {
         let new_process = Process {
             mem: SpinLock::new(new_mem),
             root: self.root.clone(),
+            current_dir: SpinLock::new(self.current_dir.lock().clone()),
             file_descriptors: SpinLock::new(new_fds),
             exit_code: Arc::new(BlockingOnceCell::new()),
         };
