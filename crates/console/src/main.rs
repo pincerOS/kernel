@@ -59,7 +59,7 @@ pub extern "C" fn main() {
 
     let font = format::pcf::load_pcf(font_data).unwrap();
 
-    let mut buf = display_client::connect();
+    let mut buf = display_client::connect(320, 240);
 
     let (width, height) = (
         buf.video_meta.width as usize,
@@ -94,7 +94,7 @@ pub extern "C" fn main() {
     let mut editor = editor::LineEditor::new();
 
     let cwd = 3;
-    let fd = ulib::sys::openat(cwd, b"shell.elf", 0, 0).unwrap();
+    let fd = ulib::sys::openat(cwd, b"shell", 0, 0).unwrap();
 
     let (_shell, shell_stdin_tx, shell_stdout_rx) = {
         let (shell_stdin_rx, shell_stdin_tx) = pipe(0).unwrap();
