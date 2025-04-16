@@ -83,6 +83,7 @@ syscall!(19 => pub fn sys_munmap(addr: usize) -> isize);
 syscall!(21 => pub fn sys_get_time_ms() -> usize);
 syscall!(22 => pub fn sys_sleep_ms(time: usize));
 
+syscall!(31 => pub fn sys_open(path_len: usize, path_ptr: *const u8) -> isize);
 syscall!(32 => pub fn sys_chdir(path_len: usize, path_ptr: *const u8) -> isize);
 
 // syscall!(23 => pub fn sys_acquire_fb(width: usize, height: usize) -> (usize, usize, usize, usize, usize));
@@ -232,17 +233,22 @@ pub fn pipe(flags: usize) -> Result<(FileDesc, FileDesc), usize> {
     }
 }
 
+pub fn open(path: &[u8]) -> Result<FileDesc, usize> {
+    let res = unsafe { sys_open(path.len(), path.as_ptr()) };
+    int_to_error(res).map(|fd| fd as FileDesc)
+}
+
 pub fn openat(dir_fd: FileDesc, path: &[u8], flags: usize, mode: usize) -> Result<FileDesc, usize> {
     let res = unsafe { sys_openat(dir_fd as usize, path.len(), path.as_ptr(), flags, mode) };
     int_to_error(res).map(|fd| fd as FileDesc)
 }
 
-pub fn chdir(path: &[u8]) -> Result<(), usize> {
+pub fn chdir(path: &[u8]) -> Result<usize, usize> {
     let res = unsafe { sys_chdir(path.len(), path.as_ptr()) };
     if res < 0 {
         Err(res.unsigned_abs())
     } else {
-        Ok(())
+        Ok(res as usize)
     }
 }
 
