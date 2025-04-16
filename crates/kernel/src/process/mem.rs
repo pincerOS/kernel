@@ -32,6 +32,7 @@ pub struct MemoryRangeNode {
     pub start: usize,
     pub size: usize,
     pub kind: MappingKind,
+    pub is_shared: bool,
 }
 
 #[derive(Clone)]
@@ -78,10 +79,10 @@ impl UserAddrSpace {
 
         for (range_start, node) in &self.memory_range_map {
             let start = new_mem
-                .insert_vme_at(node.start, node.size, node.kind.clone())
+                .insert_vme_at(node.start, node.size, node.kind.clone(), node.is_shared)
                 .unwrap();
             assert!(start == *range_start);
-
+            
             for offset in (0..node.size).step_by(buf_size) {
                 let chunk_size = (node.size - offset).min(buf_size);
                 new_mem
@@ -93,6 +94,11 @@ impl UserAddrSpace {
                     .await
                     .unwrap();
 
+                if node.is_shared {
+                    println!("Skipping over shared range");
+                    continue;
+                }
+                
                 let src_data = node.start as *const u8;
                 let dst_data = node.start as *mut u8;
                 let buf_ptr: *mut u8 = buffer.as_mut_ptr().cast();
@@ -119,6 +125,7 @@ impl UserAddrSpace {
         start: usize,
         size: usize,
         kind: MappingKind,
+        is_shared: bool,
     ) -> Result<usize, MmapError> {
         let start_addr = (start / PAGE_SIZE) * PAGE_SIZE;
         let size_pages = (size + (start - start_addr)).next_multiple_of(PAGE_SIZE);
@@ -135,7 +142,7 @@ impl UserAddrSpace {
         }
         
         //TODO: take another look at the size here
-        let node = MemoryRangeNode { start, size, kind };
+        let node = MemoryRangeNode { start, size, kind , is_shared };
         self.memory_range_map.insert(start, node);
         Ok(start_addr)
     }
@@ -164,12 +171,13 @@ impl UserAddrSpace {
         start_addr: Option<usize>,
         size: usize,
         kind: MappingKind,
+        is_shared: bool,
     ) -> Result<usize, MmapError> {
         let start_addr = match start_addr {
             Some(s) => s,
             None => self.find_vme_space(size)?,
         };
-        let base_addr = self.insert_vme_at(start_addr, size, kind)?;
+        let base_addr = self.insert_vme_at(start_addr, size, kind, is_shared)?;
         Ok(base_addr)
     }
 
@@ -258,8 +266,14 @@ impl UserAddrSpace {
                 let offset = vaddr - vme.start;
                 let page = match fd.mmap_page(offset as u64).await.map(|r| r.as_result()) {
                     Some(Ok(page)) => page,
-                    Some(Err(_e)) => return Err(MmapError::FileError),
-                    None => return Err(MmapError::FileError),
+                    Some(Err(_e)) => {
+                        println!("Error in mmap page");
+                        return Err(MmapError::FileError);
+                    },
+                    None => { 
+                        println!("Mmap page returned none");
+                        return Err(MmapError::FileError);
+                    },
                 };
                 let desc = LeafDescriptor::new(page as usize)
                     .union(LeafDescriptor::UNPRIVILEGED_ACCESS)

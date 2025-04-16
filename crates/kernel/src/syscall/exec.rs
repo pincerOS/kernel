@@ -104,7 +104,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                     let memsize = (phdr.p_memsz as usize).next_multiple_of(4096).max(4096);
 
                     let base = new_mem
-                        .mmap(Some(phdr.p_vaddr as usize), memsize, MappingKind::Anon)
+                        .mmap(Some(phdr.p_vaddr as usize), memsize, MappingKind::Anon, false)
                         .unwrap();
 
                     // TODO: figure out how to handle user page faults when in the kernel
@@ -134,7 +134,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                 Some(stack_start - stack_size),
                 stack_size,
                 MappingKind::Anon,
-            )
+            false)
             .unwrap();
 
         let old = core::mem::replace(&mut *proc.mem.lock(), new_mem);

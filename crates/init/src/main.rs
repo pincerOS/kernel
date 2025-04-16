@@ -6,7 +6,20 @@ extern crate ulib;
 
 mod runtime;
 
-use ulib::sys::spawn_elf;
+use ulib::sys::{self, spawn_elf, sys_memfd_create, SpawnArgs};
+
+static mut IS_CHILD: bool = false;
+
+fn set_indicator() {
+    unsafe { IS_CHILD = true };
+}
+
+//Shoud the ulib function be exposed to the user?
+fn current_sp() -> usize {
+    let sp: usize;
+    unsafe { core::arch::asm!("mov {0}, sp", out(reg) sp) };
+    sp
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
@@ -23,16 +36,7 @@ pub extern "C" fn main() {
     //TODO: add mmap options flags to ulib 
     let mmap_addr: *mut u8 = unsafe { ulib::sys::mmap(0, 4096, 0, 0, test_text_file, 0).unwrap() } as *mut u8;
     println!("Memory range is mmaped!");    
-    /*
-    let mut val: usize = 0;
-    let val_ptr: *mut usize = &mut val;
-    //For debug
-    for i in 0..1000 {
-        let temp: usize = unsafe { val_ptr.read_volatile() };
-        println!("Read val: {}", temp);
-        unsafe { val_ptr.write_volatile(temp + 1)};
-    }
-    */
+    
     for i in 0..5 {
         let curr_char: u8 = unsafe { *(mmap_addr.wrapping_add(i)) };
         if curr_char != HELLO_CHARS[i] {
@@ -41,6 +45,64 @@ pub extern "C" fn main() {
     }
 
     println!("mmap of test file succeeded!");
+
+    unsafe { sys::munmap(mmap_addr as *mut ()).unwrap() };
+    
+    ///*
+    println!("Starting shared memory test");
+
+    let shared_mem_fd = unsafe { sys_memfd_create() as u32 };
+    let shared_frame = unsafe { ulib::sys::mmap(0, 4096, 0, 1 << 2, shared_mem_fd, 0) }.unwrap() as *mut u8;
+    let excl_ptr: *mut u8 = shared_frame.wrapping_add(6);
+    unsafe { excl_ptr.write('.' as u8) };
+
+    println!("Calling spawn");
+    //TODO: double check this
+    let child_args = ulib::sys::SpawnArgs{ fd: 0, stdin: None, stdout: None };
+    let args_ptr = &child_args as *const SpawnArgs;
+    //bad fork
+    let wait_fd = unsafe { ulib::sys::spawn(set_indicator as usize, current_sp(), args_ptr as usize, 0).unwrap() };
+    
+    ///*
+    if unsafe { IS_CHILD } {
+        println!("In child");
+        for _i in 0..100000 {
+            
+            if unsafe { excl_ptr.read_volatile() } != ('.' as u8) {
+                break;
+            }
+        }
+
+        if unsafe { excl_ptr.read_volatile() } != ('!' as u8) {
+            ulib::sys::exit(5);
+        }
+        
+        for i in 0..5 {
+            let curr_char = unsafe { *shared_frame.wrapping_add(i) } as char;
+            if curr_char != (HELLO_CHARS[i] as char) {
+                println!("Child found wrong char at index {}. Expected {} found {}", i, (HELLO_CHARS[i] as char), curr_char);
+                ulib::sys::exit(5);
+            }
+        }
+
+        println!("Child is done");
+        ulib::sys::exit(0);
+
+    } else {
+        println!("In parent");
+        unsafe {
+            core::ptr::copy_nonoverlapping(&raw const HELLO_CHARS[0], shared_frame, HELLO_CHARS.len());
+            shared_frame.wrapping_add(6).write('!' as u8);
+        }
+
+        unsafe { excl_ptr.write('!' as u8) };
+        let child_exit_val = ulib::sys::wait(wait_fd).unwrap();
+        assert!(child_exit_val == 0);
+
+    }
+    
+    //TODO: unmap shared frame
+    //*/
 
     let child = spawn_elf(&ulib::sys::SpawnArgs {
         fd: file,

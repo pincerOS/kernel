@@ -245,6 +245,7 @@ impl FileDescriptor for InitFsFile {
                         return Some(FileDescResult::ok(page_paddr as u64));
                     },
                     Err(_val) => {
+                        println!("Read failed");
                         return None;
                     },
                 }

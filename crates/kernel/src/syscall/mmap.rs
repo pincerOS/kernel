@@ -7,7 +7,8 @@ bitflags::bitflags! {
     }
     struct MmapFlags: u32 {
         const MAP_FIXED = 1 << 0;
-        const MAP_ANONYMOUS = 1 << 1;
+        const MAP_ANONYMOUS = 1 << 1; //if not set this indicates file
+        const MAP_SHARED = 1 << 2; //if not set indicates private mapping
     }
 }
 
@@ -37,6 +38,7 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
 
     run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
+        let is_shared: bool = flags.contains(MmapFlags::MAP_SHARED);
 
         let kind = if flags.contains(MmapFlags::MAP_ANONYMOUS) {
             MappingKind::Anon
@@ -48,13 +50,17 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
             };
             MappingKind::File(file)
         };
+        
+        if is_shared {
+            println!("Shared mapping detected in mmap");
+        }
 
         let res;
         if flags.contains(MmapFlags::MAP_FIXED) {
-            res = proc.mem.lock().mmap(Some(request_addr), request_size, kind);
+            res = proc.mem.lock().mmap(Some(request_addr), request_size, kind, is_shared);
         } else {
             // TODO: try to respect hint?
-            res = proc.mem.lock().mmap(None, request_size, kind);
+            res = proc.mem.lock().mmap(None, request_size, kind, is_shared);
         }
 
         match res {

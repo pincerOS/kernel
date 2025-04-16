@@ -35,7 +35,7 @@ pub unsafe fn register_syscalls() {
 
         register_syscall_handler(21, time::sys_get_time_ms);
         register_syscall_handler(22, time::sys_sleep_ms);
-
+        register_syscall_handler(24, fb_hack::sys_memfd_create);
         register_syscall_handler(23, fb_hack::sys_acquire_fb);
         register_syscall_handler(25, fb_hack::sys_poll_key_event);
 
