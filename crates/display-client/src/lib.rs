@@ -10,13 +10,18 @@ extern crate ulib;
 use proto::BufferHandle;
 use ulib::sys::{mmap, recv, send};
 
-pub fn connect() -> BufferHandle {
+pub fn connect(width: u16, height: u16) -> BufferHandle {
     let server_socket = 12;
     let message = ulib::sys::Message {
         tag: 0x101,
         objects: [u32::MAX, u32::MAX, u32::MAX, u32::MAX],
     };
-    send(server_socket, &message, &[], 0);
+
+    let mut buffer = [0; 8];
+    buffer[0..2].copy_from_slice(&u16::to_ne_bytes(width));
+    buffer[2..4].copy_from_slice(&u16::to_ne_bytes(height));
+
+    send(server_socket, &message, &buffer, 0);
 
     let mut buf = [0u8; 64];
     let (_len, msg) = recv(server_socket, &mut buf, 0).unwrap();

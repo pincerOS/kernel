@@ -403,6 +403,7 @@ define_scancodes! {
 }
 
 #[cfg(target_arch = "aarch64")]
+#[track_caller]
 pub fn memcpy128(dst: &mut [u128], src: &[u128]) {
     let len = dst.len();
     assert_eq!(len, src.len());

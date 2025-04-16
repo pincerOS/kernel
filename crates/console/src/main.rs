@@ -59,7 +59,7 @@ pub extern "C" fn main() {
 
     let font = format::pcf::load_pcf(font_data).unwrap();
 
-    let mut buf = display_client::connect();
+    let mut buf = display_client::connect(320, 240);
 
     let (width, height) = (
         buf.video_meta.width as usize,

@@ -153,8 +153,10 @@ fn main() {
                 })
                 .unwrap();
 
-                let status = ulib::sys::wait(child).unwrap();
-                println!("child exited with code {}", status);
+                if !line.ends_with("&") {
+                    let status = ulib::sys::wait(child).unwrap();
+                    println!("child exited with code {}", status);
+                }
             } else {
                 println!("unknown command: {:?}", first);
             }
