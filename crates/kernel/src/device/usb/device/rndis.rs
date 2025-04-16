@@ -224,7 +224,10 @@ pub unsafe fn rndis_query_msg(
 
     if b_msg.message_type != 0x80000004 {
         let message_type = b_msg.message_type;
-        print!("| RNDIS: Message type is not query message. {}\n", message_type);
+        print!(
+            "| RNDIS: Message type is not query message. {}\n",
+            message_type
+        );
         return (ResultCode::ErrorDevice, 0, 0);
     }
 
@@ -241,7 +244,6 @@ pub unsafe fn rndis_query_msg(
 
     let buffer_offset: u32 = 24; //TODO: FIX, Technically not to spec but this works
     let buffer_length = b_msg.information_buffer_length;
-
 
     return (ResultCode::OK, buffer_offset, buffer_length);
 }

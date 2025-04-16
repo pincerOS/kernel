@@ -1,4 +1,3 @@
-
 use crate::networking::repr::dev::Device;
 
 use crate::device::usb::device::net::*;

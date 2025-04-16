@@ -22,7 +22,6 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
 }
 
 async fn main() {
-
     // Basic loop, lets us wait for networking packets
     loop {
         sleep(10000).await;
