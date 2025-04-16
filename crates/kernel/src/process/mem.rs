@@ -9,8 +9,9 @@ use crate::arch::memory::vmm::{
     PAGE_SIZE, USER_PG_SZ,
 };
 use crate::event::async_handler::{run_async_handler, HandlerContext};
-use crate::event::context::{deschedule_thread, Context, DescheduleAction};
+use crate::event::context::Context;
 use crate::event::exceptions::DataAbortISS;
+use crate::syscall::proc::exit_user_thread;
 
 use super::fd::ArcFd;
 
@@ -327,7 +328,7 @@ pub fn page_fault_handler(ctx: &mut Context, far: usize, _iss: DataAbortISS) -> 
                 println!("{:#?}", &*context.regs());
 
                 let thread = context.detach_thread();
-                unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
+                unsafe { exit_user_thread(thread, -4i32 as u32) }
             }
             Some(vme) => {
                 mem.populate_page(vme, page_addr).await.unwrap(); // TODO: errors?

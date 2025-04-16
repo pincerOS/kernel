@@ -29,7 +29,7 @@ fn handle_incoming(_msg: ulib::sys::Message, _buf: &[u8], resp_socket: FileDesc)
     // TODO: proper listen + connect sockets
     // (this just broadcasts a response to all listeners and hopes that there aren't race conditions)
 
-    let buffer = init_buffer();
+    let buffer = init_buffer(640, 480);
 
     let fds = [buffer.fd, buffer.present_sem_fd];
     let handle = unsafe { proto::BufferHandle::new(buffer.mapped, &fds) };
@@ -55,10 +55,9 @@ fn handle_incoming(_msg: ulib::sys::Message, _buf: &[u8], resp_socket: FileDesc)
     handle
 }
 
-fn init_buffer() -> BufferInfo {
+fn init_buffer(width: usize, height: usize) -> BufferInfo {
     println!("init_buffer");
-    let screen_size = (640, 480);
-    let vmem_size = screen_size.0 * screen_size.1 * 4;
+    let vmem_size = width * height * 4;
 
     let header_size = size_of::<proto::BufferHeader>().next_multiple_of(4096);
     let total_size = header_size + vmem_size;
@@ -87,9 +86,9 @@ fn init_buffer() -> BufferInfo {
         server_to_client_queue: proto::EventQueue::new(),
 
         video_meta: proto::VideoMeta {
-            width: screen_size.0 as u16,
-            height: screen_size.1 as u16,
-            row_stride: (screen_size.0 as u16 * 4),
+            width: width as u16,
+            height: height as u16,
+            row_stride: (width as u16 * 4),
             bytes_per_pixel: 4,
             bit_layout: 0,
             present_ts: 0,
