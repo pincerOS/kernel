@@ -64,6 +64,14 @@ impl DhcpOption {
         DhcpOption::new(53, vec![msg_type as u8])
     }
 
+    pub fn server_identifier(server_id: Ipv4Address) -> Self {
+        DhcpOption::new(54, server_id.as_bytes().to_vec())
+    }
+
+    pub fn requested_ip(request: Ipv4Address) -> Self {
+        DhcpOption::new(50, request.as_bytes().to_vec())
+    }
+
     pub fn parameters(params: Vec<DhcpParam>) -> Self {
         DhcpOption::new(55, params.into_iter().map(|p| p as u8).collect())
     }

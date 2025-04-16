@@ -33,15 +33,16 @@ pub fn send_ethernet_frame(
 // recv ethernet frame from interface: parsed -> fwd to socket -> propogated up stack
 pub fn recv_ethernet_frame(interface: &mut Interface, eth_buffer: &[u8], len: u32) -> Result<()> {
     println!("[!] received ethernet frame");
-    let eth_frame = EthernetFrame::deserialize(eth_buffer)?;
+    println!("\t {:x?}", eth_buffer);
+    let eth_frame = EthernetFrame::deserialize(&eth_buffer[44..])?;
 
     // not for us
-    if eth_frame.dst != interface.ethernet_addr
-        && !eth_frame.dst.is_broadcast()
-        && !eth_frame.dst.is_multicast()
-    {
-        return Err(Error::Ignored);
-    }
+    // if eth_frame.dst != interface.ethernet_addr
+    //     && !eth_frame.dst.is_broadcast()
+    //     && !eth_frame.dst.is_multicast()
+    // {
+    //     return Err(Error::Ignored);
+    // }
 
     let res = match eth_frame.ethertype {
         EthernetType::ARP => arp::recv_arp_packet(interface, eth_frame),

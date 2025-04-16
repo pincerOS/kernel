@@ -1,7 +1,9 @@
-use crate::networking::iface::{icmp, ipv4, Interface};
+use crate::networking::iface::*;
 use crate::networking::repr::*;
 use crate::networking::socket::{SocketAddr, SocketSet, TaggedSocket};
 use crate::networking::Result;
+
+use crate::device::usb::device::net::interface as get_interface;
 
 use alloc::vec::Vec;
 
@@ -18,7 +20,9 @@ pub fn send_udp_packet(
         "sending udp {} {} {} {}",
         src_port, dst_port, *interface.ipv4_addr, dst_addr
     );
+
     let udp_packet = UdpPacket::new(src_port, dst_port, payload, *interface.ipv4_addr, dst_addr);
+
     ipv4::send_ipv4_packet(
         interface,
         udp_packet.serialize(),
@@ -28,53 +32,47 @@ pub fn send_udp_packet(
 }
 
 pub fn recv_udp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Result<()> {
+    println!("\t received udp packet");
     let udp_packet = UdpPacket::deserialize(ipv4_packet.payload.as_slice())?;
 
-    println!("received udp packet");
 
-    let dst_socket_addr = SocketAddr {
-        addr: ipv4_packet.dst_addr,
-        port: udp_packet.dst_port,
-    };
-    let mut unreachable = true;
+    // let dst_socket_addr = SocketAddr {
+    //     addr: ipv4_packet.dst_addr,
+    //     port: udp_packet.dst_port,
+    // };
+    //
+    // let src_socket_addr = SocketAddr {
+    //     addr: ipv4_packet.src_addr,
+    //     port: udp_packet.src_port,
+    // };
+    //
+    // match interface.udp_sockets.port_open_udp(dst_socket_addr) {
+    //     Some(sockfd) => {
+    //         interface.udp_sockets
+    //             .socket(sockfd)
+    //             .as_udp_socket()
+    //             .recv_enqueue(udp_packet.payload, src_socket_addr)
+    //     },
+    //     None => {
+    //         let icmp_packet = IcmpPacket::new(IcmpMessage::DestinationUnreachable(
+    //             IcmpDstUnreachable::PortUnreachable,
+    //         ));
+    //
+    //         ipv4::send_ipv4_packet(
+    //             interface,
+    //             icmp_packet.serialize(),
+    //             Ipv4Protocol::ICMP,
+    //             ipv4_packet.src_addr,
+    //         )
+    //     }
+    // };
 
-    interface
-        .udp_sockets
-        .iter_mut()
-        .filter_map(|socket| match socket {
-            TaggedSocket::Udp(ref mut socket) => {
-                if socket.accepts(&dst_socket_addr) {
-                    Some(socket)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        })
-        .for_each(|socket| {
-            unreachable = false;
-            if let Err(err) = socket.recv_enqueue(&ipv4_packet, &udp_packet, &*udp_packet.payload) {
-                debug!(
-                    "Error enqueueing UDP packet for receiving via socket with {:?}.",
-                    err
-                );
-            }
-        });
 
-    // Send an ICMP message indicating packet has been ignored because no
-    // UDP sockets are bound to the specified port.
-    if unreachable {
-        let icmp_packet = IcmpPacket::new(IcmpMessage::DestinationUnreachable(
-            IcmpDstUnreachable::PortUnreachable,
-        ));
-
-        ipv4::send_ipv4_packet(
-            interface,
-            icmp_packet.serialize(),
-            Ipv4Protocol::ICMP,
-            ipv4_packet.src_addr,
-        )
-    } else {
-        Ok(())
+    if udp_packet.payload.len() >= 240 && (&udp_packet.payload[236..240] == &[0x63, 0x82, 0x53, 0x63]) {
+            let dhcp_packet = DhcpPacket::deserialize(udp_packet.payload.as_slice()).unwrap();
+            interface.dhcp.process_dhcp_packet(get_interface(), dhcp_packet);
     }
+
+    Ok(())
+
 }

@@ -1,8 +1,11 @@
 use crate::networking::iface::{udp, Interface};
 use crate::networking::repr::*;
 use crate::networking::{Error, Result};
+use crate::networking::SocketAddr;
+use crate::networking::socket::{UdpSocket, TaggedSocket};
 use crate::device::system_timer;
 use crate::device::usb::device::net::interface;
+
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -41,6 +44,7 @@ pub struct DhcpClient {
     subnet_mask: u32,
     router: Option<Ipv4Address>,
     dns_servers: Vec<Ipv4Address>,
+    udp_socket: Option<UdpSocket>,
 }
 
 impl DhcpClient {
@@ -60,6 +64,7 @@ impl DhcpClient {
             subnet_mask: 24,
             router: None,
             dns_servers: Vec::new(),
+            udp_socket: None,
         }
 
     }
@@ -68,6 +73,14 @@ impl DhcpClient {
         if self.state != DhcpState::Idle && self.state != DhcpState::Released {
             return Ok(()); // already in progress
         }
+
+        let socketaddr = SocketAddr {
+            addr: *interface().ipv4_addr,
+            port: DHCP_CLIENT_PORT
+        };
+
+        let udp_socket = UdpSocket::new(socketaddr, 128);
+        interface().udp_sockets.add_socket(TaggedSocket::Udp(udp_socket));
 
         let time = system_timer::get_time();
 
@@ -78,6 +91,8 @@ impl DhcpClient {
 
         send_dhcp_discover(self.xid)
     }
+
+    // WARN: sockets seem to cause deadlock TT
 
     pub fn release(&mut self, interface: &mut Interface) -> Result<()> {
         if self.state != DhcpState::Bound
@@ -96,98 +111,10 @@ impl DhcpClient {
         }
     }
 
-    pub fn poll(&mut self, interface: &mut Interface, current_time: u64) -> Result<()> {
-        match self.state {
-            DhcpState::Discovering => {
-                if current_time >= self.last_action_time + self.discover_timeout {
-                    if self.retries > 0 {
-                        self.retries -= 1;
-                        self.last_action_time = current_time;
-                        send_dhcp_discover(self.xid)?;
-                    } else {
-                        // Too many retries, give up
-                        self.state = DhcpState::Idle;
-                        return Err(Error::Timeout);
-                    }
-                }
-            }
-            DhcpState::Requesting => {
-                if current_time >= self.last_action_time + self.request_timeout {
-                    if self.retries > 0 {
-                        self.retries -= 1;
-                        self.last_action_time = current_time;
-
-                        if let (Some(server_id), Some(offered_ip)) =
-                            (self.server_identifier, self.offered_ip)
-                        {
-                            send_dhcp_request(interface, self.xid, offered_ip, server_id)?;
-                        } else {
-                            self.state = DhcpState::Idle;
-                            return Err(Error::Malformed);
-                        }
-                    } else {
-                        // Too many retries, go back to discovering
-                        self.state = DhcpState::Discovering;
-                        self.retries = DEFAULT_LEASE_RETRY;
-                        self.last_action_time = current_time;
-                        send_dhcp_discover(self.xid)?;
-                    }
-                }
-            }
-            DhcpState::Bound => {
-                // Check if it's time to renew
-                let renewal_duration = self.renewal_time;
-                if current_time >= self.last_action_time + renewal_duration.unwrap() as u64 {
-                    self.state = DhcpState::Renewing;
-                    self.last_action_time = current_time;
-                    self.retries = DEFAULT_LEASE_RETRY;
-
-                    if let (Some(server_id), Some(offered_ip)) =
-                        (self.server_identifier, self.offered_ip)
-                    {
-                        send_dhcp_renew(interface, self.xid, offered_ip, server_id)?;
-                    }
-                }
-            }
-            DhcpState::Renewing => {
-                // Check if it's time to rebind
-                if let Some(rebind_time) = self.rebind_time {
-                    let rebind_duration = rebind_time as u64;
-                    if current_time >= self.last_action_time + rebind_duration {
-                        self.state = DhcpState::Rebinding;
-                        self.last_action_time = current_time;
-                        self.retries = DEFAULT_LEASE_RETRY;
-
-                        if let Some(offered_ip) = self.offered_ip {
-                            send_dhcp_rebind(interface, self.xid, offered_ip)?;
-                        }
-                    }
-                }
-            }
-            DhcpState::Rebinding => {
-                // Check if lease expired
-                let lease_duration = self.lease_time.unwrap() as u64;
-                if current_time >= self.last_action_time + lease_duration {
-                    // Lease expired, start over
-                    self.state = DhcpState::Discovering;
-                    self.last_action_time = current_time;
-                    self.retries = DEFAULT_LEASE_RETRY;
-                    self.xid = current_time as u32 ^ 0xABCD5678;
-
-                    send_dhcp_discover(self.xid)?;
-                }
-            }
-            _ => {} // No action needed for Idle or Released states
-        }
-
-        Ok(())
-    }
-
     pub fn process_dhcp_packet(
         &mut self,
         interface: &mut Interface,
         packet: DhcpPacket,
-        current_time: u64,
     ) -> Result<()> {
         let msg_type = packet.get_message_type().ok_or(Error::Malformed)?;
 
@@ -207,7 +134,7 @@ impl DhcpClient {
                     (self.server_identifier, self.offered_ip)
                 {
                     self.state = DhcpState::Requesting;
-                    self.last_action_time = current_time;
+                    self.last_action_time = system_timer::get_time();
                     self.retries = DEFAULT_LEASE_RETRY;
 
                     send_dhcp_request(interface, self.xid, offered_ip, server_id)?;
@@ -256,7 +183,7 @@ impl DhcpClient {
                 }
 
                 self.state = DhcpState::Bound;
-                self.last_action_time = current_time;
+                self.last_action_time = system_timer::get_time();
 
                 info!(
                     "DHCP: Bound to IP {} with lease time {} seconds",
@@ -275,9 +202,9 @@ impl DhcpClient {
 
                 // Reset and start over
                 self.state = DhcpState::Discovering;
-                self.last_action_time = current_time;
+                self.last_action_time = system_timer::get_time();
                 self.retries = DEFAULT_LEASE_RETRY;
-                self.xid = current_time as u32 ^ 0xEFEF1212;
+                self.xid = system_timer::get_time() as u32 ^ 0xEFEF1212;
 
                 send_dhcp_discover(self.xid)?;
             }
@@ -344,7 +271,7 @@ pub fn send_dhcp_request(
         hops: 0,
         xid,
         secs: 0,
-        flags: 0x8000, // Broadcast flag
+        flags: 0x0000, 
         ciaddr: Ipv4Address::new([0, 0, 0, 0]),
         yiaddr: Ipv4Address::new([0, 0, 0, 0]),
         siaddr: Ipv4Address::new([0, 0, 0, 0]),
@@ -352,8 +279,17 @@ pub fn send_dhcp_request(
         chaddr: interface.ethernet_addr,
         options: vec![
             DhcpOption::message_type(DhcpMessageType::Request),
-            // DhcpOption::requested_ip(requested_ip),
-            // DhcpOption::server_identifier(server_id),
+            DhcpOption::server_identifier(server_id),
+            DhcpOption::requested_ip(requested_ip),
+            DhcpOption::parameters(vec![
+                DhcpParam::SubnetMask,
+                DhcpParam::BroadcastAddr,
+                DhcpParam::TimeOffset,
+                DhcpParam::Router,
+                DhcpParam::DomainName,
+                DhcpParam::DNS,
+                DhcpParam::Hostname,
+            ]),
             DhcpOption::end(),
         ],
     };
@@ -465,6 +401,18 @@ fn send_dhcp_packet(interface: &mut Interface, packet: &DhcpPacket) -> Result<()
         DHCP_SERVER_PORT,
     )
 }
+
+// fn send_dhcp_packet(interface: &mut Interface, packet: &DhcpPacket) -> Result<()> {
+//     let data = packet.serialize();
+//     let dest = SocketAddr {
+//         addr:  interface.ipv4_addr.broadcast(),
+//         port: DHCP_SERVER_PORT
+//     };
+//     
+//     
+//     interface.dhcp.udp_socket.as_mut().unwrap().send(data, dest);
+//     Ok(())
+// }
 
 fn send_dhcp_packet_unicast(
     interface: &mut Interface,
