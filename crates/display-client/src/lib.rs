@@ -17,11 +17,16 @@ pub fn connect(width: u16, height: u16) -> BufferHandle {
         objects: [u32::MAX, u32::MAX, u32::MAX, u32::MAX],
     };
 
-    let mut buffer = [0; 8];
-    buffer[0..2].copy_from_slice(&u16::to_ne_bytes(width));
-    buffer[2..4].copy_from_slice(&u16::to_ne_bytes(height));
+    let buffer = proto::ConnRequest {
+        width,
+        height,
+        min_width: width,
+        min_height: height,
+        max_width: width,
+        max_height: height,
+    };
 
-    send(server_socket, &message, &buffer, 0);
+    send(server_socket, &message, bytemuck::bytes_of(&buffer), 0);
 
     let mut buf = [0u8; 64];
     let (_len, msg) = recv(server_socket, &mut buf, 0).unwrap();

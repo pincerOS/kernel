@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bytemuck = "1.21.0"
+bytemuck = { version = "1.19.0", default-features = false }

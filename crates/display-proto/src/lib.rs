@@ -9,6 +9,20 @@ pub use local::BufferHandle;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct ConnRequest {
+    pub width: u16,
+    pub height: u16,
+    pub min_width: u16,
+    pub min_height: u16,
+    pub max_width: u16,
+    pub max_height: u16,
+}
+
+unsafe impl bytemuck::Zeroable for ConnRequest {}
+unsafe impl bytemuck::Pod for ConnRequest {}
+
 #[allow(non_camel_case_types)]
 type au8 = AtomicU8;
 #[allow(non_camel_case_types)]
