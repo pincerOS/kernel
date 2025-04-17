@@ -1,15 +1,15 @@
 unsafe extern "Rust" {
-    fn main();
+    fn main(argc: usize, argv: *const *const u8);
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn _start(_x0: usize) -> ! {
+extern "C" fn _start(argc: usize, argv: *const *const u8) -> ! {
     #[cfg(feature = "heap-impl")]
     unsafe {
         crate::heap_impl::init_heap()
     };
 
-    unsafe { main() };
+    unsafe { main(argc, argv) };
     crate::sys::exit(0);
 }
 

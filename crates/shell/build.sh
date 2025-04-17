@@ -19,5 +19,5 @@ for src in src/bin/*.rs; do
         BINARY=../../target/${TARGET}/${PROFILE}/${BIN}
     fi
 
-    cp "${BINARY}" "${BIN}.elf"
+    cp "${BINARY}" "bin/${BIN}"
 done

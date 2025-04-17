@@ -1,3 +1,4 @@
+use alloc::borrow::ToOwned;
 use alloc::vec;
 
 use crate::event::async_handler::{run_async_handler, HandlerContext};
@@ -10,6 +11,7 @@ bitflags::bitflags! {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct StringPair {
     len: usize,
     ptr: *const u8,
@@ -38,15 +40,8 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
     let fd = ctx.regs[0];
     let flags = ctx.regs[1];
 
-    let args_len = ctx.regs[4];
-    let args_ptr = ctx.regs[5] as *const StringPair;
-
-    // actually the shell doesn't currently give argv so here's a hardcoded test
-    let args_len = 1;
-    let args_ptr = &StringPair {
-        len: 5,
-        ptr: b"a.out\0".as_ptr(),
-    } as *const StringPair as usize;
+    let args_len = ctx.regs[2];
+    let args_ptr = (ctx.regs[3] as *const StringPair) as usize;
 
     let env_len = ctx.regs[4];
     let env_ptr = ctx.regs[5] as *const StringPair;
@@ -65,6 +60,8 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
         env_ptr: env_ptr as usize,
     };
 
+    let mut kernel_args = vec![];
+
     run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
 
@@ -76,7 +73,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
         context.with_user_vmem(|| {
             let arg_data = &arg_data;
             // TODO: soundness, check user args
-            let _args = if arg_data.args_len == 0 {
+            let args = if arg_data.args_len == 0 {
                 &[]
             } else {
                 unsafe {
@@ -86,6 +83,19 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                     )
                 }
             };
+
+            for pair in args {
+                let slice = if pair.len == 0 {
+                    &[]
+                } else {
+                    unsafe {
+                        core::slice::from_raw_parts(pair.ptr, pair.len)
+                    }
+                };
+        
+                kernel_args.push(slice.to_owned()); // a String, safe and Send
+            }
+
             let _env = if arg_data.env_len == 0 {
                 &[]
             } else {
@@ -168,15 +178,24 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                 .await
                 .unwrap();
 
+            // println!("Arg ptr: {args_ptr:#x} arg len: {args_len:#x}");
+            // for i in 0..kernel_args.len() {
+            //     let arg = kernel_args.get(i).unwrap();
+            //     println!("Arg {}: {}", i, arg);
+            // }
+
             let mut user_args = vec![];
             for i in (0..arg_data.args_len).rev() {
-                let arg = unsafe { &(*(arg_data.args_ptr as *const StringPair).add(i)) };
+                // let arg = unsafe { &(*(arg_data.args_ptr as *const StringPair).add(i)) };
+                let arg = kernel_args.get(i).unwrap();
+                // let arg = args.get(i).unwrap();
                 user_sp -= core::mem::size_of::<u8>();
                 let ptr = (user_sp) as *mut u8;
-                println!("Writing the null terminator at addr {}", user_sp);
                 unsafe { ptr.write_volatile(b'\0') };
-                for j in (0..arg.len).rev() {
-                    let char = unsafe { *(arg.ptr.add(j)) };
+                
+                for j in (0..arg.len()).rev() {
+                    // let char = unsafe { *(arg.ptr.add(j)) };
+                    let char = *arg.get(j).unwrap() as u8;
                     user_sp -= core::mem::size_of::<u8>();
                     let ptr = (user_sp) as *mut u8;
                     println!("Copying char {} at pos {} to addr {}", char, j, user_sp);
@@ -193,18 +212,18 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
             for arg_ptr in user_args.iter() {
                 user_sp -= core::mem::size_of::<usize>();
                 let ptr = (user_sp) as *mut usize;
-                println!("Writing arg pointer {} at addr {}", *arg_ptr, user_sp);
+                println!("Writing arg pointer {:p} at addr {:p}", *arg_ptr as *const usize, user_sp as *const usize);
                 unsafe { ptr.write_volatile(*arg_ptr) };
             }
             argv = user_sp;
             user_sp -= core::mem::size_of::<usize>();
             let ptr = (user_sp) as *mut usize;
-            println!("Writing argv {} at addr {}", argv, user_sp);
+            println!("Writing argv {} at addr {:p}", argv, user_sp as *const usize);
             unsafe { ptr.write_volatile(argv as usize) };
 
             user_sp -= core::mem::size_of::<usize>();
             let ptr = (user_sp) as *mut usize;
-            println!("Writing argc {} at addr {}", arg_data.args_len, user_sp);
+            println!("Writing argc {} at addr {:p}", arg_data.args_len, user_sp as *const usize);
             unsafe { ptr.write_volatile(arg_data.args_len) };
             println!("Stack has been set up!");
             argc = arg_data.args_len;

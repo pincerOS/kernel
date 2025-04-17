@@ -27,16 +27,20 @@ pub extern "C" fn main() {
         fd: file,
         stdin: None,
         stdout: None,
+        stderr: None,
+        args: &[],
     })
     .unwrap();
 
-    let path = b"shell.elf";
+    let path = b"shell";
     let file = ulib::sys::openat(root_fd, path, 0, 0).unwrap();
 
     let child = spawn_elf(&ulib::sys::SpawnArgs {
         fd: file,
         stdin: None,
         stdout: None,
+        stderr: None,
+        args: &[],
     })
     .unwrap();
 

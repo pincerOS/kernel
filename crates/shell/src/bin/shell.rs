@@ -3,7 +3,9 @@
 
 #[macro_use]
 extern crate ulib;
+extern crate alloc;
 
+use alloc::vec::Vec;
 use ulib::sys::FileDesc;
 
 const STDIN_FD: FileDesc = 0;
@@ -117,35 +119,88 @@ fn main() {
             continue;
         }
 
+        fn is_special_char(c: u8) -> bool {
+            c == b'|' || c == b'&' || c == b'>' || c == b'<'
+        }
+
         if line == "exit" {
             break;
         } else {
-            let first = line.split_ascii_whitespace().next().unwrap_or(line);
-            if first.eq("cd") {
-                let err = ulib::sys::chdir( line[3..].as_bytes());
-                if let Err(err1) = err {
-                    if (err1 as i32) == -1 {
-                        println!("cd: no such file or directory: {}", &line[3..]);
-                    } else if(err1 as i32) == -2 {
-                        println!("cd: not a directory: {}", &line[3..]);
-                    } else {
-                        println!("cd: unknown error: {}", err1);
-                    }
+            let split: Vec<&str> = line.split_ascii_whitespace().collect(); //TODO: Introduce regex for split and grammar for actual parsing
+            let mut queue = Vec::new();
+            queue.push(0);
+            for i in 0..split.len() {
+                if is_special_char(split[i].as_bytes()[0]) {
+                    queue.push(i);
                 }
             }
-            else if let Ok(file) = ulib::sys::openat(root_fd, first.as_bytes(), 0, 0) {
-                // TODO: args
-                let child = ulib::sys::spawn_elf(&ulib::sys::SpawnArgs {
-                    fd: file,
-                    stdin: None,
-                    stdout: None,
-                })
-                .unwrap();
 
-                let status = ulib::sys::wait(child).unwrap();
-                println!("child exited with code {}", status);
-            } else {
-                println!("unknown command: {:?}", first);
+            let mut next_pipe = None;
+            while !queue.is_empty() {
+                let i = queue.pop().unwrap();
+                let has_next;
+                let next;
+                if queue.len() > 0 && i + 1 < split.len() {
+                    next = queue[0];
+                    has_next = true;
+                } else {
+                    next = split.len();
+                    has_next = false;
+                };
+
+                let command = split[i];
+                let args = &split[i + 1..next];
+
+                println!("Command: {}", command);
+
+                if command.eq("cd") {
+                    let err = ulib::sys::chdir(args[0].as_bytes());
+                    if let Err(err1) = err {
+                        if (err1 as i32) == -1 {
+                            println!("cd: no such file or directory: {}", args[0]);
+                        } else if (err1 as i32) == -2 {
+                            println!("cd: not a directory: {}", args[0]);
+                        } else {
+                            println!("cd: unknown error: {}", err1);
+                        }
+                    }
+                } else if let Ok(file) = ulib::sys::openat(root_fd, command.as_bytes(), 0, 0) {
+                    use ulib::sys::ArgStr;
+
+                    let argstrs: Vec<ArgStr> = args
+                        .iter()
+                        .map(|s| ArgStr {
+                            len: s.len(),
+                            ptr: s.as_ptr(),
+                        })
+                        .collect();
+                    
+                    let cur_stdout;
+                    let mut future_next_pipe = None;
+                    if has_next {
+                        let (read_fd, write_fd) = ulib::sys::pipe(0).unwrap();
+                        cur_stdout = Some(write_fd);
+                        future_next_pipe = Some(read_fd);
+                    } else {
+                        cur_stdout = None;
+                    }
+
+                    let child = ulib::sys::spawn_elf(&ulib::sys::SpawnArgs {
+                        fd: file,
+                        stdin: next_pipe,
+                        stdout: cur_stdout,
+                        stderr: None,
+                        args: &argstrs,
+                    })
+                    .unwrap();
+
+                    next_pipe = future_next_pipe;
+
+                    let status = ulib::sys::wait(child).unwrap();
+                    println!("child exited with code {}", status);
+                } else {
+                    println!("unknown command: {:?}", command);
+                }
             }
         }
     }
