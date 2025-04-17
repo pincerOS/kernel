@@ -56,8 +56,10 @@ pub extern "C" fn main() {
                 break;
             }
         }
-
-        if unsafe { excl_ptr.read_volatile() } != ('!' as u8) {
+        
+        let end_val: u8 = unsafe { excl_ptr.read_volatile() };
+        if  end_val != ('!' as u8) {
+            println!("Error: child expected to see ! with val {} and instead found {}", ('!' as u8), end_val);
             ulib::sys::exit(5);
         }
         
@@ -81,8 +83,8 @@ pub extern "C" fn main() {
 
         unsafe { excl_ptr.write('!' as u8) };
         let child_exit_val = ulib::sys::wait(wait_fd).unwrap();
-        assert!(child_exit_val == 0);
-
+        assert_eq!(child_exit_val, 0);
+        println!("Parent received exit code 0 from child, all is good");
     }
     
     //TODO: unmap shared frame
