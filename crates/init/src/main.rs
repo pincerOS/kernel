@@ -8,19 +8,6 @@ mod runtime;
 
 use ulib::sys::{self, spawn_elf, sys_memfd_create, SpawnArgs};
 
-static mut IS_CHILD: bool = false;
-
-fn set_indicator() {
-    unsafe { IS_CHILD = true };
-}
-
-//Shoud the ulib function be exposed to the user?
-fn current_sp() -> usize {
-    let sp: usize;
-    unsafe { core::arch::asm!("mov {0}, sp", out(reg) sp) };
-    sp
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     println!("Running in usermode! (parent)");
@@ -61,10 +48,11 @@ pub extern "C" fn main() {
     let child_args = ulib::sys::SpawnArgs{ fd: 0, stdin: None, stdout: None };
     let args_ptr = &child_args as *const SpawnArgs;
     //bad fork
-    let wait_fd = unsafe { ulib::sys::spawn(set_indicator as usize, current_sp(), args_ptr as usize, 0).unwrap() };
+    let wait_fd = unsafe { ulib::sys::sys_fork()};
     
     ///*
-    if unsafe { IS_CHILD } {
+
+    if wait_fd == 0 {
         println!("In child");
         for _i in 0..100000 {
             

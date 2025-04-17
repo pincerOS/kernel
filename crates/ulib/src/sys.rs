@@ -127,6 +127,73 @@ syscall!(26 => pub fn sys_sem_create(value: usize) -> isize);
 syscall!(27 => pub fn sys_sem_up(fd: usize) -> isize);
 syscall!(28 => pub fn sys_sem_down(fd: usize) -> isize);
 
+core::arch::global_asm!(
+    ".global {name}; {name}:",
+    "mov x0, lr", //Read link register value into x0
+    "svc #{num}",
+    "ret",
+    name = sym sys_fork_helper,
+    num = const 5,
+);
+unsafe extern "C" {
+    fn sys_fork_helper(pc: usize, sp: usize, x0: usize, flags: usize) -> isize;
+}
+
+//Should this save the frame pointer too?
+core::arch::global_asm!(
+    ".global {name}; {name}:",
+    /*
+    "push {{x9}}",
+    "push {{x10}}",
+    "push {{x11}}",
+    "push {{x12}}",
+    "push {{x13}}",
+    "push {{x14}}",
+    "push {{x15}}",
+    "push {{x19}}",
+    "push {{x20}}",
+    "push {{x21}}",
+    "push {{x22}}",
+    "push {{x23}}",
+    "push {{x24}}",
+    "push {{x25}}",
+    "push {{x26}}",
+    "push {{x27}}",
+    "push {{x28}}",
+    */
+    "push {{x9, x10, x11, x12, x13, x14, x15, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28}}",
+    "mov x1, sp",
+    "mov x2, 0", //child should get 0
+    "mov x3, 0",
+    "bl sys_fork_helper",
+    "pop {{x28, x27, x26, x25, x24, x23, x22, x21, x20, x19, x15, x14, x13, x12, x11, x10, x9}}",
+    /*
+    "pop {{x28}}",
+    "pop {{x27}}",
+    "pop {{x26}}",
+    "pop {{x25}}",
+    "pop {{x24}}",
+    "pop {{x23}}",
+    "pop {{x22}}",
+    "pop {{x21}}",
+    "pop {{x20}}",
+    "pop {{x19}}",
+    "pop {{x15}}",
+    "pop {{x14}}",
+    "pop {{x13}}",
+    "pop {{x12}}",
+    "pop {{x11}}",
+    "pop {{x10}}",
+    "pop {{x9}}",
+    */
+    "ret",
+    name = sym sys_fork,
+);
+unsafe extern "C" {
+    pub fn sys_fork() -> isize;
+}
+
+
 /* * * * * * * * * * * * * * * * * * * */
 /* Syscall wrappers                    */
 /* * * * * * * * * * * * * * * * * * * */

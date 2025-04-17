@@ -93,7 +93,26 @@ impl UserAddrSpace {
                 self.populate_range(node, node.start + offset, chunk_size)
                     .await
                     .unwrap();
+                
+                /*
+                //TODO: debug this
 
+                if let MappingKind::File(arc) = &node.kind {
+                    println!("File mapping found");
+
+                    if node.is_shared {
+                        println!("memfd found");
+                    }
+
+                    let any_val = arc as &dyn core::any::Any;
+                    if any_val.downcast_ref::<crate::syscall::fb_hack::MemFd>().is_some() {
+                        println!("Skipping over shared range");
+                        continue;
+                    }
+                }
+                */
+                
+                //HACK: remove this
                 if node.is_shared {
                     println!("Skipping over shared range");
                     continue;

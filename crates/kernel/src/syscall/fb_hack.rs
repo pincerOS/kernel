@@ -65,7 +65,6 @@ impl fd::FileDescriptor for FramebufferFd {
         fd::boxed_future(async move { Err(1).into() })
     }
     fn mmap_page(&self, offset: u64) -> fd::SmallFuture<Option<fd::FileDescResult>> {
-        println!("Inside of memfd mmap page");
         let paddr_base = self.0.paddr;
         assert!(offset % PAGE_SIZE as u64 == 0);
         if offset >= self.0.size as u64 {
@@ -100,7 +99,7 @@ pub unsafe fn sys_memfd_create(ctx: &mut Context) -> *mut Context {
     })
 }
 
-struct MemFd {
+pub struct MemFd {
     pages: SpinLock<BTreeMap<usize, PhysicalPage<Size4KiB>>>,
 }
 
@@ -152,6 +151,7 @@ impl fd::FileDescriptor for MemFd {
         fd::boxed_future(async move { Err(1).into() })
     }
     fn mmap_page(&self, offset: u64) -> fd::SmallFuture<Option<fd::FileDescResult>> {
+        println!("Inside of memfd mmap page");
         assert!(offset % PAGE_SIZE as u64 == 0);
 
         let page_addr = {
