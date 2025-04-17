@@ -9,6 +9,7 @@ extern crate ulib;
 
 use alloc::vec::Vec;
 use proto::BufferHandle;
+use thunderdome::{Arena, Index};
 use ulib::sys::{dup3, mmap, recv_nonblock, send, FileDesc};
 
 mod framebuffer;
@@ -21,8 +22,8 @@ struct BufferInfo {
 }
 
 struct Client {
-    pos: (u16, u16),
     handle: BufferHandle,
+    present_ready: bool,
 }
 
 #[no_mangle]
@@ -32,12 +33,22 @@ fn main() {
     handle_conns(fb, server_socket);
 }
 
-fn handle_incoming(_msg: ulib::sys::Message, buf: &[u8], resp_socket: FileDesc) -> Client {
+fn handle_incoming(
+    _msg: ulib::sys::Message,
+    buf: &[u8],
+    resp_socket: FileDesc,
+    manager: &mut WindowManager,
+) -> (Index, Client) {
     // TODO: proper listen + connect sockets
     // (this just broadcasts a response to all listeners and hopes that there aren't race conditions)
 
-    let width = u16::from_ne_bytes(buf[0..2].try_into().unwrap()); // TODO: don't panic
-    let height = u16::from_ne_bytes(buf[2..4].try_into().unwrap()); // TODO: don't panic
+    let buf = bytemuck::try_from_bytes::<proto::ConnRequest>(buf).unwrap(); // TODO: don't panic
+
+    let min_size = U16Vec2::new(buf.min_width, buf.min_height);
+    let max_size = U16Vec2::new(buf.max_width, buf.max_height);
+    let pref_size = U16Vec2::new(buf.width, buf.height);
+    let (window, size) = manager.request_window(min_size, max_size, pref_size);
+    let (width, height) = (size.x, size.y);
 
     let buffer = init_buffer(width as usize, height as usize);
 
@@ -62,10 +73,11 @@ fn handle_incoming(_msg: ulib::sys::Message, buf: &[u8], resp_socket: FileDesc) 
         0,
     );
 
-    Client {
+    let client = Client {
         handle,
-        pos: (0, 0),
-    }
+        present_ready: false,
+    };
+    (window, client)
 }
 
 fn init_buffer(width: usize, height: usize) -> BufferInfo {
@@ -124,8 +136,159 @@ fn init_buffer(width: usize, height: usize) -> BufferInfo {
     }
 }
 
+use glam::{I16Vec2, U16Vec2};
+
+struct Window {
+    pos: U16Vec2,
+    size: U16Vec2,
+    resizable: bool,
+    client: Index,
+}
+
+struct WindowManager {
+    default_pos: U16Vec2,
+    screen_dims: U16Vec2,
+
+    windows: Arena<Window>,
+    layering: Vec<Index>,
+
+    active: Option<Index>,
+
+    dragging: Option<(Index, U16Vec2)>,
+}
+
+enum HoveredState {
+    None,
+    Window(Index, U16Vec2),
+    Titlebar(Index, U16Vec2),
+}
+
+impl WindowManager {
+    fn new(screen_dims: U16Vec2) -> Self {
+        WindowManager {
+            default_pos: U16Vec2::new(0, 0),
+            screen_dims,
+            windows: Arena::new(),
+            layering: Vec::new(),
+            active: None,
+            dragging: None,
+        }
+    }
+
+    fn request_window(
+        &mut self,
+        min_size: U16Vec2,
+        _max_size: U16Vec2,
+        pref_size: U16Vec2,
+    ) -> (Index, U16Vec2) {
+        let size = pref_size.min(self.screen_dims).max(min_size);
+
+        if self
+            .default_pos
+            .saturating_add(size)
+            .cmpgt(self.screen_dims)
+            .any()
+        {
+            self.default_pos = U16Vec2::ZERO;
+        }
+        let pos = self.default_pos;
+        self.default_pos += U16Vec2::new(16, 16);
+
+        let idx = self.windows.insert(Window {
+            pos,
+            size,
+            resizable: false,
+            client: Index::DANGLING, // TODO
+        });
+        self.layering.push(idx);
+        self.active = Some(idx);
+        (idx, size)
+    }
+
+    fn remove_window(&mut self, window: Index) {
+        self.windows.remove(window);
+        self.layering.retain(|f| *f != window);
+        if self.active == Some(window) {
+            self.active = self.layering.last().map(|i| *i);
+        }
+    }
+
+    fn select_window(&mut self, window: Index) {
+        self.layering.retain(|f| *f != window);
+        self.layering.push(window);
+        self.active = Some(window);
+    }
+
+    fn alt_tab(&mut self) {
+        if self.layering.is_empty() {
+            self.active = None;
+        } else {
+            let old = self.active.map(|i| i.slot()).unwrap_or(0);
+            for i in (old + 1..self.windows.capacity() as u32).chain(0..=old) {
+                if let Some(idx) = self.windows.contains_slot(i) {
+                    self.select_window(idx);
+                    break;
+                }
+            }
+            // active = (active + 1) % clients.len();
+        }
+        println!("Switched active; active: {:?}", self.active);
+    }
+
+    fn hovered(&self, cursor: U16Vec2) -> HoveredState {
+        let title_height = 12;
+        for (idx, window) in self.iter_windows_draw_order_rev() {
+            let x_range = window.pos.x..window.pos.x.saturating_add(window.size.x);
+            let title_y_range = window.pos.y..window.pos.y.saturating_add(title_height);
+            let window_y_range = window.pos.y.saturating_add(title_height)
+                ..window.pos.y.saturating_add(window.size.y);
+            if x_range.contains(&cursor.x) && title_y_range.contains(&cursor.y) {
+                return HoveredState::Titlebar(idx, cursor - window.pos);
+            } else if x_range.contains(&cursor.x) && window_y_range.contains(&cursor.y) {
+                return HoveredState::Window(
+                    idx,
+                    cursor - window.pos - U16Vec2::new(0, title_height),
+                );
+            }
+        }
+        HoveredState::None
+    }
+
+    fn click(&mut self, button: u8, pressed: bool, cursor: U16Vec2) {
+        if button == 1 && pressed {
+            match self.hovered(cursor) {
+                HoveredState::None => (),
+                HoveredState::Titlebar(idx, offset) => {
+                    self.dragging = Some((idx, offset));
+                    self.select_window(idx);
+                }
+                HoveredState::Window(idx, _local_pos) => {
+                    self.select_window(idx);
+                }
+            }
+        } else if button == 1 && !pressed {
+            self.dragging = None;
+        }
+    }
+
+    fn mouse_move(&mut self, new_cursor: U16Vec2) {
+        if let Some((idx, offset)) = self.dragging {
+            self.windows[idx].pos = new_cursor.saturating_sub(offset);
+        }
+    }
+
+    fn iter_windows_draw_order(&self) -> impl Iterator<Item = (Index, &Window)> {
+        self.layering.iter().map(|i| (*i, &self.windows[*i]))
+    }
+    fn iter_windows_draw_order_rev(&self) -> impl Iterator<Item = (Index, &Window)> {
+        self.layering.iter().rev().map(|i| (*i, &self.windows[*i]))
+    }
+}
+
 fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
-    let mut clients = Vec::new();
+    let mut clients = Arena::new();
+
+    let mut window_manager = WindowManager::new(U16Vec2::new(fb.width as u16, fb.height as u16));
 
     // TODO: synchronization approach
     // Server:
@@ -147,18 +310,22 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
     let mut cursor_buf = alloc::vec![0u32; cursor_width * cursor_height];
     gfx::format::qoi::decode_qoi(&cursor_header, cursor_data, &mut cursor_buf, cursor_width);
 
-    let mut to_remove = Vec::<usize>::new();
-    let mut active = 0;
+    let mut to_remove = Vec::<Index>::new();
 
     let mut intermediate_fb = alloc::vec![0u128; fb.data.len()];
-    let mut cursor = (0, 0);
+    let mut cursor = U16Vec2::new(0, 0);
 
     loop {
         let mut buf = [0u64; 32];
         while let Ok((len, msg)) = recv_nonblock(server_socket, bytemuck::bytes_of_mut(&mut buf)) {
-            let buf = handle_incoming(msg, &bytemuck::bytes_of(&buf)[..len], server_socket);
-            active = clients.len(); // Select the newest window
-            clients.push(buf);
+            let (window, client) = handle_incoming(
+                msg,
+                &bytemuck::bytes_of(&buf)[..len],
+                server_socket,
+                &mut window_manager,
+            );
+            let idx = clients.insert(client);
+            window_manager.windows[window].client = idx;
         }
 
         intermediate_fb.fill(0);
@@ -176,19 +343,15 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
             match (code, pressed) {
                 (proto::ScanCode::TAB, true) => {
                     // TODO: modifiers
-                    if clients.is_empty() {
-                        active = 0;
-                    } else {
-                        active = (active + 1) % clients.len();
-                    }
-                    println!("Switched active; active: {active}");
+                    window_manager.alt_tab();
                     continue;
                 }
                 _ => (),
             }
 
-            let active = active.min(clients.len().saturating_sub(1));
-            if let Some(client) = clients.get_mut(active) {
+            if let Some(active) = window_manager.active {
+                let window = &window_manager.windows[active];
+                let client = clients.get_mut(window.client).unwrap();
                 let event = proto::InputEvent {
                     kind: proto::InputEvent::KIND_KEY,
                     data1: if pressed { 1 } else { 2 },
@@ -208,7 +371,8 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                 match ev.code {
                     0x1001..=0x1005 => {
                         let button = ev.code - 0x1000;
-                        println!("Mouse button: {}, {}", button, ev.value != 0);
+                        let state = ev.value != 0;
+                        window_manager.click(button as u8, state, cursor);
                     }
                     _ => (),
                 }
@@ -218,10 +382,13 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                     let x = (ev.value & 0xFFFF) as i16;
                     // println!("Mouse move: {}, {}", x, y);
 
-                    cursor = (
-                        (cursor.0 + x as i32).clamp(0, fb.width as i32 - 1),
-                        (cursor.1 + y as i32).clamp(0, fb.height as i32 - 1),
-                    );
+                    cursor = (cursor.as_i16vec2() + I16Vec2::new(x, y))
+                        .clamp(
+                            I16Vec2::ZERO,
+                            I16Vec2::new(fb.width as i16 - 1, fb.height as i16 - 1),
+                        )
+                        .as_u16vec2();
+                    window_manager.mouse_move(cursor);
                     cursor_moved = true;
                 } else if ev.code == ulib::sys::REL_WHEEL {
                     println!("Mouse wheel: {}", ev.value as i32);
@@ -231,7 +398,7 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
 
         let mut any_updated = false;
 
-        for (i, client) in clients.iter_mut().enumerate() {
+        for (i, client) in clients.iter_mut() {
             let mut ev_limit = 10;
             while let Some(msg) = client.handle.client_to_server_queue().try_recv() {
                 if ev_limit == 0 {
@@ -243,47 +410,12 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                         // HACK: treat newest window as active
                         use proto::EventData;
                         let proto::PresentEvent = proto::PresentEvent::parse(&msg).unwrap();
-
-                        match i {
-                            0 => client.pos = (0, 0),
-                            1 => client.pos = (320, 0),
-                            2 => client.pos = (0, 240),
-                            3 => client.pos = (320, 240),
-                            _ => (),
-                        }
-
-                        let window_x = client.pos.0 as usize;
-                        let window_y = client.pos.1 as usize;
-
-                        let out = bytemuck::cast_slice_mut(&mut intermediate_fb);
-                        let client_width = client.handle.video_meta.width as usize;
-                        let client_height = client.handle.video_meta.height as usize;
-                        let client_row_stride =
-                            client.handle.video_meta.row_stride as usize / size_of::<u32>();
-                        let client_fb = &*client.handle.video_mem();
-                        blit_buffer(
-                            out,
-                            fb.width,
-                            fb.height,
-                            fb.stride,
-                            window_x,
-                            window_y,
-                            client_fb,
-                            client_width,
-                            client_height,
-                            client_row_stride,
-                        );
-
+                        client.present_ready = true;
                         any_updated = true;
-
-                        // TODO: better sync system here? this will accumulate if client
-                        // isn't waiting for acks
-                        ulib::sys::sem_up(client.handle.get_sem_fd(client.handle.present_sem))
-                            .unwrap();
                     }
                     proto::EventKind::DISCONNECT => {
                         // TODO: auto-disconnect on process exit?
-                        println!("Client {} disconnected.", i);
+                        println!("Client {:?} disconnected.", i);
                         to_remove.push(i);
                         break;
                     }
@@ -294,14 +426,58 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
             }
         }
 
+        let title_height = 12;
+
+        for (_idx, window) in window_manager.iter_windows_draw_order() {
+            let client = &mut clients[window.client];
+
+            let window_x = window.pos.x as usize;
+            let window_y = window.pos.y as usize;
+
+            if client.present_ready {
+                let out = bytemuck::cast_slice_mut(&mut intermediate_fb);
+                let client_width = client.handle.video_meta.width as usize;
+                let client_height = client.handle.video_meta.height as usize;
+                let client_row_stride =
+                    client.handle.video_meta.row_stride as usize / size_of::<u32>();
+                let client_fb = &*client.handle.video_mem();
+                blit_buffer(
+                    out,
+                    fb.width,
+                    fb.height,
+                    fb.stride,
+                    window_x,
+                    window_y + title_height,
+                    client_fb,
+                    client_width,
+                    client_height,
+                    client_row_stride,
+                );
+
+                // TODO: better sync system here? this will accumulate if client
+                // isn't waiting for acks
+                ulib::sys::sem_up(client.handle.get_sem_fd(client.handle.present_sem)).unwrap();
+            }
+
+            // TODO: draw title bar, borders
+
+            let width = client.handle.video_meta.width as usize;
+            let effective_width = width.min(fb.width.saturating_sub(window_x));
+            for r in window_y..(window_y + title_height).min(fb.height) {
+                let out = bytemuck::cast_slice_mut::<_, u32>(&mut intermediate_fb);
+                let dst_row = &mut out[r * fb.stride + window_x..][..effective_width];
+                dst_row.fill(0xFFFFFFFF);
+            }
+        }
+
         let out = bytemuck::cast_slice_mut(&mut intermediate_fb);
         blit_buffer_blend(
             out,
             fb.width,
             fb.height,
             fb.stride,
-            cursor.0 as usize,
-            cursor.1 as usize,
+            cursor.x as usize,
+            cursor.y as usize,
             &cursor_buf,
             cursor_width,
             cursor_height,
@@ -316,6 +492,14 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
             to_remove.sort_by(|a, b| a.cmp(b).reverse());
         }
         for remove in to_remove.drain(..) {
+            if let Some(window) = window_manager
+                .windows
+                .iter()
+                .find(|(_, w)| w.client == remove)
+                .map(|(i, _)| i)
+            {
+                window_manager.remove_window(window);
+            }
             clients.remove(remove);
         }
 

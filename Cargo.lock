@@ -44,6 +44,7 @@ dependencies = [
 name = "display-client"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "display-proto",
  "ulib",
 ]
@@ -62,7 +63,9 @@ dependencies = [
  "bytemuck",
  "display-proto",
  "gfx",
+ "glam",
  "linked_list_allocator",
+ "thunderdome",
  "ulib",
 ]
 
@@ -89,6 +92,15 @@ name = "gfx"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+]
+
+[[package]]
+name = "glam"
+version = "0.30.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0e9b6647e9b41d3a5ef02964c6be01311a7f2472fea40595c635c6d046c259e"
+dependencies = [
+ "libm",
 ]
 
 [[package]]
@@ -122,6 +134,12 @@ dependencies = [
  "smallbox",
  "tinyvec",
 ]
+
+[[package]]
+name = "libm"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8355be11b20d696c8f18f6cc018c4e372165b1fa8126cef092399c9951984ffa"
 
 [[package]]
 name = "linked_list_allocator"
@@ -174,6 +192,12 @@ checksum = "5b9eb1a2f4c41445a3a0ff9abc5221c5fcd28e1f13cd7c0397706f9ac938ddb0"
 dependencies = [
  "lock_api",
 ]
+
+[[package]]
+name = "thunderdome"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92e170f93360bf9ae6fe3c31116bbf27adb1d054cedd6bc3d7857e34f2d98d0b"
 
 [[package]]
 name = "tinyvec"

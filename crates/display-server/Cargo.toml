@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bytemuck = { version = "1.21.0" }
+bytemuck = { version = "1.19.0", default-features = false }
 linked_list_allocator = "0.10"
+glam = { version = "0.30", default-features = false, features = ["nostd-libm"] }
+thunderdome = { version = "0.6", default-features = false }
 
 display-proto = { path = "../display-proto" }
 ulib = { path = "../ulib", features = ["heap-impl"] }
