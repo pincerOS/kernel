@@ -46,6 +46,8 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
     let user_sp = ctx.regs[1];
     let user_x0 = ctx.regs[2];
     let flags = ctx.regs[3];
+    
+    println!("In sys_spawn with user x0 value of {}", user_x0);
 
     run_async_handler(ctx, async move |context: HandlerContext<'_>| {
         let old_process = context.cur_process().unwrap();

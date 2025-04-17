@@ -43,12 +43,8 @@ pub extern "C" fn main() {
     let excl_ptr: *mut u8 = shared_frame.wrapping_add(6);
     unsafe { excl_ptr.write('.' as u8) };
 
-    println!("Calling spawn");
-    //TODO: double check this
-    let child_args = ulib::sys::SpawnArgs{ fd: 0, stdin: None, stdout: None };
-    let args_ptr = &child_args as *const SpawnArgs;
-    //bad fork
-    let wait_fd = unsafe { ulib::sys::sys_fork()};
+    println!("Calling fork");
+    let wait_fd = unsafe { ulib::sys::sys_fork() } as u32;
     
     ///*
 
