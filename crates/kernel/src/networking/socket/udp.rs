@@ -1,7 +1,7 @@
 use crate::networking::iface::udp;
 use crate::networking::repr::{Ipv4Packet, Ipv4Protocol, UdpPacket};
-use crate::networking::socket::SocketAddr;
-use crate::networking::utils::{ring::Ring, slice::Slice};
+use crate::networking::socket::IpAddrPair;
+use crate::networking::utils::ring::Ring;
 use crate::networking::{Error, Result};
 
 use crate::device::usb::device::net::interface;
@@ -10,21 +10,21 @@ use crate::event::thread;
 use alloc::vec;
 use alloc::vec::Vec;
 
-fn new_ring_packet_buffer(capacity: usize) -> Ring<(Vec<u8>, SocketAddr)> {
-    let default_entry = (Vec::new(), SocketAddr::default()); // or some placeholder address
+fn new_ring_packet_buffer(capacity: usize) -> Ring<(Vec<u8>, IpAddrPair)> {
+    let default_entry = (Vec::new(), IpAddrPair::default()); // or some placeholder address
     let buffer = vec![default_entry; capacity];
     Ring::from(buffer)
 }
 
 // A UDP socket
 pub struct UdpSocket {
-    binding: SocketAddr,
-    send_buffer: Ring<(Vec<u8>, SocketAddr)>,
-    recv_buffer: Ring<(Vec<u8>, SocketAddr)>,
+    binding: IpAddrPair,
+    send_buffer: Ring<(Vec<u8>, IpAddrPair)>,
+    recv_buffer: Ring<(Vec<u8>, IpAddrPair)>,
 }
 
 impl UdpSocket {
-    pub fn new(binding: SocketAddr, capacity: usize) -> UdpSocket {
+    pub fn new(binding: IpAddrPair, capacity: usize) -> UdpSocket {
         UdpSocket {
             binding,
             send_buffer: new_ring_packet_buffer(capacity),
@@ -32,11 +32,11 @@ impl UdpSocket {
         }
     }
 
-    pub fn accepts(&self, dst_addr: SocketAddr) -> bool {
+    pub fn accepts(&self, dst_addr: IpAddrPair) -> bool {
         self.binding == dst_addr
     }
 
-    pub fn send(&mut self, payload: Vec<u8>, dest: SocketAddr) -> Result<()> {
+    pub fn send(&mut self, payload: Vec<u8>, dest: IpAddrPair) -> Result<()> {
         let src_port = self.binding.port;
         let payload_clone = payload.clone();
 
@@ -55,13 +55,16 @@ impl UdpSocket {
 
     // Dequeues a received packet along with it's source address from the
     // socket.
-    pub fn recv(&mut self) -> Result<(&[u8], SocketAddr)> {
+    pub fn recv(&mut self) -> Result<(&[u8], IpAddrPair)> {
         self.recv_buffer
-            .dequeue_with(|&mut (ref buffer, ref addr)| (&buffer[..], addr.clone()))
+            .dequeue_with(|entry: &mut (Vec<u8>, IpAddrPair)| {
+                let (buffer, addr) = entry;
+                (&buffer[..], addr.clone())
+            })
     }
 
     // Enqueues a packet for receiving.
-    pub fn recv_enqueue(&mut self, payload: Vec<u8>, sender: SocketAddr) -> Result<()> {
+    pub fn recv_enqueue(&mut self, payload: Vec<u8>, sender: IpAddrPair) -> Result<()> {
         self.recv_buffer.enqueue_maybe(|(buffer, addr)| {
             *buffer = payload;
             *addr = sender;
