@@ -16,7 +16,7 @@ pub mod utils;
 use core::result::Result as CoreResult;
 
 use crate::networking::repr::Ipv4Address;
-use crate::networking::socket::SocketAddr;
+use crate::networking::socket::IpAddrPair;
 
 use crate::device::system_timer;
 
@@ -34,7 +34,7 @@ pub enum Error {
     // mac address cannot be resolved to ipv4 address
     MacResolution(Ipv4Address),
     // socket reuse
-    BindingInUse(SocketAddr),
+    BindingInUse(IpAddrPair),
     // socket buffer is full or empty
     Exhausted,
     Ignored,

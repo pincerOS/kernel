@@ -147,8 +147,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         ipv4_addr: DEFAULT_IPV4CIDR,
         default_gateway: DEFAULT_GATEWAY,
         dns: Vec::new(),
-        udp_sockets: SocketSet::new(0),
-        tcp_sockets: SocketSet::new(0),
+        sockets: Vec::new(),
         dhcp: dhcp::DhcpClient::new(),
     };
 
