@@ -1,6 +1,6 @@
 use crate::networking::iface::*;
 use crate::networking::repr::*;
-use crate::networking::socket::{SocketAddr, SocketSet, TaggedSocket};
+use crate::networking::socket::{IpAddrPair, TaggedSocket};
 use crate::networking::Result;
 
 use crate::device::usb::device::net::interface as get_interface;
@@ -35,12 +35,12 @@ pub fn recv_udp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Re
     println!("\t received udp packet");
     let udp_packet = UdpPacket::deserialize(ipv4_packet.payload.as_slice())?;
 
-    // let dst_socket_addr = SocketAddr {
+    // let dst_socket_addr = IpAddrPair {
     //     addr: ipv4_packet.dst_addr,
     //     port: udp_packet.dst_port,
     // };
     //
-    // let src_socket_addr = SocketAddr {
+    // let src_socket_addr = IpAddrPair {
     //     addr: ipv4_packet.src_addr,
     //     port: udp_packet.src_port,
     // };

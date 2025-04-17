@@ -1,4 +1,4 @@
-use crate::networking::iface::{arp, ethernet, icmp, udp, Interface};
+use crate::networking::iface::{arp, ethernet, icmp, tcp, udp, Interface};
 use crate::networking::repr::*;
 use crate::networking::{Error, Result};
 
@@ -46,7 +46,7 @@ pub fn recv_ip_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Re
     }
 
     match ipv4_packet.protocol {
-        // Ipv4Protocol::TCP => tcp::recv_tcp_packet(interface, ipv4_packet.payload),
+        Ipv4Protocol::TCP => tcp::recv_tcp_packet(interface, ipv4_packet),
         Ipv4Protocol::UDP => udp::recv_udp_packet(interface, ipv4_packet),
         Ipv4Protocol::ICMP => icmp::recv_icmp_packet(interface, ipv4_packet),
         _ => Err(Error::Ignored),

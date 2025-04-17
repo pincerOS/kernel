@@ -1,31 +1,19 @@
-use crate::networking::socket::{RawSocket, UdpSocket};
+use crate::networking::socket::{IpAddrPair, UdpSocket};
 
-// One of many types of sockets.
+use alloc::sync::Arc;
+
 pub enum TaggedSocket {
     // Raw(RawSocket),
-    Udp(UdpSocket),
-    // Tcp(TcpSocket),
+    Udp(Arc<UdpSocket>),
+    // Tcp(Arc<TcpSocket>),
 }
 
 impl TaggedSocket {
-    // pub fn as_raw_socket(&mut self) -> &mut RawSocket {
-    //     match *self {
-    //         TaggedSocket::Raw(ref mut socket) => socket,
-    //         _ => panic!("Not a raw socket!"),
-    //     }
-    // }
-    #[allow(unreachable_patterns)]
-    pub fn as_udp_socket(&mut self) -> &mut UdpSocket {
-        match *self {
-            TaggedSocket::Udp(ref mut socket) => socket,
-            _ => panic!("Not a UDP socket!"),
+    pub fn accepts(&mut self, pair: IpAddrPair) -> bool {
+        match self {
+            // TaggedSocket::Raw(socket) => socket.accepts(pair),
+            TaggedSocket::Udp(socket) => socket.accepts(pair),
+            // TaggedSocket::Tcp(socket) => socket.accepts(pair),
         }
     }
-
-    // pub fn as_tcp_socket(&mut self) -> &mut TcpSocket {
-    //     match *self {
-    //         TaggedSocket::Tcp(ref mut socket) => socket,
-    //         _ => panic!("Not a TCP socket!"),
-    //     }
-    // }
 }
