@@ -1,3 +1,5 @@
+use core::cell::RefCell;
+
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
@@ -17,11 +19,74 @@ pub struct ExitStatus {
     pub status: u32,
 }
 
+#[derive(Clone)]
+pub struct Credential {
+    /// Real UID: the UID of the user who started the process
+    pub ruid: u32,
+    /// Real GID: the GID of the user who started the process
+    pub rgid: u32,
+    /// Saved UID: the prior UID that the process was running as (for future permission raising)
+    pub suid: u32,
+    /// Saved GID: the prior GID that the process was running as (for future permission raising)
+    pub sgid: u32,
+    /// Effective UID: the UID that the process is running as
+    pub euid: u32,
+    /// Effective GID: the GID that the process is running as
+    pub egid: u32,
+    // todo: capabilities
+}
+
+impl Credential {
+    pub fn new() -> Self {
+        Credential {
+            ruid: 0,
+            rgid: 0,
+            suid: 0,
+            sgid: 0,
+            euid: 0,
+            egid: 0,
+        }
+    }
+
+    pub fn try_set_reuid(&mut self, ruid: Option<u32>, euid: Option<u32>) -> Result<(), ()> {
+        let executing_euid = self.euid;
+
+        if let Some(euid) = euid {
+            // Unprivileged processes may only set the **effective** user ID to the
+            // real user ID, the effective user ID, or the saved set-user-ID.
+            if executing_euid == 0 || [self.ruid, self.euid, self.suid].contains(&euid) {
+                self.euid = euid;
+
+                if self.euid != self.ruid {
+                    self.suid = self.euid;
+                }
+            } else {
+                return Err(());
+            }
+        }
+
+        if let Some(ruid) = ruid {
+            // Unprivileged users may only set the **real** user ID to the real user
+            // ID or the effective user ID.
+            if executing_euid == 0 || [self.ruid, executing_euid].contains(&ruid) {
+                self.ruid = ruid;
+                // Save the effective user id
+                self.suid = self.euid;
+            } else {
+                return Err(());
+            }
+        }
+
+        Ok(())
+    }
+}
+
 pub struct Process {
     pub mem: SpinLock<mem::UserAddrSpace>,
     pub root: Option<fd::ArcFd>,
     pub file_descriptors: SpinLock<FileDescriptorList>,
     pub exit_code: Arc<BlockingOnceCell<ExitStatus>>,
+    pub credential: SpinLock<Credential>,
 }
 
 impl Process {
@@ -33,6 +98,7 @@ impl Process {
             root: None,
             file_descriptors: SpinLock::new(FileDescriptorList { desc: Vec::new() }),
             exit_code: Arc::new(BlockingOnceCell::new()),
+            credential: SpinLock::new(Credential::new()),
         }
     }
 
@@ -56,11 +122,14 @@ impl Process {
             }
         }
 
+        let creds = self.credential.lock();
+
         let new_process = Process {
             mem: SpinLock::new(new_mem),
             root: self.root.clone(),
             file_descriptors: SpinLock::new(new_fds),
             exit_code: Arc::new(BlockingOnceCell::new()),
+            credential: SpinLock::new(creds.clone()),
         };
 
         new_process

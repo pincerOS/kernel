@@ -1,6 +1,7 @@
 use crate::event::exceptions::register_syscall_handler;
 
 pub mod channel;
+pub mod creds;
 pub mod exec;
 pub mod fb_hack;
 pub mod file;
@@ -42,5 +43,11 @@ pub unsafe fn register_syscalls() {
         register_syscall_handler(26, semaphore::sys_sem_create);
         register_syscall_handler(27, semaphore::sys_sem_up);
         register_syscall_handler(28, semaphore::sys_sem_down);
+
+        register_syscall_handler(50, creds::setuid);
+        register_syscall_handler(52, creds::setreuid);
+        register_syscall_handler(55, creds::geteuid);
+        register_syscall_handler(56, creds::getruid);
+        register_syscall_handler(57, creds::getsuid);
     }
 }

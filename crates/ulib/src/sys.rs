@@ -125,6 +125,13 @@ syscall!(26 => pub fn sys_sem_create(value: usize) -> isize);
 syscall!(27 => pub fn sys_sem_up(fd: usize) -> isize);
 syscall!(28 => pub fn sys_sem_down(fd: usize) -> isize);
 
+syscall!(50 => pub fn sys_setuid(uid: usize) -> isize);
+syscall!(52 => pub fn sys_setreuid(ruid: usize, euid: usize) -> isize);
+
+syscall!(55 => pub fn sys_geteuid() -> usize);
+syscall!(56 => pub fn sys_getruid() -> usize);
+syscall!(57 => pub fn sys_getsuid() -> usize);
+
 /* * * * * * * * * * * * * * * * * * * */
 /* Syscall wrappers                    */
 /* * * * * * * * * * * * * * * * * * * */
@@ -299,6 +306,31 @@ pub fn sem_up(fd: FileDesc) -> Result<(), usize> {
 pub fn sem_down(fd: FileDesc) -> Result<(), usize> {
     let res = unsafe { sys_sem_down(fd as usize) };
     int_to_error(res).map(|_| ())
+}
+pub fn setuid(uid: u32) -> Result<(), usize> {
+    let res = unsafe { sys_setuid(uid as usize) };
+    int_to_error(res).map(|_| ())
+}
+
+pub fn setreuid(ruid: u32, euid: u32) -> Result<(), usize> {
+    let res = unsafe { sys_setreuid(ruid as usize, euid as usize) };
+    int_to_error(res).map(|_| ())
+}
+
+pub fn getuid() -> u32 {
+    unsafe { sys_geteuid() as u32 }
+}
+
+pub fn geteuid() -> u32 {
+    unsafe { sys_geteuid() as u32 }
+}
+
+pub fn getruid() -> u32 {
+    unsafe { sys_getruid() as u32 }
+}
+
+pub fn getsuid() -> u32 {
+    unsafe { sys_getsuid() as u32 }
 }
 
 pub struct SpawnArgs {
