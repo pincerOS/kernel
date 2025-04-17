@@ -7,15 +7,13 @@ extern crate display_client;
 #[macro_use]
 extern crate ulib;
 
-pub mod format;
-
-mod color;
 pub mod editor;
 mod grid;
 mod input;
 mod vt100;
 
 use display_client::proto;
+use gfx::{color, format};
 
 #[macro_use]
 #[doc(hidden)]

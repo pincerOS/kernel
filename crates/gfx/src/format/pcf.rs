@@ -5,7 +5,7 @@
 
 use core::mem::offset_of;
 
-use bytemuck::{try_cast_slice, try_from_bytes, AnyBitPattern, Pod, Zeroable};
+use bytemuck::{AnyBitPattern, Pod, Zeroable, try_cast_slice, try_from_bytes};
 
 type le_u32 = u32;
 

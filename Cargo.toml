@@ -9,6 +9,7 @@ members = [
     "crates/elf",
     "crates/endian",
     "crates/filesystem",
+    "crates/gfx",
     "crates/init",
     "crates/initfs",
     "crates/kernel",

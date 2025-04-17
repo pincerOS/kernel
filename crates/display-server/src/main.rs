@@ -27,7 +27,7 @@ struct Client {
 
 #[no_mangle]
 fn main() {
-    let fb = framebuffer::init_fb(640, 480);
+    let fb = framebuffer::init_fb(1280, 720);
     let server_socket = 13;
     handle_conns(fb, server_socket);
 }
@@ -138,11 +138,20 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
     //   requests?)
     // TODO: vsync / rate management
 
+    // Load image (included directly in the binary)
+    let img = include_bytes!("../cursor.qoi");
+    let (cursor_header, cursor_data) = gfx::format::qoi::read_qoi_header(img).unwrap();
+    let cursor_width = cursor_header.width as usize;
+    let cursor_height = cursor_header.height as usize;
+    // Decode image into a bitmap buffer
+    let mut cursor_buf = alloc::vec![0u32; cursor_width * cursor_height];
+    gfx::format::qoi::decode_qoi(&cursor_header, cursor_data, &mut cursor_buf, cursor_width);
+
     let mut to_remove = Vec::<usize>::new();
+    let mut active = 0;
 
     let mut intermediate_fb = alloc::vec![0u128; fb.data.len()];
-
-    let mut active = 0;
+    let mut cursor = (0, 0);
 
     loop {
         let mut buf = [0u64; 32];
@@ -150,6 +159,74 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
             let buf = handle_incoming(msg, &bytemuck::bytes_of(&buf)[..len], server_socket);
             active = clients.len(); // Select the newest window
             clients.push(buf);
+        }
+
+        intermediate_fb.fill(0);
+
+        // TODO: better scheduling for this
+        loop {
+            let key = unsafe { ulib::sys::sys_poll_key_event() };
+            if key < 0 {
+                break;
+            }
+            let pressed = (key & 0x100) != 0;
+            let code = key & 0xFF;
+            let code = remap_keycode(code);
+
+            match (code, pressed) {
+                (proto::ScanCode::TAB, true) => {
+                    // TODO: modifiers
+                    if clients.is_empty() {
+                        active = 0;
+                    } else {
+                        active = (active + 1) % clients.len();
+                    }
+                    println!("Switched active; active: {active}");
+                    continue;
+                }
+                _ => (),
+            }
+
+            let active = active.min(clients.len().saturating_sub(1));
+            if let Some(client) = clients.get_mut(active) {
+                let event = proto::InputEvent {
+                    kind: proto::InputEvent::KIND_KEY,
+                    data1: if pressed { 1 } else { 2 },
+                    data2: code.0,
+                    data3: 0,
+                    data4: 0,
+                };
+                let queue = client.handle.server_to_client_queue();
+                queue.try_send_data(event).map_err(drop).unwrap();
+            }
+        }
+
+        let mut cursor_moved = false;
+
+        while let Some(ev) = ulib::sys::poll_mouse_event() {
+            if ev.kind == ulib::sys::EVENT_KEY {
+                match ev.code {
+                    0x1001..=0x1005 => {
+                        let button = ev.code - 0x1000;
+                        println!("Mouse button: {}, {}", button, ev.value != 0);
+                    }
+                    _ => (),
+                }
+            } else if ev.kind == ulib::sys::EVENT_RELATIVE {
+                if ev.code == ulib::sys::REL_XY {
+                    let y = (ev.value >> 16) as i16;
+                    let x = (ev.value & 0xFFFF) as i16;
+                    // println!("Mouse move: {}, {}", x, y);
+
+                    cursor = (
+                        (cursor.0 + x as i32).clamp(0, fb.width as i32 - 1),
+                        (cursor.1 + y as i32).clamp(0, fb.height as i32 - 1),
+                    );
+                    cursor_moved = true;
+                } else if ev.code == ulib::sys::REL_WHEEL {
+                    println!("Mouse wheel: {}", ev.value as i32);
+                }
+            }
         }
 
         let mut any_updated = false;
@@ -217,46 +294,22 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
             }
         }
 
-        if any_updated {
+        let out = bytemuck::cast_slice_mut(&mut intermediate_fb);
+        blit_buffer_blend(
+            out,
+            fb.width,
+            fb.height,
+            fb.stride,
+            cursor.0 as usize,
+            cursor.1 as usize,
+            &cursor_buf,
+            cursor_width,
+            cursor_height,
+            cursor_width,
+        );
+
+        if any_updated || cursor_moved {
             framebuffer::present(&mut fb, &intermediate_fb);
-        }
-
-        // TODO: better scheduling for this
-        loop {
-            let key = unsafe { ulib::sys::sys_poll_key_event() };
-            if key < 0 {
-                break;
-            }
-            let pressed = (key & 0x100) != 0;
-            let code = key & 0xFF;
-            let code = remap_keycode(code);
-
-            match (code, pressed) {
-                (proto::ScanCode::TAB, true) => {
-                    // TODO: modifiers
-                    if clients.is_empty() {
-                        active = 0;
-                    } else {
-                        active = (active + 1) % clients.len();
-                    }
-                    println!("Switched active; active: {active}");
-                    continue;
-                }
-                _ => (),
-            }
-
-            let active = active.min(clients.len().saturating_sub(1));
-            if let Some(client) = clients.get_mut(active) {
-                let event = proto::InputEvent {
-                    kind: proto::InputEvent::KIND_KEY,
-                    data1: if pressed { 1 } else { 2 },
-                    data2: code.0,
-                    data3: 0,
-                    data4: 0,
-                };
-                let queue = client.handle.server_to_client_queue();
-                queue.try_send_data(event).map_err(drop).unwrap();
-            }
         }
 
         if !to_remove.is_empty() {
@@ -268,7 +321,9 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
 
         // TODO: composite and present
         // TODO: sleep until frame
-        unsafe { ulib::sys::sys_sleep_ms(1) };
+        // TODO: intermediate buffers to prevent flickering for apps
+        // that render slowly
+        unsafe { ulib::sys::sys_sleep_ms(10) };
     }
 }
 
@@ -290,6 +345,29 @@ fn blit_buffer(
         let src_row = &src[r * src_stride..][..effective_width];
         let dst_row = &mut dst[(r + dst_y) * dst_stride + dst_x..][..effective_width];
         dst_row.copy_from_slice(src_row);
+    }
+}
+
+fn blit_buffer_blend(
+    dst: &mut [u32],
+    dst_w: usize,
+    dst_h: usize,
+    dst_stride: usize,
+    dst_x: usize,
+    dst_y: usize,
+    src: &[u32],
+    src_w: usize,
+    src_h: usize,
+    src_stride: usize,
+) {
+    let effective_width = src_w.min(dst_w.saturating_sub(dst_x));
+    let effective_height = src_h.min(dst_h.saturating_sub(dst_y));
+    for r in 0..effective_height {
+        let src_row = &src[r * src_stride..][..effective_width];
+        let dst_row = &mut dst[(r + dst_y) * dst_stride + dst_x..][..effective_width];
+        for (a, b) in src_row.iter().zip(dst_row) {
+            *b = gfx::color::blend(*a, *b);
+        }
     }
 }
 

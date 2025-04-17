@@ -26,6 +26,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "display-client",
+ "gfx",
  "lz4",
  "ulib",
  "unicode-segmentation",
@@ -60,6 +61,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "display-proto",
+ "gfx",
  "linked_list_allocator",
  "ulib",
 ]
@@ -81,6 +83,13 @@ dependencies = [
 [[package]]
 name = "filesystem"
 version = "0.1.0"
+
+[[package]]
+name = "gfx"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "init"

@@ -10,6 +10,7 @@ unicode-segmentation = "1.12"
 display-client = { path = "../display-client" }
 lz4 = { path = "../lz4" }
 ulib = { path = "../ulib", features = ["heap-impl"] }
+gfx = { path = "../gfx" }
 
 [dev-dependencies]
 ulib = { path = "../ulib", features = ["test"] }
