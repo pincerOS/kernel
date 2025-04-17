@@ -122,6 +122,8 @@ syscall!(26 => pub fn sys_sem_create(value: usize) -> isize);
 syscall!(27 => pub fn sys_sem_up(fd: usize) -> isize);
 syscall!(28 => pub fn sys_sem_down(fd: usize) -> isize);
 
+syscall!(30 => pub fn sys_poll_mouse_event(buf: *mut u8, buf_len: usize) -> isize);
+
 /* * * * * * * * * * * * * * * * * * * */
 /* Syscall wrappers                    */
 /* * * * * * * * * * * * * * * * * * * */
@@ -307,18 +309,19 @@ pub struct SpawnArgs<'a> {
 }
 
 pub fn spawn_elf(args: &SpawnArgs) -> Result<FileDesc, usize> {
+    // This is a hack, which only works for spawn.  Don't try to use this
+    // elsewhere.
+    fn current_sp() -> usize {
+        let sp: usize;
+        unsafe { core::arch::asm!("mov {0}, sp", out(reg) sp) };
+        sp
+    }
     let current_stack = current_sp();
     let target_pc = exec_child as usize;
     let arg = args as *const SpawnArgs;
 
     let wait_fd = unsafe { spawn(target_pc, current_stack, arg as usize, 0) };
     wait_fd
-}
-
-fn current_sp() -> usize {
-    let sp: usize;
-    unsafe { core::arch::asm!("mov {0}, sp", out(reg) sp) };
-    sp
 }
 
 extern "C" fn exec_child(spawn_args: *const SpawnArgs) -> ! {
@@ -340,4 +343,36 @@ extern "C" fn exec_child(spawn_args: *const SpawnArgs) -> ! {
     let _res = unsafe { execve_fd(spawn_args.fd, flags, args, env) };
     // TODO: notify parent of spawn failure
     exit(1);
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct InputEvent {
+    pub time: u64,
+    pub kind: u16,
+    pub code: u16,
+    pub value: u32,
+}
+
+pub const EVENT_KEY: u16 = 0x01;
+pub const EVENT_RELATIVE: u16 = 0x02;
+
+pub const REL_XY: u16 = 0x01;
+pub const REL_WHEEL: u16 = 0x02;
+
+pub fn poll_mouse_event() -> Option<InputEvent> {
+    let mut event = InputEvent {
+        time: 0,
+        kind: 0,
+        code: 0,
+        value: 0,
+    };
+    let res =
+        unsafe { sys_poll_mouse_event((&raw mut event).cast::<u8>(), size_of::<InputEvent>()) };
+    let res = int_to_error(res);
+    if res.is_ok() {
+        Some(event)
+    } else {
+        None
+    }
 }

@@ -76,7 +76,11 @@ pub fn decode_qoi(header: &QoiHeader, mut stream: &[u8], output: &mut [u32], out
                 rest
             }
             // QOI_OP_LUMA
-            [diff_green @ (0b1000_0000..=0b1011_1111), diff, ref rest @ ..] => {
+            [
+                diff_green @ (0b1000_0000..=0b1011_1111),
+                diff,
+                ref rest @ ..,
+            ] => {
                 let dg = (diff_green & 0b0011_1111).wrapping_sub(32);
                 let db = ((diff >> 0) & 0b0000_1111).wrapping_sub(8).wrapping_add(dg);
                 let dr = ((diff >> 4) & 0b0000_1111).wrapping_sub(8).wrapping_add(dg);
