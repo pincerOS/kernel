@@ -9,6 +9,7 @@ linked_list_allocator = "0.10"
 
 display-proto = { path = "../display-proto" }
 ulib = { path = "../ulib", features = ["heap-impl"] }
+gfx = { path = "../gfx" }
 
 [dev-dependencies]
 ulib = { path = "../ulib", features = ["test"] }
