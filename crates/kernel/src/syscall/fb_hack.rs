@@ -105,7 +105,6 @@ pub struct MemFd {
 
 impl MemFd {
     fn new() -> Self {
-        println!("Creating new mem fd");
         Self {
             pages: SpinLock::new(BTreeMap::new()),
         }
@@ -151,7 +150,6 @@ impl fd::FileDescriptor for MemFd {
         fd::boxed_future(async move { Err(1).into() })
     }
     fn mmap_page(&self, offset: u64) -> fd::SmallFuture<Option<fd::FileDescResult>> {
-        println!("Inside of memfd mmap page");
         assert!(offset % PAGE_SIZE as u64 == 0);
 
         let page_addr = {

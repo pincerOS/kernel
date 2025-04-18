@@ -6,7 +6,7 @@ extern crate ulib;
 
 mod runtime;
 
-use ulib::sys::{self, spawn_elf, sys_memfd_create, SpawnArgs};
+use ulib::sys::{self, spawn_elf, sys_memfd_create};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
@@ -35,31 +35,29 @@ pub extern "C" fn main() {
 
     unsafe { sys::munmap(mmap_addr as *mut ()).unwrap() };
     
-    ///*
     println!("Starting shared memory test");
 
     let shared_mem_fd = unsafe { sys_memfd_create() as u32 };
     let shared_frame = unsafe { ulib::sys::mmap(0, 4096, 0, 1 << 2, shared_mem_fd, 0) }.unwrap() as *mut u8;
-    let excl_ptr: *mut u8 = shared_frame.wrapping_add(6);
-    unsafe { excl_ptr.write('.' as u8) };
+    let end_ptr: *mut u8 = shared_frame.wrapping_add(6);
+    unsafe { end_ptr.write_volatile('.' as u8) };
+    assert_eq!(unsafe { end_ptr.read_volatile() }, '.' as u8);
 
     println!("Calling fork");
     let wait_fd = unsafe { ulib::sys::sys_fork() } as u32;
     
-    ///*
-
     if wait_fd == 0 {
-        println!("In child");
-        for _i in 0..100000 {
+        
+        for _i in 0..1000000 {
             
-            if unsafe { excl_ptr.read_volatile() } != ('.' as u8) {
+            if unsafe { end_ptr.read_volatile() } == ('!' as u8) {
                 break;
             }
         }
-        
-        let end_val: u8 = unsafe { excl_ptr.read_volatile() };
+
+        let end_val: u8 = unsafe { end_ptr.read_volatile() };
         if  end_val != ('!' as u8) {
-            println!("Error: child expected to see ! with val {} and instead found {}", ('!' as u8), end_val);
+            println!("Error: child expected to see '!' with val {} and instead found {}", ('!' as u8), end_val);
             ulib::sys::exit(5);
         }
         
@@ -75,20 +73,18 @@ pub extern "C" fn main() {
         ulib::sys::exit(0);
 
     } else {
-        println!("In parent");
+
         unsafe {
             core::ptr::copy_nonoverlapping(&raw const HELLO_CHARS[0], shared_frame, HELLO_CHARS.len());
             shared_frame.wrapping_add(6).write('!' as u8);
         }
 
-        unsafe { excl_ptr.write('!' as u8) };
         let child_exit_val = ulib::sys::wait(wait_fd).unwrap();
         assert_eq!(child_exit_val, 0);
         println!("Parent received exit code 0 from child, all is good");
     }
     
     //TODO: unmap shared frame
-    //*/
 
     let child = spawn_elf(&ulib::sys::SpawnArgs {
         fd: file,
