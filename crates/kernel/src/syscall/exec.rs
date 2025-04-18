@@ -88,11 +88,9 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                 let slice = if pair.len == 0 {
                     &[]
                 } else {
-                    unsafe {
-                        core::slice::from_raw_parts(pair.ptr, pair.len)
-                    }
+                    unsafe { core::slice::from_raw_parts(pair.ptr, pair.len) }
                 };
-        
+
                 kernel_args.push(slice.to_owned()); // a String, safe and Send
             }
 
@@ -192,7 +190,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                 user_sp -= core::mem::size_of::<u8>();
                 let ptr = (user_sp) as *mut u8;
                 unsafe { ptr.write_volatile(b'\0') };
-                
+
                 for j in (0..arg.len()).rev() {
                     // let char = unsafe { *(arg.ptr.add(j)) };
                     let char = *arg.get(j).unwrap() as u8;

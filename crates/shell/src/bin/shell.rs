@@ -84,7 +84,6 @@ fn main() {
     let path = "test.txt";
     let fd = ulib::sys::openat(root, path.as_bytes(), 0, 0).unwrap();
 
-    println!("File: {}", fd);
 
     let mut data = [0; 4096];
 

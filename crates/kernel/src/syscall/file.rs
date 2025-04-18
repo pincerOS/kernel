@@ -2,7 +2,7 @@ use alloc::borrow::Cow;
 
 use crate::event::async_handler::{run_async_handler, run_event_handler, HandlerContext};
 use crate::event::context::Context;
-use crate::process::fd::{ArcFd, DirEntry, FileKind};
+use crate::process::fd::{ArcFd, FileKind};
 
 bitflags::bitflags! {
     struct DupFlags: u32 {
@@ -158,7 +158,7 @@ pub unsafe fn sys_open(ctx: &mut Context) -> *mut Context {
     let Some(flags) = u32::try_from(flags).ok().and_then(OpenFlags::from_bits) else {
         ctx.regs[0] = -1i64 as usize;
         return ctx;
-    }; 
+    };
 
     let arg_data = OpenAtArgs {
         dir_fd: 0,
