@@ -231,6 +231,32 @@ impl FileDescriptor for InitFsFile {
     fn mmap_page(&self, _offset: u64) -> SmallFuture<Option<FileDescResult>> {
         boxed_future(async move { None })
     }
+    /// Permission checking for initfs files based on UID/GID and mode bits (union of owner, group, others)
+    fn can_access(
+        &self,
+        cred: &crate::process::Credential,
+        mode: crate::process::fd::FdAccessMode,
+    ) -> bool {
+        // Extract permission bits: owner (bits 8-6), group (5-3), others (2-0)
+        let perm = (self.header.mode & 0o777) as u16;
+        let owner_bits = (perm >> 6) & 0o7;
+        let group_bits = (perm >> 3) & 0o7;
+        let other_bits = perm & 0o7;
+
+        let mut bits = other_bits;
+        if cred.euid == self.header.uid as u32 {
+            bits |= owner_bits;
+        }
+        if cred.egid == self.header.gid as u32 {
+            bits |= group_bits;
+        }
+        // Check requested mode
+        match mode {
+            crate::process::fd::FdAccessMode::Read => bits & 0o4 != 0,
+            crate::process::fd::FdAccessMode::Write => bits & 0o2 != 0,
+            crate::process::fd::FdAccessMode::Exec => bits & 0o1 != 0,
+        }
+    }
     fn as_any(&self) -> &dyn core::any::Any {
         self
     }

@@ -2,7 +2,8 @@ use alloc::borrow::Cow;
 
 use crate::event::async_handler::{run_async_handler, run_event_handler, HandlerContext};
 use crate::event::context::Context;
-use crate::process::fd::{ArcFd, FileKind};
+use crate::process::fd::{ArcFd, FdAccessMode, FileKind};
+use crate::process::Credential;
 
 bitflags::bitflags! {
     struct DupFlags: u32 {
@@ -206,10 +207,23 @@ pub unsafe fn sys_openat(ctx: &mut Context) -> *mut Context {
         });
 
         // TODO: file creation?
-        let new_fd = match resolve_path(proc.root.as_ref(), dir, &path).await {
+        let cred = proc.credential.lock();
+        let new_fd = resolve_path(proc.root.as_ref(), dir, &path, &cred).await;
+        drop(cred);
+        let new_fd = match new_fd {
             Ok(f) => f,
             Err(_e) => return context.resume_return(-1i64 as usize),
         };
+
+        // Permission check: ensure process credentials allow opening this file
+        {
+            let cred = proc.credential.lock();
+            // Here, we assume read access is requested; adjust AccessMode when write flags are supported
+            if !new_fd.can_access(&*cred, crate::process::fd::FdAccessMode::Read) {
+                drop(cred);
+                return context.resume_return(-1i64 as usize);
+            }
+        }
 
         // TODO: close on exec, etc?
         let fd_idx = proc.file_descriptors.lock().insert(new_fd);
@@ -278,6 +292,7 @@ async fn resolve_path(
     root: Option<&ArcFd>,
     cur: ArcFd,
     path: &[u8],
+    cred: &Credential,
 ) -> Result<ArcFd, ResolveError> {
     // TODO: file creation?
 
@@ -331,10 +346,13 @@ async fn resolve_path(
 
             parent = cur;
             cur = new_cur;
-
-            // TODO: permission checks
-            // TODO: symbolic links
-
+            // Directory-traversal permission: require execute/search bit
+            if cur.kind() == FileKind::Directory {
+                if !cur.can_access(&cred, FdAccessMode::Exec) {
+                    return Err(ResolveError::NotFound);
+                }
+            }
+            // Symbolic links and type checking
             match cur.kind() {
                 FileKind::SymbolicLink => {
                     cur = parent.clone();

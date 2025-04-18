@@ -11,6 +11,13 @@ use crate::sync;
 pub type SmallFuture<'a, Out> = SmallBox<dyn Future<Output = Out> + Send + 'a, smallbox::space::S4>;
 pub type SmallFutureOwned<Out> = SmallBox<dyn Future<Output = Out> + Send, smallbox::space::S4>;
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum FdAccessMode {
+    Read,
+    Write,
+    Exec,
+}
+
 pub fn boxed_future<'a, F, Out>(f: F) -> SmallFuture<'a, Out>
 where
     F: Future<Output = Out> + Send + 'a,
@@ -65,6 +72,12 @@ pub trait FileDescriptor: Any {
         boxed_future(async move { Err(()).into() })
     }
 
+    // Permission checking: check if a credential may access this file
+    /// Check whether the given credentials have the specified access to this file
+    fn can_access(&self, _cred: &crate::process::Credential, _mode: FdAccessMode) -> bool {
+        // By default, allow all access; filesystems may override
+        true
+    }
     // TODO: unneeded after rust 1.86 by trait upcasting
     fn as_any(&self) -> &dyn Any;
 }
