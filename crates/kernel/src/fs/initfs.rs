@@ -200,10 +200,8 @@ impl FileDescriptor for InitFsFile {
         boxed_future(async move { Ok(size as u64).into() })
     }
     fn open<'a>(&'a self, name: &'a [u8]) -> SmallFuture<'a, Result<ArcFd, ()>> {
-        println!("Opening {:?}", core::str::from_utf8(name).unwrap());
         if self.header.is_dir() {
             let cur_name = self.fs.inner.get_file_name(&self.header).unwrap();
-            println!("cur dir {:?}", core::str::from_utf8(cur_name).unwrap());
             let pfx_len = if cur_name.is_empty() {
                 0
             } else {
@@ -211,11 +209,10 @@ impl FileDescriptor for InitFsFile {
             };
             let files = self.fs.inner.list_dir(self.inode.0 as usize).expect("TODO");
             for (inode, file) in files {
-                println!("file name {:?}", core::str::from_utf8(self.fs.inner.get_file_name(file).unwrap()).unwrap());
                 if file.name_len as usize == pfx_len + name.len()
                     && self.fs.inner.get_file_name(file).map(|b| &b[pfx_len..]) == Some(name)
                 {
-                    println!("found {:?}", self.fs.inner.get_file_name(file).map(|i| core::str::from_utf8(i).unwrap()));
+                    // println!("found {:?}", self.fs.inner.get_file_name(file).map(|i| core::str::from_utf8(i).unwrap()));
                     return boxed_future(async move {
                         self.fs
                             .get_inode(inode as u64)

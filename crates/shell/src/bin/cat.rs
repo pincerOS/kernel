@@ -21,7 +21,7 @@ extern "C" fn main(argc: usize, argv: *const *const u8) -> ! {
 
         let file = arg_str.as_bytes();
 
-        let result_fd = ulib::sys::open(file);
+        let result_fd = ulib::sys::open(file, 0);
         if result_fd.is_err() {
             println!("cat: no such file or directory: {:?}", arg_str);
             continue;

@@ -7,7 +7,7 @@ extern crate ulib;
 
 #[no_mangle]
 fn main() {
-    let root = ulib::sys::open(b".").unwrap();
+    let root = ulib::sys::open(b".", 0).unwrap();
     let mut cookie = 0;
     let mut data_backing = [0u64; 8192 / 8];
     let data = cast_slice(&mut data_backing);

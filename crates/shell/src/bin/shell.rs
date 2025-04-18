@@ -64,6 +64,18 @@ fn readline(reader: &mut LineReader) -> Result<&[u8], usize> {
     }
 }
 
+struct redirection<'a> {
+    redirect_type: i32,
+    file: &'a str
+}
+
+struct simple_command<'a> {
+    command: &'a str,
+    args: Vec<&'a str>,
+    redirections: Vec<redirection<'a>>,
+}
+
+
 #[no_mangle]
 fn main() {
     println!("Starting 🐚");
@@ -119,41 +131,88 @@ fn main() {
             continue;
         }
 
+        fn is_pipe(c: u8) -> bool {
+            c == b'|'
+        }
+
+        fn is_redirection(c: u8) -> bool {
+            c == b'>' || c == b'<'
+        }
+
+        fn is_background(c: u8) -> bool {
+            c == b'&'
+        }
+
         fn is_special_char(c: u8) -> bool {
-            c == b'|' || c == b'&' || c == b'>' || c == b'<'
+            is_pipe(c) || is_redirection(c) || is_background(c)
         }
 
         if line == "exit" {
             break;
         } else {
+            let mut run_background = false;
             let split: Vec<&str> = line.split_ascii_whitespace().collect(); //TODO: Introduce regex for split and grammar for actual parsing
             let mut queue = Vec::new();
-            queue.push(0);
-            for i in 0..split.len() {
-                if is_special_char(split[i].as_bytes()[0]) {
-                    queue.push(i);
+            
+            let mut i = 0;
+            while i < split.len() {
+                let c = split[i];
+                let mut j = i + 1;
+                while j < split.len() && !is_special_char(split[j].as_bytes()[0]) {
+                    j += 1;
+                }
+
+                let mut redirects = Vec::new();
+                let mut k = j;
+                while k < split.len() && is_redirection(split[k].as_bytes()[0]) {
+                    let redirection_str = split[k];
+                    let redirection_type;
+                    if redirection_str == "<" {
+                        redirection_type = 0;
+                    } else if redirection_str == "<<" {
+                        redirection_type = 1;
+                    } else if redirection_str == ">" {
+                        redirection_type = 2;
+                    } else if redirection_str == "<<" {
+                        redirection_type = 3;
+                    } else {
+                        redirection_type = -1;
+                    }
+
+                    k += 1;
+                    redirects.push(redirection {
+                        redirect_type: redirection_type,
+                        file: split[k],
+                    });
+                    k += 1;
+                }
+
+                if k < split.len() && is_background(split[k].as_bytes()[0]) {
+                    run_background = true;
+                    k += 1;
+                }
+                
+                // println!("Command: {}, Args: {:?}, i {} j {}", c, &split[(i + 1)..j], i, j);
+                queue.push(simple_command {
+                    command: c,
+                    args: split[(i + 1)..j].to_vec(),
+                    redirections: redirects,
+                });
+                i = k;
+
+                if i < split.len() && split[i].as_bytes()[0] == b'|' {
+                    i += 1;
                 }
             }
 
             let mut next_pipe = None;
-            while !queue.is_empty() {
-                let i = queue.pop().unwrap();
-                let has_next;
-                let next;
-                if queue.len() > 0 && i + 1 < split.len() {
-                    next = queue[0];
-                    has_next = true;
-                } else {
-                    next = split.len();
-                    has_next = false;
-                };
+            for i in 0..queue.len() {
+                let next = queue.get(i).unwrap();
+                let has_next = i < queue.len() - 1;
 
-                let command = split[i];
-                let args = &split[i + 1..next];
-
-                println!("Command: {}", command);
-
-                if command.eq("cd") {
+                let command = next.command;
+                let args = &next.args;
+                if command == "cd" {
                     let err = ulib::sys::chdir(args[0].as_bytes());
                     if let Err(err1) = err {
                         if (err1 as i32) == -1 {
@@ -175,14 +234,48 @@ fn main() {
                         })
                         .collect();
                     
-                    let cur_stdout;
+                    let mut cur_stdout;
                     let mut future_next_pipe = None;
+
                     if has_next {
                         let (read_fd, write_fd) = ulib::sys::pipe(0).unwrap();
                         cur_stdout = Some(write_fd);
                         future_next_pipe = Some(read_fd);
                     } else {
                         cur_stdout = None;
+                    }
+
+                    if next.redirections.len() > 0 {
+                        for redirect in &next.redirections {
+                            match redirect.redirect_type {
+                                0 => { //<
+                                    if let Ok(redirect_file) = ulib::sys::open(redirect.file.as_bytes(), 0) {
+                                        next_pipe = Some(redirect_file);
+                                    } else {
+                                        println!("failed to open file for redirection: {}", redirect.file);
+                                    }
+                                }
+                                1 => { //<<
+                                    println!("<< redirection not implemented");
+                                    continue;
+                                }
+                                2 => { //>
+                                    if let Ok(redirect_file) = ulib::sys::open(redirect.file.as_bytes(), 0) {
+                                        cur_stdout = Some(redirect_file);
+                                    } else {
+                                        println!("failed to open file for redirection: {}", redirect.file);
+                                    }
+                                }
+                                3 => { //<<
+                                    println!("<< redirection not implemented");
+                                    continue;
+                                }
+                                _ => {
+                                    println!("unknown redirection type: {}", redirect.redirect_type);
+                                    continue;
+                                }
+                            }
+                        }
                     }
 
                     let child = ulib::sys::spawn_elf(&ulib::sys::SpawnArgs {
@@ -196,8 +289,10 @@ fn main() {
 
                     next_pipe = future_next_pipe;
 
-                    let status = ulib::sys::wait(child).unwrap();
-                    println!("child exited with code {}", status);
+                    if !run_background { //TODO: Hacky solution -> need tracking
+                        let status = ulib::sys::wait(child).unwrap();
+                        println!("child exited with code {}", status);
+                    }
                 } else {
                     println!("unknown command: {:?}", command);
                 }

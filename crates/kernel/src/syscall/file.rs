@@ -153,12 +153,18 @@ bitflags::bitflags! {
 pub unsafe fn sys_open(ctx: &mut Context) -> *mut Context {
     let path_len = ctx.regs[0];
     let path_ptr = ctx.regs[1] as *const u8;
+    let flags = ctx.regs[2];
+
+    let Some(flags) = u32::try_from(flags).ok().and_then(OpenFlags::from_bits) else {
+        ctx.regs[0] = -1i64 as usize;
+        return ctx;
+    }; 
 
     let arg_data = OpenAtArgs {
         dir_fd: 0,
         path_len,
         path_ptr,
-        _flags: OpenFlags::empty(),
+        _flags: flags,
         _mode: OpenMode::empty(),
     };
 

@@ -83,7 +83,7 @@ syscall!(19 => pub fn sys_munmap(addr: usize) -> isize);
 syscall!(21 => pub fn sys_get_time_ms() -> usize);
 syscall!(22 => pub fn sys_sleep_ms(time: usize));
 
-syscall!(31 => pub fn sys_open(path_len: usize, path_ptr: *const u8) -> isize);
+syscall!(31 => pub fn sys_open(path_len: usize, path_ptr: *const u8, flags: usize) -> isize);
 syscall!(32 => pub fn sys_chdir(path_len: usize, path_ptr: *const u8) -> isize);
 
 // syscall!(23 => pub fn sys_acquire_fb(width: usize, height: usize) -> (usize, usize, usize, usize, usize));
@@ -233,8 +233,8 @@ pub fn pipe(flags: usize) -> Result<(FileDesc, FileDesc), usize> {
     }
 }
 
-pub fn open(path: &[u8]) -> Result<FileDesc, usize> {
-    let res = unsafe { sys_open(path.len(), path.as_ptr()) };
+pub fn open(path: &[u8], flags: usize) -> Result<FileDesc, usize> {
+    let res = unsafe { sys_open(path.len(), path.as_ptr(), flags) };
     int_to_error(res).map(|fd| fd as FileDesc)
 }
 
@@ -346,6 +346,9 @@ extern "C" fn exec_child(spawn_args: *const SpawnArgs) -> ! {
     }
     if let Some(fd) = spawn_args.stdout {
         dup3(fd, 1, 0).unwrap();
+    }
+    if let Some(fd) = spawn_args.stderr {
+        dup3(fd, 2, 0).unwrap();
     }
 
     let flags = 0;

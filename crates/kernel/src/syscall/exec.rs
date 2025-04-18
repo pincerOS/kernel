@@ -171,7 +171,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
         let mut argc = 0;
         let mut argv = 0;
         let setup_stack = async {
-            println!("In stack callback");
+            // println!("In stack callback");
             let stack_vme = new_mem.get_vme(stack_start - stack_size).unwrap();
             new_mem
                 .populate_range(stack_vme, stack_start - stack_size, stack_size)
@@ -198,7 +198,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                     let char = *arg.get(j).unwrap() as u8;
                     user_sp -= core::mem::size_of::<u8>();
                     let ptr = (user_sp) as *mut u8;
-                    println!("Copying char {} at pos {} to addr {}", char, j, user_sp);
+                    // println!("Copying char {} at pos {} to addr {}", char, j, user_sp);
                     unsafe { ptr.write_volatile(char) };
                 }
                 user_args.push(user_sp);
@@ -207,25 +207,25 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
             user_sp &= !0b111;
             user_sp -= core::mem::size_of::<usize>();
             let ptr = (user_sp) as *mut usize;
-            println!("Writing NULL at addr {}", user_sp);
+            // println!("Writing NULL at addr {}", user_sp);
             unsafe { ptr.write_volatile(0) };
             for arg_ptr in user_args.iter() {
                 user_sp -= core::mem::size_of::<usize>();
                 let ptr = (user_sp) as *mut usize;
-                println!("Writing arg pointer {:p} at addr {:p}", *arg_ptr as *const usize, user_sp as *const usize);
+                // println!("Writing arg pointer {:p} at addr {:p}", *arg_ptr as *const usize, user_sp as *const usize);
                 unsafe { ptr.write_volatile(*arg_ptr) };
             }
             argv = user_sp;
             user_sp -= core::mem::size_of::<usize>();
             let ptr = (user_sp) as *mut usize;
-            println!("Writing argv {} at addr {:p}", argv, user_sp as *const usize);
+            // println!("Writing argv {} at addr {:p}", argv, user_sp as *const usize);
             unsafe { ptr.write_volatile(argv as usize) };
 
             user_sp -= core::mem::size_of::<usize>();
             let ptr = (user_sp) as *mut usize;
-            println!("Writing argc {} at addr {:p}", arg_data.args_len, user_sp as *const usize);
+            // println!("Writing argc {} at addr {:p}", arg_data.args_len, user_sp as *const usize);
             unsafe { ptr.write_volatile(arg_data.args_len) };
-            println!("Stack has been set up!");
+            // println!("Stack has been set up!");
             argc = arg_data.args_len;
         };
 
@@ -247,7 +247,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
             context.user_regs().as_mut().unwrap().ttbr0_el1 = ttbr0;
         }
 
-        println!("Jumping to user entry point: {user_entry:#x}");
+        // println!("Jumping to user entry point: {user_entry:#x}");
         context.resume_final()
     })
 }
