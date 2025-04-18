@@ -12,6 +12,9 @@ use crate::event::async_handler::{run_async_handler, HandlerContext};
 use crate::event::context::{deschedule_thread, Context, DescheduleAction};
 use crate::event::exceptions::DataAbortISS;
 
+use crate::process::fd::FileDescriptor;
+use crate::syscall::fb_hack::MemFd;
+
 use super::fd::ArcFd;
 
 #[derive(Debug)]
@@ -32,7 +35,6 @@ pub struct MemoryRangeNode {
     pub start: usize,
     pub size: usize,
     pub kind: MappingKind,
-    pub is_shared: bool,
 }
 
 #[derive(Clone)]
@@ -40,6 +42,7 @@ pub enum MappingKind {
     Anon,
     File(ArcFd),
 }
+
 
 impl UserAddrSpace {
     pub fn new() -> Self {
@@ -79,7 +82,7 @@ impl UserAddrSpace {
 
         for (range_start, node) in &self.memory_range_map {
             let start = new_mem
-                .insert_vme_at(node.start, node.size, node.kind.clone(), node.is_shared)
+                .insert_vme_at(node.start, node.size, node.kind.clone())
                 .unwrap();
             assert!(start == *range_start);
             
@@ -93,31 +96,17 @@ impl UserAddrSpace {
                 self.populate_range(node, node.start + offset, chunk_size)
                     .await
                     .unwrap();
-                
-                /*
-                //TODO: debug this
-
+               
+                //Don't want to copy data in shared mem
                 if let MappingKind::File(arc) = &node.kind {
-                    println!("File mapping found");
-
-                    if node.is_shared {
-                        println!("memfd found");
-                    }
-
-                    let any_val = arc as &dyn core::any::Any;
-                    if any_val.downcast_ref::<crate::syscall::fb_hack::MemFd>().is_some() {
-                        println!("Skipping over shared range");
+                     
+                    if let Some(_s) = arc.as_any().downcast_ref::<MemFd>() {
+                        println!("Skipping over shared range the right way");
                         continue;
                     }
+                    
                 }
-                */
-                
-                //HACK: remove this
-                if node.is_shared {
-                    println!("Skipping over shared range");
-                    continue;
-                }
-                
+                 
                 let src_data = node.start as *const u8;
                 let dst_data = node.start as *mut u8;
                 let buf_ptr: *mut u8 = buffer.as_mut_ptr().cast();
@@ -144,7 +133,6 @@ impl UserAddrSpace {
         start: usize,
         size: usize,
         kind: MappingKind,
-        is_shared: bool,
     ) -> Result<usize, MmapError> {
         let start_addr = (start / PAGE_SIZE) * PAGE_SIZE;
         let size_pages = (size + (start - start_addr)).next_multiple_of(PAGE_SIZE);
@@ -161,7 +149,7 @@ impl UserAddrSpace {
         }
         
         //TODO: take another look at the size here
-        let node = MemoryRangeNode { start, size, kind , is_shared };
+        let node = MemoryRangeNode { start, size, kind };
         self.memory_range_map.insert(start, node);
         Ok(start_addr)
     }
@@ -190,13 +178,12 @@ impl UserAddrSpace {
         start_addr: Option<usize>,
         size: usize,
         kind: MappingKind,
-        is_shared: bool,
     ) -> Result<usize, MmapError> {
         let start_addr = match start_addr {
             Some(s) => s,
             None => self.find_vme_space(size)?,
         };
-        let base_addr = self.insert_vme_at(start_addr, size, kind, is_shared)?;
+        let base_addr = self.insert_vme_at(start_addr, size, kind)?;
         Ok(base_addr)
     }
 

@@ -38,6 +38,7 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
 
     run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
+        //TODO: remove this
         let is_shared: bool = flags.contains(MmapFlags::MAP_SHARED);
 
         let kind = if flags.contains(MmapFlags::MAP_ANONYMOUS) {
@@ -51,16 +52,17 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
             MappingKind::File(file)
         };
         
+        //TODO: remove this
         if is_shared {
             println!("Shared mapping detected in mmap");
         }
 
         let res;
         if flags.contains(MmapFlags::MAP_FIXED) {
-            res = proc.mem.lock().mmap(Some(request_addr), request_size, kind, is_shared);
+            res = proc.mem.lock().mmap(Some(request_addr), request_size, kind);
         } else {
             // TODO: try to respect hint?
-            res = proc.mem.lock().mmap(None, request_size, kind, is_shared);
+            res = proc.mem.lock().mmap(None, request_size, kind);
         }
 
         match res {

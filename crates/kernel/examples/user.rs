@@ -31,7 +31,7 @@ async fn main() {
     let user_region = process
         .mem
         .lock()
-        .mmap(Some(0x20_0000), user_region_len, MappingKind::Anon, false)
+        .mmap(Some(0x20_0000), user_region_len, MappingKind::Anon)
         .unwrap();
 
     let mem = process.mem.lock();
@@ -91,8 +91,8 @@ async fn main() {
         .mmap(
             Some(stack_start - stack_size),
             stack_size,
-            MappingKind::Anon,
-            false)
+            MappingKind::Anon
+            )
         .unwrap();
 
     let user_sp = stack_start;
