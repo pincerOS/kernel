@@ -167,7 +167,6 @@ unsafe extern "C" {
     pub fn sys_fork() -> isize;
 }
 
-
 /* * * * * * * * * * * * * * * * * * * */
 /* Syscall wrappers                    */
 /* * * * * * * * * * * * * * * * * * * */

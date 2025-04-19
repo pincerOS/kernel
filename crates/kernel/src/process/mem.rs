@@ -12,7 +12,6 @@ use crate::event::async_handler::{run_async_handler, HandlerContext};
 use crate::event::context::{deschedule_thread, Context, DescheduleAction};
 use crate::event::exceptions::DataAbortISS;
 
-use crate::process::fd::FileDescriptor;
 use crate::syscall::fb_hack::MemFd;
 
 use super::fd::ArcFd;
@@ -35,6 +34,7 @@ pub struct MemoryRangeNode {
     pub start: usize,
     pub size: usize,
     pub kind: MappingKind,
+    pub offset: usize,
 }
 
 #[derive(Clone)]
@@ -42,7 +42,6 @@ pub enum MappingKind {
     Anon,
     File(ArcFd),
 }
-
 
 impl UserAddrSpace {
     pub fn new() -> Self {
@@ -82,10 +81,10 @@ impl UserAddrSpace {
 
         for (range_start, node) in &self.memory_range_map {
             let start = new_mem
-                .insert_vme_at(node.start, node.size, node.kind.clone())
+                .insert_vme_at(node.start, node.size, node.kind.clone(), node.offset)
                 .unwrap();
             assert!(start == *range_start);
-            
+
             for offset in (0..node.size).step_by(buf_size) {
                 let chunk_size = (node.size - offset).min(buf_size);
                 new_mem
@@ -96,17 +95,14 @@ impl UserAddrSpace {
                 self.populate_range(node, node.start + offset, chunk_size)
                     .await
                     .unwrap();
-               
+
                 //Don't want to copy data in shared mem
                 if let MappingKind::File(arc) = &node.kind {
-                     
                     if let Some(_s) = arc.as_any().downcast_ref::<MemFd>() {
-                        println!("Skipping over shared range the right way");
                         continue;
                     }
-                    
                 }
-                 
+
                 let src_data = node.start as *const u8;
                 let dst_data = node.start as *mut u8;
                 let buf_ptr: *mut u8 = buffer.as_mut_ptr().cast();
@@ -133,6 +129,7 @@ impl UserAddrSpace {
         start: usize,
         size: usize,
         kind: MappingKind,
+        offset: usize,
     ) -> Result<usize, MmapError> {
         let start_addr = (start / PAGE_SIZE) * PAGE_SIZE;
         let size_pages = (size + (start - start_addr)).next_multiple_of(PAGE_SIZE);
@@ -147,9 +144,13 @@ impl UserAddrSpace {
                 return Err(MmapError::MemoryRangeCollision);
             }
         }
-        
-        //TODO: take another look at the size here
-        let node = MemoryRangeNode { start, size, kind };
+
+        let node = MemoryRangeNode {
+            start,
+            size,
+            kind,
+            offset,
+        };
         self.memory_range_map.insert(start, node);
         Ok(start_addr)
     }
@@ -178,12 +179,13 @@ impl UserAddrSpace {
         start_addr: Option<usize>,
         size: usize,
         kind: MappingKind,
+        offset: usize,
     ) -> Result<usize, MmapError> {
         let start_addr = match start_addr {
             Some(s) => s,
             None => self.find_vme_space(size)?,
         };
-        let base_addr = self.insert_vme_at(start_addr, size, kind)?;
+        let base_addr = self.insert_vme_at(start_addr, size, kind, offset)?;
         Ok(base_addr)
     }
 
@@ -208,12 +210,23 @@ impl UserAddrSpace {
             };
 
             let leaf = unsafe { desc.leaf };
+
             if leaf.is_valid() {
                 let new_desc = TranslationDescriptor::unset();
                 unsafe {
                     set_translation_descriptor(self.table, virt_addr, 3, 0, new_desc, false)
                         .unwrap()
                 }
+                //Need this invalidation here or it still accesses old page
+                unsafe {
+                    core::arch::asm! {
+                        "dsb ISH",
+                        "tlbi vaae1, {0}",
+                        in(reg) (virt_addr >> 12)
+                        //options(readonly, nostack, preserves_flags)
+                    }
+                }
+
                 // TODO: free it
                 match &vme.kind {
                     MappingKind::Anon => {
@@ -270,16 +283,20 @@ impl UserAddrSpace {
             }
             MappingKind::File(fd) => {
                 let offset = vaddr - vme.start;
-                let page = match fd.mmap_page(offset as u64).await.map(|r| r.as_result()) {
+                let page = match fd
+                    .mmap_page(offset as u64 + (vme.offset as u64))
+                    .await
+                    .map(|r| r.as_result())
+                {
                     Some(Ok(page)) => page,
                     Some(Err(_e)) => {
                         println!("Error in mmap page");
                         return Err(MmapError::FileError);
-                    },
-                    None => { 
+                    }
+                    None => {
                         println!("Mmap page returned none");
                         return Err(MmapError::FileError);
-                    },
+                    }
                 };
                 let desc = LeafDescriptor::new(page as usize)
                     .union(LeafDescriptor::UNPRIVILEGED_ACCESS)
@@ -330,7 +347,6 @@ unsafe impl Sync for UserAddrSpace {}
 pub fn page_fault_handler(ctx: &mut Context, far: usize, _iss: DataAbortISS) -> *mut Context {
     run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
-
         // TODO: make sure misaligned loads don't loop here?
         let page_addr = (far / PAGE_SIZE) * PAGE_SIZE;
 
