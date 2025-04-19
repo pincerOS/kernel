@@ -84,7 +84,6 @@ syscall!(21 => pub fn sys_get_time_ms() -> usize);
 syscall!(22 => pub fn sys_sleep_ms(time: usize));
 
 // syscall!(23 => pub fn sys_acquire_fb(width: usize, height: usize) -> (usize, usize, usize, usize, usize));
-syscall!(24 => pub fn sys_memfd_create() -> isize);
 
 #[repr(C)]
 pub struct RawFB {
