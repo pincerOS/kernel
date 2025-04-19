@@ -12,7 +12,24 @@ use ulib::sys::{self, spawn_elf, sys_memfd_create};
 pub extern "C" fn main() {
     println!("Running in usermode! (parent)");
 
+    let (serve_a, serve_b) = ulib::sys::channel();
+
+    ulib::sys::dup3(serve_a, 12, 0).unwrap();
+    ulib::sys::dup3(serve_b, 13, 0).unwrap();
+    ulib::sys::close(serve_a).unwrap();
+    ulib::sys::close(serve_b).unwrap();
+
     let root_fd = 3;
+
+    let path = b"display-server.elf";
+    let file = ulib::sys::openat(root_fd, path, 0, 0).unwrap();
+    spawn_elf(&ulib::sys::SpawnArgs {
+        fd: file,
+        stdin: None,
+        stdout: None,
+    })
+    .unwrap();
+
     let path = b"shell.elf";
     let file = ulib::sys::openat(root_fd, path, 0, 0).unwrap();
 
