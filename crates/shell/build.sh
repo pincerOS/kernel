@@ -5,6 +5,7 @@ set -ex
 TARGET=aarch64-unknown-none-softfloat
 PROFILE=${PROFILE:-release}
 
+mkdir -p bin
 for src in src/bin/*.rs; do
     BIN=$(basename "${src}" .rs)
 
