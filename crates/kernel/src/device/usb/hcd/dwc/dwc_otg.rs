@@ -1368,13 +1368,17 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
 
     write_volatile(DOTG_GINTSTS, 1);
     write_volatile(DOTG_GAHBCFG, GAHBCFG_GLBLINTRMSK);
-    // hport = read_volatile(DOTG_HPRT);
-    // hport |= HPRT_PRTRST;
-    // write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x100));
 
-    // micro_delay(50000);
-    // hport &= !HPRT_PRTRST;
-    // write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x100));
+
+    hport = read_volatile(DOTG_HPRT);
+    hport |= HPRT_PRTRST;
+    write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x100));
+
+    micro_delay(50000);
+    hport &= !HPRT_PRTRST;
+    write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x100));
+    micro_delay(50000);
+
     return ResultCode::OK;
 }
 
