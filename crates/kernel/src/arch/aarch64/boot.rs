@@ -235,8 +235,8 @@ switch_user_tcr_el1:
         1           // enable EL1&0 virtual memory
     ),
     MAIR_EL1 = const (
-        (0b01000100 << 16) | // Entry 2: normal noncacheable memory
-        (0b00000000 << 8)  | // Entry 1: device memory
-        (0b11111111 << 0)    // Entry 0: normal memory
+        (0x44 << 16) | // Entry 2: normal noncacheable memory
+        (0x00 << 8)  | // Entry 1: device memory
+        (0xFF << 0)    // Entry 0: normal memory
     )
 );

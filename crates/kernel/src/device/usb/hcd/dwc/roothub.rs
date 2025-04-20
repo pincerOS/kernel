@@ -58,12 +58,12 @@ const DeviceDescriptor: UsbDeviceDescriptor = UsbDeviceDescriptor {
     class: DeviceClass::DeviceClassHub,
     subclass: 0,
     protocol: 0,
-    max_packet_size0: 8,
+    max_packet_size0: 64,
     vendor_id: 0,
     product_id: 0,
     version: 0x0100,
-    manufacturer: 0,
-    product: 1,
+    manufacturer: 1,
+    product: 2,
     serial_number: 0,
     configuration_count: 1,
 };
@@ -129,7 +129,7 @@ const HUB_DESCRIPTOR: HubDescriptor = HubDescriptor {
     DescriptorType: DescriptorType::Hub,
     PortCount: 1,
     Attributes: 0,
-    PowerGoodDelay: 0,
+    PowerGoodDelay: 50,
     MaximumHubPower: 0,
     Data: [0x01, 0xff],
 };
@@ -278,22 +278,33 @@ pub unsafe fn HcdProcessRootHubMessage(
                 0x23 => {
                     match request.value {
                         4 => {
-                            //FeatureReset
-                            let mut pwr = read_volatile(DOTG_PCGCCTL);
-                            pwr &= !(1 << 5);
-                            pwr &= !(1 << 0);
-                            write_volatile(DOTG_PCGCCTL, pwr);
-                            write_volatile(DOTG_PCGCCTL, 0);
+                            // println!("Roothub Exec: Port Reset");
 
-                            let mut hprt = read_volatile(DOTG_HPRT);
-                            hprt &= !HPRT_PRTSUSP;
-                            hprt |= HPRT_PRTRST;
-                            hprt |= HPRT_PRTPWR;
-                            write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x1180));
-                            micro_delay(60000);
+                            let hprt = read_volatile(DOTG_HPRT);
+                            write_volatile(DOTG_HPRT, hprt | HPRT_PRTRST);
 
-                            hprt &= !HPRT_PRTRST;
-                            write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x1000));
+                            micro_delay(ms_to_micro(63));
+
+                            write_volatile(DOTG_HPRT, hprt);
+                            micro_delay(ms_to_micro(63));
+
+                            init_fifo();
+                            // //FeatureReset
+                            // let mut pwr = read_volatile(DOTG_PCGCCTL);
+                            // pwr &= !(1 << 5);
+                            // pwr &= !(1 << 0);
+                            // write_volatile(DOTG_PCGCCTL, pwr);
+                            // write_volatile(DOTG_PCGCCTL, 0);
+
+                            // let mut hprt = read_volatile(DOTG_HPRT);
+                            // hprt &= !HPRT_PRTSUSP;
+                            // hprt |= HPRT_PRTRST;
+                            // hprt |= HPRT_PRTPWR;
+                            // write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x1180));
+                            // micro_delay(60000);
+
+                            // hprt &= !HPRT_PRTRST;
+                            // write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x1000));
                         }
                         8 => {
                             //FeaturePower
