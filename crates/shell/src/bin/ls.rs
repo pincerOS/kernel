@@ -93,6 +93,4 @@ fn list_dir(dir: u32) {
             }
         }
     }
-
-    ulib::sys::exit(0);
 }
