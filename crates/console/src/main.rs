@@ -102,8 +102,10 @@ pub extern "C" fn main() {
 
         let shell = spawn_elf(&SpawnArgs {
             fd,
+            args: &[],
             stdin: Some(shell_stdin_rx),
             stdout: Some(shell_stdout_tx),
+            stderr: Some(shell_stdout_tx),
         })
         .unwrap();
         (shell, shell_stdin_tx, shell_stdout_rx)

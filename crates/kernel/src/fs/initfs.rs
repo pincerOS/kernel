@@ -133,7 +133,15 @@ impl FileDescriptor for InitFsFile {
                     let mut failed = false;
                     let mut list = list.peekable();
                     while let Some((file, next)) = list.next() {
-                        let name_len: u16 = file.name_len.try_into().unwrap(); // TODO
+                        let path = self.fs.inner.get_file_name(file).unwrap(); // TODO
+                        let name_start = path
+                            .iter()
+                            .rposition(|b| *b == b'/')
+                            .map(|i| i + 1)
+                            .unwrap_or(0);
+                        let name = &path[name_start..];
+
+                        let name_len: u16 = name.len().try_into().unwrap(); // TODO
                         let rec_len =
                             (size_of::<DirEntry>() as u16 - 3 + name_len).next_multiple_of(8);
                         if buf.len() - cur_idx < rec_len as usize {
@@ -150,8 +158,6 @@ impl FileDescriptor for InitFsFile {
                             file_type: (file.mode >> 12) as u8,
                             name: [0; 3],
                         };
-                        let name = self.fs.inner.get_file_name(file).unwrap(); // TODO
-                        assert_eq!(name.len(), name_len as usize); // TODO
 
                         let slice = &mut buf[cur_idx..][..rec_len as usize];
                         slice[..size_of::<DirEntry>()]
@@ -207,6 +213,26 @@ impl FileDescriptor for InitFsFile {
             } else {
                 cur_name.len() + 1
             };
+
+            if name == b"." {
+                let this = self.fs.get_inode(self.inode.0).unwrap() as Arc<_>;
+                return boxed_future(async move { Ok(this) });
+            } else if name == b".." {
+                let last_slash = cur_name.iter().rposition(|b| *b == b'/').unwrap_or(0);
+                let parent_name = &cur_name[..last_slash];
+                // TODO: this might not work if the root of the archive has a name
+                if let Some((parent_inode, _)) = self.fs.inner.find_file(parent_name) {
+                    return boxed_future(async move {
+                        self.fs
+                            .get_inode(parent_inode as u64)
+                            .ok_or(())
+                            .map(|f| f as ArcFd)
+                    });
+                } else {
+                    return boxed_future(async move { Err(()) });
+                }
+            }
+
             let files = self.fs.inner.list_dir(self.inode.0 as usize).expect("TODO");
             for (inode, file) in files {
                 if file.name_len as usize == pfx_len + name.len()

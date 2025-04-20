@@ -6,8 +6,43 @@ extern crate alloc;
 extern crate ulib;
 
 #[no_mangle]
-fn main() {
-    let root = ulib::sys::open(b".", 0).unwrap();
+fn main(argc: usize, argv: *const *const u8) {
+    let cwd = ulib::sys::open(b".", 0).unwrap();
+
+    // TODO: args should start at 1 for compatability
+    if argc <= 0 {
+        list_dir(cwd);
+        ulib::sys::exit(0);
+    }
+
+    let argv_array = unsafe { core::slice::from_raw_parts(argv, argc) };
+    let mut first = true;
+    for arg in argv_array.iter().copied() {
+        let arg = unsafe { core::ffi::CStr::from_ptr(arg) };
+        let file = arg.to_bytes();
+        let string = core::str::from_utf8(file).unwrap();
+
+        let result_fd = ulib::sys::openat(cwd, file, 0, 0);
+        if result_fd.is_err() {
+            println!("ls: no such file or directory: {:?}", string);
+            continue;
+        }
+
+        let fd = result_fd.unwrap();
+        if argc > 1 {
+            if !first {
+                println!();
+            }
+            println!("{}:", string);
+        }
+        list_dir(fd);
+        ulib::sys::close(fd).unwrap();
+
+        first = false;
+    }
+}
+
+fn list_dir(dir: u32) {
     let mut cookie = 0;
     let mut data_backing = [0u64; 8192 / 8];
     let data = cast_slice(&mut data_backing);
@@ -32,7 +67,7 @@ fn main() {
     }
 
     loop {
-        match ulib::sys::pread(root, data, cookie) {
+        match ulib::sys::pread(dir, data, cookie) {
             Err(e) => {
                 println!("Error reading dir: {e}");
                 ulib::sys::exit(1);
@@ -58,6 +93,4 @@ fn main() {
             }
         }
     }
-
-    ulib::sys::exit(0);
 }
