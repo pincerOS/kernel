@@ -32,7 +32,7 @@ pub extern "C" fn main() {
     })
     .unwrap();
 
-    let path = b"shell";
+    let path = b"shell.elf";
     let file = ulib::sys::openat(root_fd, path, 0, 0).unwrap();
 
     let child = spawn_elf(&ulib::sys::SpawnArgs {
