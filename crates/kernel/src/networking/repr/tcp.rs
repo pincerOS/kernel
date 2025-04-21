@@ -167,7 +167,7 @@ impl Packet {
     //         0
     //     }
     // }
-    // 
+    //
     // pub fn extract_seq_number_from_payload(&mut self) -> u32 {
     //     if self.payload.len() >= 8 {
     //         ((self.payload[4] as u32) << 24) |
@@ -178,7 +178,7 @@ impl Packet {
     //         0
     //     }
     // }
-    // 
+    //
     // pub fn extract_ack_number_from_payload(&mut self) -> u32 {
     //     if self.payload.len() >= 12 {
     //         ((self.payload[8] as u32) << 24) |
@@ -189,11 +189,11 @@ impl Packet {
     //         0
     //     }
     // }
-    // 
+    //
     // pub fn has_tcp_payload(&mut self) -> bool {
-    //     self.payload.len() > 20  
+    //     self.payload.len() > 20
     // }
-    // 
+    //
     // pub fn extract_tcp_payload(&mut self) -> Vec<u8> {
     //     if self.payload.len() > 20 {
     //         self.payload[20..].to_vec()

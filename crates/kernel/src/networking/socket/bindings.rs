@@ -82,6 +82,34 @@ pub fn connect(socketfd: u16, saddr: SocketAddr) -> Result<()> {
     tagged_socket.connect(saddr)
 }
 
+pub fn listen(socketfd: u16, num_requests: usize) -> Result<()> {
+    // 1.check if binded, if not error
+    let sockets = &mut interface().sockets;
+
+    let tagged_socket = sockets
+        .get_mut(&socketfd)
+        .ok_or(Error::InvalidSocket(socketfd))?;
+
+    if !tagged_socket.is_bound() {
+        return Err(Error::InvalidSocket(socketfd));
+    }
+
+    // 2. start the listener
+    tagged_socket.listen(num_requests)
+}
+
+pub fn accept(socketfd: u16) -> Result<SocketAddr> {
+    // 1. if listener not started, error
+    let sockets = &mut interface().sockets;
+
+    let tagged_socket = sockets
+        .get_mut(&socketfd)
+        .ok_or(Error::InvalidSocket(socketfd))?;
+
+    // 2. accept 1 connection, error if no pending connections
+    tagged_socket.accept()
+}
+
 pub fn bind(socketfd: u16, port: u16) -> Result<()> {
     // 1. check if binding is already in use by another socket
     let bind_addr = SocketAddr {

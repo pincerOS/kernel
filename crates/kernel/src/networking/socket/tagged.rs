@@ -1,4 +1,4 @@
-use crate::networking::socket::{SocketAddr, UdpSocket, TcpSocket};
+use crate::networking::socket::{SocketAddr, TcpSocket, UdpSocket};
 use crate::networking::{Error, Result};
 
 use alloc::vec::Vec;
@@ -43,12 +43,20 @@ impl TaggedSocket {
     }
 
     // TODO: this is so ugl lol
-    pub fn recv_enqueue(&mut self, seq_num: u32, ack_num: u32, flags: u8,
-        payload: Vec<u8>, saddr: SocketAddr) -> Result<()> {
+    pub fn recv_enqueue(
+        &mut self,
+        seq_num: u32,
+        ack_num: u32,
+        flags: u8,
+        payload: Vec<u8>,
+        saddr: SocketAddr,
+    ) -> Result<()> {
         match self {
             // TaggedSocket::Raw(socket) => socket.queue_recv(payload, saddr),
             TaggedSocket::Udp(socket) => socket.recv_enqueue(payload, saddr),
-            TaggedSocket::Tcp(socket) => socket.recv_enqueue(seq_num, ack_num, flags, payload, saddr),
+            TaggedSocket::Tcp(socket) => {
+                socket.recv_enqueue(seq_num, ack_num, flags, payload, saddr)
+            }
         }
     }
 
@@ -74,8 +82,24 @@ impl TaggedSocket {
     pub fn connect(&mut self, saddr: SocketAddr) -> Result<()> {
         match self {
             // TaggedSocket::Raw(socket) => socket.recv(),
-            TaggedSocket::Udp(socket) => Err(Error::Ignored), 
+            TaggedSocket::Udp(socket) => Err(Error::Ignored),
             TaggedSocket::Tcp(socket) => socket.connect(saddr),
+        }
+    }
+
+    pub fn listen(&mut self, num_req: usize) -> Result<()> {
+        match self {
+            // TaggedSocket::Raw(socket) => socket.recv(),
+            TaggedSocket::Udp(socket) => Err(Error::Ignored),
+            TaggedSocket::Tcp(socket) => socket.listen(num_req),
+        }
+    }
+
+    pub fn accept(&mut self) -> Result<SocketAddr> {
+        match self {
+            // TaggedSocket::Raw(socket) => socket.recv(),
+            TaggedSocket::Udp(socket) => Err(Error::Ignored),
+            TaggedSocket::Tcp(socket) => socket.accept(),
         }
     }
 }
