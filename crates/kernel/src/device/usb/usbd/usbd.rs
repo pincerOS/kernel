@@ -674,6 +674,15 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
 
     device.number = address;
     result = UsbReadDeviceDescriptor(device);
+
+    for it in 0..100 {
+        if result == ResultCode::OK {
+            break;
+        }
+        println!("| USBD: Failed to read device descriptor at iteration {}", it);
+        micro_delay(100000);
+    }
+
     if result != ResultCode::OK {
         println!("| USBD: Failed to read device descriptor");
         return result;

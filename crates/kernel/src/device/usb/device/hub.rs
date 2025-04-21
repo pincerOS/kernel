@@ -165,7 +165,7 @@ fn HubPowerOn(device: &mut UsbDevice) -> ResultCode {
     let hub = device.driver_data.downcast::<HubDevice>().unwrap();
     let hub_desc = hub.Descriptor.as_mut().unwrap().as_mut(); //unsafe { &mut *(.as_mut_ptr() as *mut HubDescriptor) };
     let max_children = hub.MaxChildren;
-    let delay = hub_desc.PowerGoodDelay as u32;
+    let mut delay = hub_desc.PowerGoodDelay as u32;
 
     for i in 0..max_children {
         if HubChangePortFeature(device, HubPortFeature::FeaturePower, i as u8, true)
@@ -173,6 +173,10 @@ fn HubPowerOn(device: &mut UsbDevice) -> ResultCode {
         {
             println!("| HUB: failed to power on port {}", i);
         }
+    }
+
+    if delay == 0 {
+        delay = 50; //100 ms
     }
 
     println!("| HUB: powering on hub, waiting for {}ms", 2 * delay);
