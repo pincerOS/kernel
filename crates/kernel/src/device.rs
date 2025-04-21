@@ -324,9 +324,14 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
 
     if ENABLE_USB {
         println!("| Initializing USB");
-        let usb = discover_compatible(tree, b"brcm,bcm2708-usb")
+        let usb = discover_compatible(tree, b"brcm,bcm2835-usb")
             .unwrap()
             .next()
+            .or_else(|| {
+                discover_compatible(tree, b"brcm,bcm2708-usb")
+                    .unwrap()
+                    .next()
+            })
             .unwrap();
 
         let (usb_addr, _) = find_device_addr(usb).unwrap().unwrap();
