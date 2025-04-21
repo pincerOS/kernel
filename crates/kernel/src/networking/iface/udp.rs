@@ -1,13 +1,11 @@
 use crate::networking::iface::*;
 use crate::networking::repr::*;
-use crate::networking::socket::{IpAddrPair, TaggedSocket};
+use crate::networking::socket::{SocketAddr, TaggedSocket};
 use crate::networking::Result;
 
 use crate::device::usb::device::net::interface as get_interface;
 
 use alloc::vec::Vec;
-
-use log::debug;
 
 pub fn send_udp_packet(
     interface: &mut Interface,
@@ -17,7 +15,7 @@ pub fn send_udp_packet(
     dst_port: u16,
 ) -> Result<()> {
     println!(
-        "sending udp {} {} {} {}",
+        "\t[!] sending udp {} {} {} {}",
         src_port, dst_port, *interface.ipv4_addr, dst_addr
     );
 
@@ -35,12 +33,12 @@ pub fn recv_udp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Re
     println!("\t received udp packet");
     let udp_packet = UdpPacket::deserialize(ipv4_packet.payload.as_slice())?;
 
-    // let dst_socket_addr = IpAddrPair {
+    // let dst_socket_addr = SocketAddr {
     //     addr: ipv4_packet.dst_addr,
     //     port: udp_packet.dst_port,
     // };
     //
-    // let src_socket_addr = IpAddrPair {
+    // let src_socket_addr = SocketAddr {
     //     addr: ipv4_packet.src_addr,
     //     port: udp_packet.src_port,
     // };

@@ -3,7 +3,7 @@ use crate::device::usb::device::net::interface;
 use crate::networking::iface::*;
 use crate::networking::repr::*;
 use crate::networking::socket::{TaggedSocket, UdpSocket};
-use crate::networking::IpAddrPair;
+use crate::networking::SocketAddr;
 use crate::networking::{Error, Result};
 
 use alloc::sync::Arc;
@@ -78,7 +78,7 @@ impl DhcpClient {
             return Ok(()); // already in progress
         }
 
-        let socketaddr = IpAddrPair {
+        let socketaddr = SocketAddr {
             addr: *interface().ipv4_addr,
             port: DHCP_CLIENT_PORT,
         };
@@ -194,9 +194,10 @@ impl DhcpClient {
                 self.last_action_time = system_timer::get_time();
 
                 println!(
-                    "\t[+] DHCP: Bound to IP {} with lease time {} seconds",
+                    "\t[+] DHCP: Bound to IP {} with lease time {} seconds on gateway {}",
                     interface.ipv4_addr,
-                    self.lease_time.unwrap_or(0)
+                    self.lease_time.unwrap_or(0),
+                    interface.default_gateway,
                 );
             }
             (DhcpState::Requesting, DhcpMessageType::Nak)
@@ -497,7 +498,7 @@ fn send_dhcp_packet_workaround(
 
 // fn send_dhcp_packet(interface: &mut Interface, packet: &DhcpPacket) -> Result<()> {
 //     let data = packet.serialize();
-//     let dest = IpAddrPair {
+//     let dest = SocketAddr {
 //         addr:  interface.ipv4_addr.broadcast(),
 //         port: DHCP_SERVER_PORT
 //     };

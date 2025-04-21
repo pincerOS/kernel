@@ -1,3 +1,5 @@
+use crate::device::usb::device::net::interface;
+use crate::event::thread;
 use crate::networking::iface::{arp, ethernet, icmp, tcp, udp, Interface};
 use crate::networking::repr::*;
 use crate::networking::{Error, Result};
@@ -5,21 +7,33 @@ use crate::networking::{Error, Result};
 use alloc::vec::Vec;
 
 pub fn send_ipv4_packet(
-    interface: &mut Interface,
+    iface: &mut Interface,
     payload: Vec<u8>,
     protocol: Ipv4Protocol,
     dst_addr: Ipv4Address,
 ) -> Result<()> {
-    let next_hop = ipv4_addr_route(interface, dst_addr);
-    let dst_mac = arp::eth_addr_for_ip(interface, next_hop)?;
-
-    let ipv4_packet = Ipv4Packet::new(*interface.ipv4_addr, dst_addr, protocol, payload);
-    ethernet::send_ethernet_frame(
-        interface,
-        ipv4_packet.serialize(),
-        dst_mac,
-        EthernetType::IPV4,
-    )
+    let next_hop = ipv4_addr_route(iface, dst_addr);
+    match arp::eth_addr_for_ip(iface, next_hop) {
+        Ok(dst_mac) => {
+            println!("resolved mac, sending ip");
+            let ipv4_packet = Ipv4Packet::new(*iface.ipv4_addr, dst_addr, protocol, payload);
+            ethernet::send_ethernet_frame(
+                iface,
+                ipv4_packet.serialize(),
+                dst_mac,
+                EthernetType::IPV4,
+            )
+        }
+        Err(e) => {
+            println!("couldnt resolve mac, queuing another send");
+            // WARN: wait for mac address resolution, this is bad because it will loop infintiely
+            // if it doesnt resolve, need to add TTL and decrease
+            thread::thread(move || {
+                send_ipv4_packet(interface(), payload, protocol, dst_addr);
+            });
+            Err(e)
+        }
+    }
 }
 
 pub fn recv_ip_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Result<()> {

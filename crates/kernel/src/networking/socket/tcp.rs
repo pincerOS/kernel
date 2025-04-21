@@ -1,6 +1,6 @@
 use crate::networking::iface::{tcp, Interface};
 use crate::networking::repr::{Ipv4Packet, Ipv4Protocol, Packet};
-use crate::networking::socket::{IpAddrPair, IpAddrPairLease};
+use crate::networking::socket::{SocketAddr, SocketAddrLease};
 use crate::networking::utils::{ring::Ring, slice::Slice};
 use crate::networking::{Error, Result};
 use alloc::vec::Vec;
@@ -22,7 +22,7 @@ pub enum TcpState {
 
 pub struct TcpConnection {
     pub state: TcpState,
-    pub remote_addr: IpAddrPair,
+    pub remote_addr: SocketAddr,
     pub local_seq: u32,
     pub local_ack: u32,
     pub remote_seq: u32,
@@ -32,9 +32,9 @@ pub struct TcpConnection {
 }
 
 pub struct TcpSocket {
-    binding: IpAddrPairLease,
-    send_buffer: Ring<(Slice<u8>, IpAddrPair)>,
-    recv_buffer: Ring<(Slice<u8>, IpAddrPair)>,
+    binding: SocketAddrLease,
+    send_buffer: Ring<(Slice<u8>, SocketAddr)>,
+    recv_buffer: Ring<(Slice<u8>, SocketAddr)>,
 
     mss: u16,
     unacked_segments: Ring<(Slice<u8>, u32, u64)>,
@@ -46,9 +46,9 @@ pub struct TcpSocket {
 
 impl TcpSocket {
     pub fn new(
-        binding: IpAddrPairLease,
-        send_buffer: Ring<(Slice<u8>, IpAddrPair)>,
-        recv_buffer: Ring<(Slice<u8>, IpAddrPair)>,
+        binding: SocketAddrLease,
+        send_buffer: Ring<(Slice<u8>, SocketAddr)>,
+        recv_buffer: Ring<(Slice<u8>, SocketAddr)>,
         mss: u16,
         backlog_size: usize,
     ) -> TcpSocket {
@@ -92,7 +92,7 @@ impl TcpSocket {
     }
 
     /// Initiate a connection to a remote host
-    pub fn connect(&mut self, remote_addr: IpAddrPair) -> Result<()> {
+    pub fn connect(&mut self, remote_addr: SocketAddr) -> Result<()> {
         if self.connection.is_some() {
             return Err(Error::InUse);
         }
@@ -138,7 +138,7 @@ impl TcpSocket {
     }
 
     /// Send data over the connection
-    pub fn send(&mut self, buffer_len: usize, addr: IpAddrPair) -> Result<&mut [u8]> {
+    pub fn send(&mut self, buffer_len: usize, addr: SocketAddr) -> Result<&mut [u8]> {
         match &self.connection {
             Some(conn) if conn.state == TcpState::Established => {
                 if addr != conn.remote_addr {
@@ -161,7 +161,7 @@ impl TcpSocket {
     }
 
     /// Receive data from the connection
-    pub fn recv(&mut self) -> Result<(&[u8], IpAddrPair)> {
+    pub fn recv(&mut self) -> Result<(&[u8], SocketAddr)> {
         match &self.connection {
             Some(conn)
                 if conn.state == TcpState::Established || conn.state == TcpState::CloseWait =>
@@ -298,7 +298,7 @@ impl TcpSocket {
 
     /// Process an incoming TCP packet
     pub fn process_packet(&mut self, ipv4_repr: &Ipv4Packet, tcp_repr: &Packet) -> Result<()> {
-        let src_addr = IpAddrPair {
+        let src_addr = SocketAddr {
             addr: ipv4_repr.src_addr,
             port: tcp_repr.src_port,
         };
@@ -478,7 +478,7 @@ impl TcpSocket {
     }
 
     /// Check if this socket is bound to the specified address
-    pub fn accepts(&self, dst_addr: &IpAddrPair) -> bool {
+    pub fn accepts(&self, dst_addr: &SocketAddr) -> bool {
         &(*self.binding) == dst_addr
     }
 
@@ -614,7 +614,7 @@ impl TcpSocket {
     }
 
     /// Accept a pending connection from the backlog
-    pub fn accept(&mut self) -> Result<IpAddrPair> {
+    pub fn accept(&mut self) -> Result<SocketAddr> {
         if self.connection.is_some() {
             return Err(Error::InUse);
         }
