@@ -1,4 +1,4 @@
-use crate::networking::socket::{SocketAddr, UdpSocket};
+use crate::networking::socket::{SocketAddr, UdpSocket, TcpSocket};
 use crate::networking::{Error, Result};
 
 use alloc::vec::Vec;
@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 pub enum TaggedSocket {
     // Raw(RawSocket),
     Udp(UdpSocket),
-    // Tcp(Arc<TcpSocket>),
+    Tcp(TcpSocket),
 }
 
 impl TaggedSocket {
@@ -14,7 +14,7 @@ impl TaggedSocket {
         match self {
             // TaggedSocket::Raw(socket) => socket.accepts(pair),
             TaggedSocket::Udp(socket) => socket.is_bound(),
-            // TaggedSocket::Tcp(socket) => socket.accepts(pair),
+            TaggedSocket::Tcp(socket) => socket.is_bound(),
         }
     }
 
@@ -22,15 +22,15 @@ impl TaggedSocket {
         match self {
             // TaggedSocket::Raw(socket) => socket.accepts(pair),
             TaggedSocket::Udp(socket) => socket.bind(port),
-            // TaggedSocket::Tcp(socket) => socket.accepts(pair),
+            TaggedSocket::Tcp(socket) => socket.bind(port),
         }
     }
 
-    pub fn send(&mut self) {
+    pub fn send(&mut self) -> Result<()> {
         match self {
             // TaggedSocket::Raw(socket) => socket.send(),
             TaggedSocket::Udp(socket) => socket.send(),
-            // TaggedSocket::Tcp(socket) => socket.send(),
+            TaggedSocket::Tcp(socket) => socket.send(),
         }
     }
 
@@ -38,15 +38,17 @@ impl TaggedSocket {
         match self {
             // TaggedSocket::Raw(socket) => socket.queue_send(payload, saddr),
             TaggedSocket::Udp(socket) => socket.send_enqueue(payload, saddr),
-            // TaggedSocket::Tcp(socket) => socket.queue_send(payload, saddr),
+            TaggedSocket::Tcp(socket) => socket.send_enqueue(payload, saddr),
         }
     }
 
-    pub fn recv_enqueue(&mut self, payload: Vec<u8>, saddr: SocketAddr) -> Result<()> {
+    // TODO: this is so ugl lol
+    pub fn recv_enqueue(&mut self, seq_num: u32, ack_num: u32, flags: u8,
+        payload: Vec<u8>, saddr: SocketAddr) -> Result<()> {
         match self {
             // TaggedSocket::Raw(socket) => socket.queue_recv(payload, saddr),
             TaggedSocket::Udp(socket) => socket.recv_enqueue(payload, saddr),
-            // TaggedSocket::Tcp(socket) => socket.queue_recv(payload, saddr),
+            TaggedSocket::Tcp(socket) => socket.recv_enqueue(seq_num, ack_num, flags, payload, saddr),
         }
     }
 
@@ -54,7 +56,7 @@ impl TaggedSocket {
         match self {
             // TaggedSocket::Raw(socket) => socket.recv(),
             TaggedSocket::Udp(socket) => socket.recv(),
-            // TaggedSocket::Tcp(socket) => socket.recv(),
+            TaggedSocket::Tcp(socket) => socket.recv(),
         }
     }
 
@@ -62,7 +64,18 @@ impl TaggedSocket {
         match self {
             // TaggedSocket::Raw(socket) => socket.recv(),
             TaggedSocket::Udp(socket) => socket.binding_equals(saddr),
-            // TaggedSocket::Tcp(socket) => socket.recv(),
+            TaggedSocket::Tcp(socket) => socket.binding_equals(saddr),
+        }
+    }
+
+    // TODO: should block
+    // TODO: udp just throws error for now, but can be used like berkley posix to instead set the
+    // default destination as well in the future
+    pub fn connect(&mut self, saddr: SocketAddr) -> Result<()> {
+        match self {
+            // TaggedSocket::Raw(socket) => socket.recv(),
+            TaggedSocket::Udp(socket) => Err(Error::Ignored), 
+            TaggedSocket::Tcp(socket) => socket.connect(saddr),
         }
     }
 }

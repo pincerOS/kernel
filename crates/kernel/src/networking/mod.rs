@@ -43,6 +43,7 @@ pub enum Error {
     Device(Option<IOError>),
     // bad packet
     Malformed,
+    NotConnected,
     // bad checksum
     Checksum,
     Timeout,
