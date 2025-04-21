@@ -20,6 +20,11 @@ pub fn recv_arp_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> R
         return Err(Error::Ignored);
     }
 
+    println!(
+        "\t[+] updating arp cache {} {}",
+        arp_repr.source_proto_addr, arp_repr.source_hw_addr
+    );
+
     interface
         .arp_cache
         .set_eth_addr_for_ip(arp_repr.source_proto_addr, arp_repr.source_hw_addr);

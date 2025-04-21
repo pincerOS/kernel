@@ -5,7 +5,11 @@ extern crate alloc;
 extern crate kernel;
 
 use kernel::event::thread;
+use kernel::networking::repr::Ipv4Address;
+use kernel::networking::socket::{recv_from, send_to, SocketAddr, UdpSocket};
 use kernel::*;
+
+use core::str;
 
 #[no_mangle]
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
@@ -27,7 +31,20 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     barrier.sync_blocking();
     println!("End of preemption test");
 
+    let s = UdpSocket::new();
+    let saddr = SocketAddr {
+        addr: Ipv4Address::new([11, 187, 10, 102]),
+        port: 224,
+    };
+
+    send_to(s, "hello everynyan".as_bytes().to_vec(), saddr);
+
     for i in 0..count {
-        sync::spin_sleep(1000_00);
+        sync::spin_sleep(5000_000);
+    }
+
+    let recv = recv_from(s);
+    if let Ok((payload, senderaddr)) = recv {
+        println!("got message: {:x?}", payload);
     }
 }
