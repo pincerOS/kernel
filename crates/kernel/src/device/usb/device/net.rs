@@ -22,6 +22,7 @@ use crate::device::usb::usbd::endpoint::*;
 use crate::device::usb::usbd::request::*;
 use crate::shutdown;
 use alloc::boxed::Box;
+use alloc::collections::btree_map::BTreeMap;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -147,7 +148,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         ipv4_addr: DEFAULT_IPV4CIDR,
         default_gateway: DEFAULT_GATEWAY,
         dns: Vec::new(),
-        sockets: Vec::new(),
+        sockets: BTreeMap::new(),
         dhcp: dhcp::DhcpClient::new(),
     };
 
@@ -176,6 +177,10 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     unsafe {
         rndis_receive_packet(device, buf.into_boxed_slice(), 1500);
     }
+
+    // begin send series for sockets
+    // WARN: this is bad
+    socket::socket_send_loop();
 
     return ResultCode::OK;
 }
