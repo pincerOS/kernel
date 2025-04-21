@@ -1,3 +1,4 @@
+use core::mem::offset_of;
 use core::mem::MaybeUninit;
 
 macro_rules! syscall {
@@ -21,10 +22,6 @@ fn int_to_error(res: isize) -> Result<usize, usize> {
 }
 
 pub type FileDesc = u32;
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct ChannelDesc(pub u32);
 
 #[repr(C)]
 #[derive(Debug)]
@@ -83,32 +80,74 @@ syscall!(17 => pub fn sys_wait(fd: usize) -> isize);
 syscall!(18 => pub fn sys_mmap(addr: usize, size: usize, prot_flags: usize, flags: usize, fd: usize, offset: usize) -> isize);
 syscall!(19 => pub fn sys_munmap(addr: usize) -> isize);
 
+syscall!(21 => pub fn sys_get_time_ms() -> usize);
+syscall!(22 => pub fn sys_sleep_ms(time: usize));
+
+// syscall!(23 => pub fn sys_acquire_fb(width: usize, height: usize) -> (usize, usize, usize, usize, usize));
+#[repr(C)]
+pub struct RawFB {
+    pub fd: usize,
+    pub size: usize,
+    pub pitch: usize,
+    pub width: usize,
+    pub height: usize,
+}
+
+core::arch::global_asm!(
+    ".global {name}; {name}:",
+    "mov x7, x2",
+    "svc #{num}",
+    "str x0, [x7, {fd_offset}]",
+    "str x1, [x7, {size_offset}]",
+    "str x2, [x7, {pitch_offset}]",
+    "str x3, [x7, {width_offset}]",
+    "str x4, [x7, {height_offset}]",
+    "ret",
+    name = sym sys_acquire_fb,
+    num = const 23,
+    fd_offset = const offset_of!(RawFB, fd),
+    size_offset = const offset_of!(RawFB, size),
+    pitch_offset = const offset_of!(RawFB, pitch),
+    width_offset = const offset_of!(RawFB, width),
+    height_offset = const offset_of!(RawFB, height),
+);
+unsafe extern "C" {
+    pub fn sys_acquire_fb(width: usize, height: usize, res: *mut RawFB) -> isize;
+}
+
+syscall!(24 => pub fn sys_memfd_create() -> isize);
+syscall!(25 => pub fn sys_poll_key_event() -> isize);
+
+syscall!(26 => pub fn sys_sem_create(value: usize) -> isize);
+syscall!(27 => pub fn sys_sem_up(fd: usize) -> isize);
+syscall!(28 => pub fn sys_sem_down(fd: usize) -> isize);
+
 /* * * * * * * * * * * * * * * * * * * */
 /* Syscall wrappers                    */
 /* * * * * * * * * * * * * * * * * * * */
 
 const FLAG_NO_BLOCK: usize = 1 << 0;
 
-pub fn channel() -> (ChannelDesc, ChannelDesc) {
+pub fn channel() -> (FileDesc, FileDesc) {
     let res = unsafe { sys_channel() };
-    (ChannelDesc(res.0 as u32), ChannelDesc(res.1 as u32))
+    (res.0 as u32, res.1 as u32)
 }
 
-pub fn send(desc: ChannelDesc, msg: &Message, buf: &[u8], flags: usize) -> isize {
-    unsafe { sys_send(desc.0 as usize, msg, buf.as_ptr(), buf.len(), flags) }
+pub fn send(desc: FileDesc, msg: &Message, buf: &[u8], flags: usize) -> isize {
+    unsafe { sys_send(desc as usize, msg, buf.as_ptr(), buf.len(), flags) }
 }
-pub fn send_block(desc: ChannelDesc, msg: &Message, buf: &[u8]) -> isize {
+pub fn send_block(desc: FileDesc, msg: &Message, buf: &[u8]) -> isize {
     send(desc, msg, buf, 0)
 }
-pub fn send_nonblock(desc: ChannelDesc, msg: &Message, buf: &[u8]) -> isize {
+pub fn send_nonblock(desc: FileDesc, msg: &Message, buf: &[u8]) -> isize {
     send(desc, msg, buf, FLAG_NO_BLOCK)
 }
 
-pub fn recv(desc: ChannelDesc, buf: &mut [u8], flags: usize) -> Result<(usize, Message), isize> {
+pub fn recv(desc: FileDesc, buf: &mut [u8], flags: usize) -> Result<(usize, Message), isize> {
     let mut msg = MaybeUninit::uninit();
     let res = unsafe {
         sys_recv(
-            desc.0 as usize,
+            desc as usize,
             msg.as_mut_ptr(),
             buf.as_mut_ptr(),
             buf.len(),
@@ -121,10 +160,10 @@ pub fn recv(desc: ChannelDesc, buf: &mut [u8], flags: usize) -> Result<(usize, M
         Err(res)
     }
 }
-pub fn recv_block(desc: ChannelDesc, buf: &mut [u8]) -> Result<(usize, Message), isize> {
+pub fn recv_block(desc: FileDesc, buf: &mut [u8]) -> Result<(usize, Message), isize> {
     recv(desc, buf, 0)
 }
-pub fn recv_nonblock(desc: ChannelDesc, buf: &mut [u8]) -> Result<(usize, Message), isize> {
+pub fn recv_nonblock(desc: FileDesc, buf: &mut [u8]) -> Result<(usize, Message), isize> {
     recv(desc, buf, FLAG_NO_BLOCK)
 }
 
@@ -244,4 +283,56 @@ pub unsafe fn mmap(
 pub unsafe fn munmap(addr: *mut ()) -> Result<usize, usize> {
     let res = unsafe { sys_munmap(addr.addr()) };
     int_to_error(res)
+}
+
+pub fn sem_create(value: usize) -> Result<FileDesc, usize> {
+    let res = unsafe { sys_sem_create(value) };
+    int_to_error(res).map(|f| f as FileDesc)
+}
+pub fn sem_up(fd: FileDesc) -> Result<(), usize> {
+    let res = unsafe { sys_sem_up(fd as usize) };
+    int_to_error(res).map(|_| ())
+}
+pub fn sem_down(fd: FileDesc) -> Result<(), usize> {
+    let res = unsafe { sys_sem_down(fd as usize) };
+    int_to_error(res).map(|_| ())
+}
+
+pub struct SpawnArgs {
+    pub fd: FileDesc,
+    pub stdin: Option<FileDesc>,
+    pub stdout: Option<FileDesc>,
+}
+
+pub fn spawn_elf(args: &SpawnArgs) -> Result<FileDesc, usize> {
+    let current_stack = current_sp();
+    let target_pc = exec_child as usize;
+    let arg = args as *const SpawnArgs;
+
+    let wait_fd = unsafe { spawn(target_pc, current_stack, arg as usize, 0) };
+    wait_fd
+}
+
+fn current_sp() -> usize {
+    let sp: usize;
+    unsafe { core::arch::asm!("mov {0}, sp", out(reg) sp) };
+    sp
+}
+
+extern "C" fn exec_child(spawn_args: *const SpawnArgs) -> ! {
+    let spawn_args = unsafe { &*spawn_args };
+
+    if let Some(fd) = spawn_args.stdin {
+        dup3(fd, 0, 0).unwrap();
+    }
+    if let Some(fd) = spawn_args.stdout {
+        dup3(fd, 1, 0).unwrap();
+    }
+
+    let flags = 0;
+    let args = &[];
+    let env = &[];
+    let _res = unsafe { execve_fd(spawn_args.fd, flags, args, env) };
+    // TODO: notify parent of spawn failure
+    exit(1);
 }

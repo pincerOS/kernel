@@ -16,3 +16,4 @@ device-tree = { path = "../device-tree" }
 endian = { path = "../endian" }
 elf = { path = "../elf" }
 initfs = { path = "../initfs"}
+filesystem = { path = "../filesystem" }
