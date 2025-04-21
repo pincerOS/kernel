@@ -772,7 +772,7 @@ fn HcdChannelSendOne(
                 | HCINTMSK_CHHLTDMSK
                 | HCINTMSK_AHBERRMSK
                 | HCINTMSK_STALLMSK
-                // | HCINTMSK_NAKMSK
+                | HCINTMSK_NAKMSK
                 | HCINTMSK_ACKMSK
                 | HCINTMSK_NYETMSK
                 | HCINTMSK_XACTERRMSK
