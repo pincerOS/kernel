@@ -22,15 +22,15 @@ pub fn send_tcp_packet(
     );
 
     let tcp_packet = TcpPacket::new(
-        src_port, 
-        dst_port, 
+        src_port,
+        dst_port,
         seq_number,
         ack_number,
         flags,
         window_size,
         payload,
-        *interface.ipv4_addr, 
-        dst_addr
+        *interface.ipv4_addr,
+        dst_addr,
     );
 
     ipv4::send_ipv4_packet(
@@ -58,11 +58,11 @@ pub fn recv_tcp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Re
     for (_, socket) in &mut interface.sockets {
         if socket.binding_equals(local_socket_addr) {
             socket.recv_enqueue(
-                tcp_packet.seq_number, 
-                tcp_packet.ack_number, 
+                tcp_packet.seq_number,
+                tcp_packet.ack_number,
                 tcp_packet.flags,
-                tcp_packet.payload.clone(), 
-                sender_socket_addr
+                tcp_packet.payload.clone(),
+                sender_socket_addr,
             );
         }
     }
