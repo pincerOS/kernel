@@ -1123,7 +1123,8 @@ pub fn HcdReset() -> ResultCode {
         grstcl = read_volatile(DOTG_GRSTCTL);
     }
 
-    grstcl |= GRSTCTL_CSFTRST;
+    // grstcl |= GRSTCTL_CSFTRST;
+    grstcl = GRSTCTL_CSFTRST;
     write_volatile(DOTG_GRSTCTL, grstcl);
     count = 0;
 
@@ -1212,7 +1213,7 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     println!("| HCD: Start");
 
     write_volatile(DOTG_DCTL, 1 << 1);
-    micro_delay(1000);
+    micro_delay(32000);
 
     let mut gusbcfg = read_volatile(DOTG_GUSBCFG);
     gusbcfg &= !(GUSBCFG_ULPIEXTVBUSDRV | GUSBCFG_TERMSELDLPULSE);
@@ -1231,6 +1232,7 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
         gusbcfg &= !GUSBCFG_PHYIF;
         write_volatile(DOTG_GUSBCFG, gusbcfg);
         HcdReset();
+        println!("| HCD: Reset PHY");
     }
 
     gusbcfg = read_volatile(DOTG_GUSBCFG);
@@ -1271,18 +1273,25 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     }
     write_volatile(DOTG_GUSBCFG, gusbcfg);
 
+    write_volatile(DOTG_PCGCCTL, 0xFFFFFFFF);
+
+    micro_delay(10000);
+
     write_volatile(DOTG_PCGCCTL, 0);
+
+    micro_delay(10000);
 
     let mut hcfg = read_volatile(DOTG_HCFG);
     //FSPhyType = Dedicated full-speed interface 2'b01
     //HSPhyType = UTMI+ 2'b01
-    hcfg &= !HCFG_FSLSPCLKSEL_MASK;
+    hcfg &= !(HCFG_FSLSSUPP | HCFG_FSLSPCLKSEL_MASK);
+    hcfg |= (1 << HCFG_FSLSPCLKSEL_SHIFT) | HCFG_FSLSSUPP;
     //Host clock: 30-60Mhz
     write_volatile(DOTG_HCFG, hcfg);
 
-    hcfg = read_volatile(DOTG_HCFG);
-    hcfg |= HCFG_FSLSSUPP; //Sets speed for FS/LS devices, no HS devices
-    write_volatile(DOTG_HCFG, hcfg);
+    // hcfg = read_volatile(DOTG_HCFG);
+    // hcfg |= HCFG_FSLSSUPP; //Sets speed for FS/LS devices, no HS devices
+    // write_volatile(DOTG_HCFG, hcfg);
 
     let h_dmaen = hcfg & (1 << 23);
     let cfg4 = read_volatile(DOTG_GHWCFG4);
@@ -1374,6 +1383,8 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
 
     write_volatile(DOTG_GINTSTS, 0xFFFFFFFF);
     dwc_otg_register_interrupt_handler();
+
+    micro_delay(10000);
     write_volatile(DOTG_GINTMSK, GINTMSK_HCHINTMSK);
 
     write_volatile(DOTG_GINTSTS, 1);
