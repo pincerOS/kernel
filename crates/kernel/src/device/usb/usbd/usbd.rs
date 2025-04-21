@@ -743,10 +743,34 @@ pub fn UsbAllocateDevice(mut devices: Box<UsbDevice>) -> ResultCode {
         if bus.devices[number].is_none() {
             // println!("| USBD: Allocating device {}", number);
             device.number = number as u32 + 1;
+            if device.number == 1 {
+                //Roothub -> get speed
+                use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HPRT;
+                let hprt = read_volatile(DOTG_HPRT);
+                let speed = match (hprt >> 17) & 0b11 {
+                    0b00 => {
+                        device.speed = UsbSpeed::High;
+                        "High-Speed"
+                    },
+                    0b01 => {
+                        device.speed = UsbSpeed::Full;
+                        "Full-Speed"
+                    },
+                    0b10 => {
+                        device.speed = UsbSpeed::Low;
+                        "Low-Speed"
+                    },
+                    _ => { panic!("| USBD: Unknown speed") },
+                };
+
+                println!("| USBD: Roothub: {}", speed);
+            }
             bus.devices[number] = Some(devices);
             break;
         }
     }
+
+    
 
     return ResultCode::OK;
 }

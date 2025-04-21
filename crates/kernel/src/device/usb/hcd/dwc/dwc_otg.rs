@@ -1209,7 +1209,7 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
         }
     }
 
-    // println!("| HCD: Starting");
+    println!("| HCD: Start");
 
     write_volatile(DOTG_DCTL, 1 << 1);
     micro_delay(1000);
@@ -1356,10 +1356,20 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     }
 
     let mut hport = read_volatile(DOTG_HPRT);
-    if (hport & HPRT_PRTCONNSTS) == 0 {
+    if (hport & HPRT_PRTPWR) == 0 {
         println!("| HCD Powering on port");
         hport |= HPRT_PRTPWR;
         write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x1000));
+        micro_delay(10000);
+    }
+
+    // Wait for device connection (optional debounce)
+    for _ in 0..100 {
+        let h = read_volatile(DOTG_HPRT);
+        if (h & HPRT_PRTCONNSTS) != 0 {
+            break;
+        }
+        micro_delay(1000); // wait 1ms
     }
 
     write_volatile(DOTG_GINTSTS, 0xFFFFFFFF);
@@ -1372,11 +1382,11 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
 
     hport = read_volatile(DOTG_HPRT);
     hport |= HPRT_PRTRST;
-    write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x100));
+    write_volatile(DOTG_HPRT, hport);
 
     micro_delay(50000);
     hport &= !HPRT_PRTRST;
-    write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x100));
+    write_volatile(DOTG_HPRT, hport);
     micro_delay(50000);
 
     return ResultCode::OK;

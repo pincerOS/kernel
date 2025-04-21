@@ -175,7 +175,8 @@ fn HubPowerOn(device: &mut UsbDevice) -> ResultCode {
         }
     }
 
-    micro_delay(delay);
+    println!("| HUB: powering on hub, waiting for {}ms", 2 * delay);
+    micro_delay(delay * 2000);
 
     return ResultCode::OK;
 }
@@ -282,6 +283,11 @@ fn HubPortReset(device: &mut UsbDevice, port: u8) -> ResultCode {
     result = HubChangePortFeature(device, HubPortFeature::FeatureReset, port, false);
     if result != ResultCode::OK {
         println!("| HUB: failed to clear reset for port {}", port + 1);
+    }
+
+    result = HubChangePortFeature(device, HubPortFeature::FeatureResetChange, port, false);
+    if result != ResultCode::OK {
+        println!("| HUB: failed to clear reset change for port {}", port + 1);
     }
 
     return ResultCode::OK;
