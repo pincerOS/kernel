@@ -44,12 +44,9 @@ pub fn send_to(socketfd: u16, payload: Vec<u8>, saddr: SocketAddr) -> Result<()>
 
     // 2. if socket not bound, bind to ephemeral port (32768–60999)
     if !tagged_socket.is_bound() {
-        let ephemeral_addr = SocketAddr {
-            addr: *interface().ipv4_addr,
-            port: NEXT_EPHEMERAL.fetch_add(1, Ordering::SeqCst),
-        };
+        let ephem_port = NEXT_EPHEMERAL.fetch_add(1, Ordering::SeqCst);
 
-        tagged_socket.bind(ephemeral_addr);
+        tagged_socket.bind(ephem_port);
     }
 
     // 3. queue a send on socket sending queue
@@ -74,11 +71,15 @@ pub fn recv_from(socketfd: u16) -> Result<(Vec<u8>, SocketAddr)> {
     tagged_socket.recv() // this needs to be blocking
 }
 
-pub fn bind(socketfd: u16, saddr: SocketAddr) -> Result<()> {
+pub fn bind(socketfd: u16, port: u16) -> Result<()> {
     // 1. check if binding is already in use by another socket
+    let bind_addr = SocketAddr {
+        addr: *interface().ipv4_addr,
+        port,
+    };
     for (_, socket) in &mut interface().sockets {
-        if socket.binding_equals(saddr) {
-            return Err(Error::BindingInUse(saddr));
+        if socket.binding_equals(bind_addr) {
+            return Err(Error::BindingInUse(bind_addr));
         }
     }
 
@@ -89,7 +90,7 @@ pub fn bind(socketfd: u16, saddr: SocketAddr) -> Result<()> {
         .ok_or(Error::InvalidSocket(socketfd))?;
 
     // 3. bind the socket (will also overwrite current binding)
-    tagged_socket.bind(saddr);
+    tagged_socket.bind(port);
 
     Ok(())
 }
