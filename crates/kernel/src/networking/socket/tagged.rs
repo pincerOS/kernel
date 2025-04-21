@@ -18,10 +18,10 @@ impl TaggedSocket {
         }
     }
 
-    pub fn bind(&mut self, saddr: SocketAddr) {
+    pub fn bind(&mut self, port: u16) {
         match self {
             // TaggedSocket::Raw(socket) => socket.accepts(pair),
-            TaggedSocket::Udp(socket) => socket.bind(saddr),
+            TaggedSocket::Udp(socket) => socket.bind(port),
             // TaggedSocket::Tcp(socket) => socket.accepts(pair),
         }
     }

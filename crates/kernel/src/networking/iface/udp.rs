@@ -33,37 +33,23 @@ pub fn recv_udp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Re
     println!("\t received udp packet");
     let udp_packet = UdpPacket::deserialize(ipv4_packet.payload.as_slice())?;
 
-    // let dst_socket_addr = SocketAddr {
-    //     addr: ipv4_packet.dst_addr,
-    //     port: udp_packet.dst_port,
-    // };
-    //
-    // let src_socket_addr = SocketAddr {
-    //     addr: ipv4_packet.src_addr,
-    //     port: udp_packet.src_port,
-    // };
-    //
-    // match interface.udp_sockets.port_open_udp(dst_socket_addr) {
-    //     Some(sockfd) => {
-    //         interface.udp_sockets
-    //             .socket(sockfd)
-    //             .as_udp_socket()
-    //             .recv_enqueue(udp_packet.payload, src_socket_addr)
-    //     },
-    //     None => {
-    //         let icmp_packet = IcmpPacket::new(IcmpMessage::DestinationUnreachable(
-    //             IcmpDstUnreachable::PortUnreachable,
-    //         ));
-    //
-    //         ipv4::send_ipv4_packet(
-    //             interface,
-    //             icmp_packet.serialize(),
-    //             Ipv4Protocol::ICMP,
-    //             ipv4_packet.src_addr,
-    //         )
-    //     }
-    // };
+    let local_socket_addr = SocketAddr {
+        addr: ipv4_packet.dst_addr,
+        port: udp_packet.dst_port,
+    };
 
+    let sender_socket_addr = SocketAddr {
+        addr: ipv4_packet.src_addr,
+        port: udp_packet.src_port,
+    };
+
+    for (_, socket) in &mut interface.sockets {
+        if socket.binding_equals(local_socket_addr) {
+            socket.recv_enqueue(udp_packet.payload.clone(), sender_socket_addr);
+        }
+    }
+
+    // dhcp
     if udp_packet.payload.len() >= 240
         && (&udp_packet.payload[236..240] == &[0x63, 0x82, 0x53, 0x63])
     {
