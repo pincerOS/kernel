@@ -647,8 +647,23 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
     println!("| USBD: Device descriptor: {:?}", device.descriptor);
     if result != ResultCode::OK {
         println!("| USBD: Failed to read device descriptor");
-        return result;
+
+        for it in 0..100 {
+            micro_delay(400000);
+            result = UsbReadDeviceDescriptor(device);
+            if result == ResultCode::OK {
+                println!("| SUCCESS: Read device descriptor at iteration {}", it);
+                break;
+            }
+            println!("| USBD: Failed to read device descriptor at iteration {}", it);
+        }
+
+        if result != ResultCode::OK {
+            return result;
+        }
     }
+
+
     device.status = UsbDeviceStatus::Default;
 
     if let Some(parent) = device.parent {

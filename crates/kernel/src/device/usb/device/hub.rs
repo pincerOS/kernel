@@ -226,6 +226,52 @@ fn HubPortGetStatus(device: &mut UsbDevice, port: u8) -> ResultCode {
     return ResultCode::OK;
 }
 
+fn HubPortReset2(device: &mut UsbDevice, port: u8) -> ResultCode {
+    /* clear any leftover port reset changes first */
+    HubChangePortFeature(device, HubPortFeature::FeatureResetChange, port, false);
+    let mut result = HubChangePortFeature(device, HubPortFeature::FeatureReset, port, true);
+
+    if result != ResultCode::OK {
+        println!("| HUB: failed to reset port (1) {}", port + 1);
+        return result;
+    }
+
+    let mut n = 0;
+    loop {
+        /* wait for the device to recover from reset */
+        micro_delay(50000); //50ms
+        n += 50;
+
+        result = HubPortGetStatus(device, port);
+        let data = device.driver_data.downcast::<HubDevice>().unwrap();
+        let status = &data.PortStatus[port as usize];
+        let port_changed = status.Change;
+
+        if port_changed.contains(HubPortStatusChange::ResetChanged) {
+            break;
+        }
+
+        if n > 1000 {
+            n = 0;
+            break;
+        }
+    }
+
+    result = HubChangePortFeature(device, HubPortFeature::FeatureResetChange, port, false);
+    if result != ResultCode::OK {
+        println!("| HUB: failed to clear reset change for port {}", port + 1);
+        return result;
+    }
+
+    if n == 0 {
+        println!("| HUB: timeout waiting for reset on port {}", port + 1);
+        return ResultCode::ErrorTimeout;
+    }
+
+    micro_delay(10000);
+    return result;
+}
+
 fn HubPortReset(device: &mut UsbDevice, port: u8) -> ResultCode {
     let mut result;
     let mut retry_max = 0;
@@ -304,7 +350,7 @@ fn HubChildReset(device: &mut UsbDevice, child: &mut UsbDevice) -> ResultCode {
         && child.port_number < data.MaxChildren as u8
         && data.Children[child.port_number as usize] == child
     {
-        return HubPortReset(device, child.port_number);
+        return HubPortReset2(device, child.port_number);
     } else {
         println!("| HUB: child reset failed");
         return ResultCode::ErrorArgument;
@@ -330,6 +376,13 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
         );
         return result;
     }
+
+    result = HubPortGetStatus(device, port);
+    if result != ResultCode::OK {
+        println!("| HUB: failed to get status (3) for port {}", port + 1);
+        return result;
+    }
+
     let data = device.driver_data.downcast::<HubDevice>().unwrap();
     let port_status = data.PortStatus[port as usize].Status;
     if (!(port_status.contains(HubPortStatus::Connected))
@@ -342,7 +395,15 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
         return ResultCode::ErrorIncompatible;
     }
 
-    result = HubPortReset(device, port);
+    if !port_status.contains(HubPortStatus::Power) {
+        println!("| WWARNING: HUB: PORT {} has no power", port + 1);
+    }
+
+    //wait for maximum device powerup time
+    //300ms
+    micro_delay(300000);
+
+    result = HubPortReset2(device, port);
     if result != ResultCode::OK {
         println!("| HUB: count not reset port {} for new device", port + 1);
         return result;
@@ -417,10 +478,20 @@ fn HubCheckConnection(device: &mut UsbDevice, port: u8) -> ResultCode {
         }
     }
 
-    if port_change.contains(HubPortStatusChange::ConnectedChanged) {
-        println!("| HUB: Port {} connected changed", port + 1);
-        HubPortConnectionChanged(device, port);
+    //freebsd
+    if port_change.contains(HubPortStatusChange::OverCurrentChanged) {
+        if HubChangePortFeature(device, HubPortFeature::FeatureOverCurrent, port, false)
+            != ResultCode::OK
+        {
+            println!("| HUB: failed to clear over current for port {}", port + 1);
+        }
+        HubPowerOn(device);
     }
+
+    // if port_change.contains(HubPortStatusChange::ConnectedChanged) {
+    //     println!("| HUB: Port {} connected changed", port + 1);
+    //     HubPortConnectionChanged(device, port);
+    // }
 
     if port_change.contains(HubPortStatusChange::EnabledChanged) {
         if HubChangePortFeature(device, HubPortFeature::FeatureEnableChange, port, false)
@@ -440,28 +511,33 @@ fn HubCheckConnection(device: &mut UsbDevice, port: u8) -> ResultCode {
         }
     }
 
+    if port_change.contains(HubPortStatusChange::ConnectedChanged) {
+        println!("| HUB: Port {} connected changed", port + 1);
+        HubPortConnectionChanged(device, port);
+    }
+
     if port_status.contains(HubPortStatus::Suspended) {
         if HubChangePortFeature(device, HubPortFeature::FeatureSuspend, port, false)
             != ResultCode::OK
         {
-            println!("| HUB: failed to clear suspend for port {}", port + 1);
+            panic!("| HUB: failed to clear suspend for port {}", port + 1);
         }
     }
 
-    if port_change.contains(HubPortStatusChange::OverCurrentChanged) {
-        if HubChangePortFeature(device, HubPortFeature::FeatureOverCurrent, port, false)
-            != ResultCode::OK
-        {
-            println!("| HUB: failed to clear over current for port {}", port + 1);
-        }
-        HubPowerOn(device);
-    }
+    // if port_change.contains(HubPortStatusChange::OverCurrentChanged) {
+    //     if HubChangePortFeature(device, HubPortFeature::FeatureOverCurrent, port, false)
+    //         != ResultCode::OK
+    //     {
+    //         println!("| HUB: failed to clear over current for port {}", port + 1);
+    //     }
+    //     HubPowerOn(device);
+    // }
 
     if port_change.contains(HubPortStatusChange::ResetChanged) {
         if HubChangePortFeature(device, HubPortFeature::FeatureResetChange, port, false)
             != ResultCode::OK
         {
-            println!("| HUB: failed to clear reset change for port {}", port + 1);
+            panic!("| HUB: failed to clear reset change for port {}", port + 1);
         }
     }
 
