@@ -50,11 +50,11 @@ fn HubReadDescriptor(device: &mut UsbDevice) -> ResultCode {
 
     let hub = device.driver_data.downcast::<HubDevice>().unwrap();
     if hub.Descriptor.is_none() {
-        // println!(
-        //     "| HUB: allocating descriptor of size {} with HubDescriptor {}",
-        //     header.descriptor_length,
-        //     size_of::<HubDescriptor>()
-        // );
+        println!(
+            "| HUB: allocating descriptor of size {} with HubDescriptor {}",
+            header.descriptor_length,
+            size_of::<HubDescriptor>()
+        );
         hub.Descriptor = Some(Box::new(HubDescriptor::default()));
 
         //TODO: Update this creation as well
@@ -591,6 +591,9 @@ fn HubAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     } else {
         hub.MaxChildren = HubDescriptor.PortCount as u32;
     }
+
+    //print HubDescriptor info
+    println!("| HUB: Hub descriptor {:?}", HubDescriptor);
 
     //TODO: Hope HubDescriptor.Attributes is correct
     // println!("| HUB: hub has {} children", hub.MaxChildren);
