@@ -57,9 +57,14 @@ impl UdpSocket {
         self.is_bound
     }
 
-    pub fn bind(&mut self, saddr: SocketAddr) {
+    pub fn bind(&mut self, port: u16) {
         self.is_bound = true;
-        self.binding = saddr;
+        let bind_addr = SocketAddr {
+            addr: *interface().ipv4_addr,
+            port,
+        };
+
+        self.binding = bind_addr;
     }
 
     pub fn send_enqueue(&mut self, payload: Vec<u8>, dest: SocketAddr) -> Result<()> {
