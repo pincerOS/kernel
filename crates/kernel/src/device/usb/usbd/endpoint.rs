@@ -30,14 +30,20 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
     device.last_transfer = endpoint.buffer_length - transfer_size;
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
-    if hcint & HCINT_CHHLTD == 0 {
+    if hcint & HCINT_NAK != 0 {
+        //NAK received -> need to schedule another transfer
+        // if device.last_transfer != 0 {
+        //     panic!(
+        //         "| Endpoint {} in: HCINT_NAK with transfer, aborting. hcint: {:x} last transfer: {}",
+        //         channel, hcint, device.last_transfer
+        //     );
+        // }
+    } else if hcint & HCINT_CHHLTD == 0 {
         panic!(
             "| Endpoint {} in: HCINT_CHHLTD not set, aborting. hcint: {:x} last transfer: {}",
             channel, hcint, device.last_transfer
         );
-    }
-
-    if hcint & HCINT_XFERCOMPL == 0 {
+    } else if hcint & HCINT_XFERCOMPL == 0 {
         panic!(
             "| Endpoint {} in: HCINT_XFERCOMPL not set, aborting. {:x}",
             channel, hcint

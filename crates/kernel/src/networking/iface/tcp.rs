@@ -23,6 +23,7 @@ pub fn send_tcp_packet(
     let tcp_packet = TcpPacket::new(
         src_port, 
         dst_port, 
+        0, 0, 0, 0,
         payload, 
         *interface.ipv4_addr, 
         dst_addr
