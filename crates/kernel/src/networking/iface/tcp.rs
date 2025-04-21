@@ -1,19 +1,20 @@
-
 use crate::networking::iface::*;
 use crate::networking::repr::*;
 use crate::networking::socket::{SocketAddr, TaggedSocket};
 use crate::networking::Result;
 
-use crate::device::usb::device::net::interface as get_interface;
-
 use alloc::vec::Vec;
 
 pub fn send_tcp_packet(
     interface: &mut Interface,
-    dst_addr: Ipv4Address,
-    payload: Vec<u8>,
     src_port: u16,
     dst_port: u16,
+    seq_number: u32,
+    ack_number: u32,
+    flags: u8,
+    window_size: u16,
+    dst_addr: Ipv4Address,
+    payload: Vec<u8>,
 ) -> Result<()> {
     println!(
         "\t[!] sending tcp {} {} {} {}",
@@ -23,7 +24,11 @@ pub fn send_tcp_packet(
     let tcp_packet = TcpPacket::new(
         src_port, 
         dst_port, 
-        payload, 
+        seq_number,
+        ack_number,
+        flags,
+        window_size,
+        payload,
         *interface.ipv4_addr, 
         dst_addr
     );
@@ -31,7 +36,7 @@ pub fn send_tcp_packet(
     ipv4::send_ipv4_packet(
         interface,
         tcp_packet.serialize(),
-        Ipv4Protocol::UDP,
+        Ipv4Protocol::TCP,
         dst_addr,
     )
 }
@@ -52,7 +57,13 @@ pub fn recv_tcp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Re
 
     for (_, socket) in &mut interface.sockets {
         if socket.binding_equals(local_socket_addr) {
-            socket.recv_enqueue(tcp_packet.payload.clone(), sender_socket_addr);
+            socket.recv_enqueue(
+                tcp_packet.seq_number, 
+                tcp_packet.ack_number, 
+                tcp_packet.flags,
+                tcp_packet.payload.clone(), 
+                sender_socket_addr
+            );
         }
     }
 

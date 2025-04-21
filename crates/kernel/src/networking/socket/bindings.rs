@@ -71,6 +71,17 @@ pub fn recv_from(socketfd: u16) -> Result<(Vec<u8>, SocketAddr)> {
     tagged_socket.recv() // this needs to be blocking
 }
 
+pub fn connect(socketfd: u16, saddr: SocketAddr) -> Result<()> {
+    let sockets = &mut interface().sockets;
+
+    // 1. check if a socketfd is valid if not return error
+    let tagged_socket = sockets
+        .get_mut(&socketfd)
+        .ok_or(Error::InvalidSocket(socketfd))?;
+
+    tagged_socket.connect(saddr)
+}
+
 pub fn bind(socketfd: u16, port: u16) -> Result<()> {
     // 1. check if binding is already in use by another socket
     let bind_addr = SocketAddr {

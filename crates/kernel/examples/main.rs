@@ -6,7 +6,7 @@ extern crate kernel;
 
 use kernel::event::thread;
 use kernel::networking::repr::Ipv4Address;
-use kernel::networking::socket::{bind, recv_from, send_to, SocketAddr, UdpSocket};
+use kernel::networking::socket::{bind, recv_from, send_to, connect, SocketAddr, TcpSocket, UdpSocket};
 use kernel::*;
 
 use core::str;
@@ -31,20 +31,29 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     barrier.sync_blocking();
     println!("End of preemption test");
 
-    let s = UdpSocket::new();
+    // let s = UdpSocket::new();
 
     // send_to(s, "hello everynyan".as_bytes().to_vec(), saddr);
-    bind(s, 2222);
+    // bind(s, 2222);
 
-    // for i in 0..count {
-    //     sync::spin_sleep(5000_000);
+    for i in 0..count {
+        sync::spin_sleep(1000_000);
+    }
+
+    // loop {
+    //     sync::spin_sleep(500_000);
+    //     let recv = recv_from(s);
+    //     if let Ok((payload, senderaddr)) = recv {
+    //         println!("got message: {:x?}", payload);
+    //     }
     // }
 
-    loop {
-        sync::spin_sleep(500_000);
-        let recv = recv_from(s);
-        if let Ok((payload, senderaddr)) = recv {
-            println!("got message: {:x?}", payload);
-        }
-    }
+    // let saddr = SocketAddr {
+    //     addr: Ipv4Address::new([11, 187, 10, 102]),
+    //     port: 2222,
+    // };
+    //
+    // let s = TcpSocket::new();
+    // connect(s, saddr);
+    // send_to(s, "hello everynyan".as_bytes().to_vec(), saddr);
 }

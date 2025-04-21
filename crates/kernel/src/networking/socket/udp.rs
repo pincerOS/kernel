@@ -75,7 +75,7 @@ impl UdpSocket {
         })
     }
 
-    pub fn send(&mut self) {
+    pub fn send(&mut self) -> Result<()> {
         loop {
             match self.send_buffer.dequeue_with(|entry| {
                 let (payload, addr) = entry;
@@ -94,6 +94,8 @@ impl UdpSocket {
                 Err(_) => break,
             }
         }
+
+        Ok(())
     }
 
     // Dequeues a received packet along with it's source address from the
