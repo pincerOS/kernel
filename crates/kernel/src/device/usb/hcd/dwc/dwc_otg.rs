@@ -124,6 +124,13 @@ pub fn dwc_otg_interrupt_handler(_ctx: &mut Context, _irq: usize) {
     }
 }
 
+pub fn DwcUpdateHostFrameInterval() {
+
+    let hfir = read_volatile(DOTG_HFIR);
+    println!("| DWC: HFIR: {:#x}", hfir);
+    println!("| DWC: HFIR FRINT: {:#x}\n", hfir & HFIR_FRINT_MASK);
+}
+
 /**
     \brief Prepares a channel to communicated with a device.
 

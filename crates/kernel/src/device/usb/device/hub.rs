@@ -358,6 +358,10 @@ fn HubChildReset(device: &mut UsbDevice, child: &mut UsbDevice) -> ResultCode {
 }
 
 fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
+
+    use crate::device::usb::DwcUpdateHostFrameInterval;
+    DwcUpdateHostFrameInterval();
+
     let mut result = HubPortGetStatus(device, port);
 
     if result != ResultCode::OK {
@@ -435,6 +439,8 @@ fn HubPortConnectionChanged(device: &mut UsbDevice, port: u8) -> ResultCode {
     } else {
         child_dev.speed = UsbSpeed::Full;
     }
+
+
 
     println!("| HUB: new device speed {:?}", child_dev.speed);
 
