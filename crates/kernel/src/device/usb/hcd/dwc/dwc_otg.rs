@@ -184,6 +184,11 @@ fn HcdPrepareChannel(
     dwc_sc.channel[channel as usize].characteristics.Enable = false;
     dwc_sc.channel[channel as usize].characteristics.Disable = false;
     dwc_sc.channel[channel as usize].characteristics.OddFrame = false;
+    if pipe.transfer_type == UsbTransfer::Interrupt { //TODO: handling for isochronous
+        let frame = read_volatile(DOTG_HFNUM);
+        dwc_sc.channel[channel as usize].characteristics.OddFrame = frame & 1 != 0;
+    }
+    
     dwc_sc.channel[channel as usize]
         .characteristics
         .PacketsPerFrame = 1;
