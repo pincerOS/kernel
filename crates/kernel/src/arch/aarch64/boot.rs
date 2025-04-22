@@ -84,8 +84,19 @@ kernel_entry_alt:
     b kernel_entry_rust_alt
 
 drop_to_el1:
-    mov x5, #(1 << 31)
-    // orr x5, x5, #0x38
+    // Init core ids?  TODO: probably unneeded
+    mrs x5, midr_el1
+    mrs x6, mpidr_el1
+    msr vpidr_el2, x5
+    msr vmpidr_el2, x6
+
+    // Init timers on core zero???
+    mrs x5, cnthctl_el2
+    orr x5, x5, #0x3
+    msr cnthctl_el2, x5
+    msr cntvoff_el2, xzr
+
+    ldr x5, ={HCR_EL2}
     msr hcr_el2, x5
 
     // Enable FPU
@@ -107,7 +118,7 @@ drop_to_el1:
     ldr x5, ={MAIR_EL1}
     msr MAIR_EL1, x5
 
-    mov x5, #0b0101
+    mov x5, #0x3c5 // EL1_SP1, DAIF masked
     msr SPSR_EL2, x5
 
     // Enable FPU
@@ -204,8 +215,19 @@ switch_user_tcr_el1:
     STACK_SIZE_LOG2 = const STACK_SIZE_LOG2,
     TCR_EL1 = const INIT_TCR_EL1,
     TRANSLATION_ENTRY = const INIT_TRANSLATION,
+    HCR_EL2 = const (
+        (1 << 31) | // 64 bit mode in EL1
+        // orr x5, x5, #0x38 (???)
+        0
+    ),
     SCTLR_EL1 = const (
+        (1 << 29) | // ???
+        (1 << 28) |
+        (1 << 23) |
+        (1 << 22) |
+        (1 << 20) |
         (1 << 12) | // enable instruction caching
+        (1 << 11) | // exceptions as sync point?
         (1 << 4) | // enable EL0 stack pointer alignment
         (1 << 3) | // enable EL1 stack pointer alignment
         (1 << 2) | // enable data caching
