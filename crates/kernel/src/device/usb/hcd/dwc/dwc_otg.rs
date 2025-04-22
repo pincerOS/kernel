@@ -708,6 +708,9 @@ fn HcdChannelSendWait(
 
             transfer = buffer_length - dwc_sc.channel[channel as usize].transfer_size.TransferSize;
             println!("| HCD: Transfer to packet progress: {}/{} with packets {} from {}\n", transfer, buffer_length, dwc_sc.channel[channel as usize].transfer_size.PacketCount, packets);
+            
+            printDWCErrors(channel as u32);
+            
             // If the packet count hasn’t changed, break out of the loop.
             if packets == dwc_sc.channel[channel as usize].transfer_size.PacketCount {
                 println!("| HCD: Transfer to packet got stuck.");
@@ -979,12 +982,14 @@ pub fn printDWCErrors(channel: u32) {
     let haint = read_volatile(DOTG_HAINT);
     let hcint = read_volatile(DOTG_HCINT(channel as usize));
     let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+    let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
 
     println!("| HCD hprt: {:#x}", hprt);
     println!("| HCD gintsts: {:#x}", gintsts);
     println!("| HCD haint: {:#x}", haint);
     println!("| HCD hcint: {:#x}", hcint);
     println!("| HCD hcchar: {:#x}", hcchar);
+    println!("| HCD hctsiz: {:#x}", hctsiz);
     println!("| HCD channel: {:#x}", channel);
 }
 
@@ -1018,6 +1023,7 @@ pub unsafe fn HcdSubmitControlMessage(
     let request_buffer = request as *mut UsbDeviceRequest as *mut u8;
 
     // dwc_sc.channel[0].characteristics.MaximumPacketSize = 8;
+
     let mut result;
     result = HcdChannelSendWait(
         device,
@@ -1063,7 +1069,7 @@ pub unsafe fn HcdSubmitControlMessage(
             data_buffer,
             buffer_length,
             request,
-            PacketId::Data0,
+            PacketId::Data1,
         );
         if result != ResultCode::OK {
             println!("| HCD: Coult not send data to device\n");
@@ -1122,7 +1128,7 @@ pub unsafe fn HcdSubmitControlMessage(
         dwc_sc.databuffer.as_mut_ptr(),
         0,
         request,
-        PacketId::Data1,
+        PacketId::Data0,
     );
     if result != ResultCode::OK {
         // println!("| HCD: Could not send STATUS to device.");
@@ -1317,10 +1323,10 @@ pub fn DwcInit(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
 
     unsafe {
         let dma_address = 0x2FF0000;
-        use crate::memory::map_device_block;
+        use crate::memory::map_physical_noncacheable;
         let dma_loc =
-            // map_physical_noncacheable(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
-            map_device_block(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
+            map_physical_noncacheable(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
+            // map_device_block(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
         dwc_sc.dma_loc = dma_loc; //TODO: Temporay, move to somwhere elses
         println!(
             "| HCD: DMA address {:#x} mapped from {:#x} to {:#x}",

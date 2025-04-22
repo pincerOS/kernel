@@ -31,7 +31,7 @@ use crate::device::usb::usbd::transfer::*;
 
 use core::ptr;
 
-const DEBUG_DISABLE_MAX_PACKET_SIZE: bool = true;
+const DEBUG_DISABLE_MAX_PACKET_SIZE: bool = false;
 
 //TODO: This needs checking under load
 pub static USB_TRANSFER_QUEUE: UsbTransferQueue = UsbTransferQueue::new();
@@ -316,7 +316,7 @@ pub unsafe fn UsbGetDescriptor(
     };
 
     if result != ResultCode::OK {
-        println!("| USBD: Failed to get descriptor");
+        println!("| USBD: Failed to get descriptor {} {}", device.last_transfer, minimumLength);
         return result;
     }
 
@@ -386,6 +386,10 @@ fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
             )
         };
         if result != ResultCode::OK {
+
+            //print the device descriptor
+            println!("| USBD: failed device descriptor {:?}", device.descriptor);
+
             return result;
         }
         println!("//RIGHT HERE!");
