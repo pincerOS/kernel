@@ -1274,9 +1274,10 @@ pub fn DwcInit(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
 
     unsafe {
         let dma_address = 0x2FF0000;
-        use crate::memory::map_physical_noncacheable;
+        use crate::memory::map_device_block;
         let dma_loc =
-            map_physical_noncacheable(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
+            // map_physical_noncacheable(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
+            map_device_block(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
         dwc_sc.dma_loc = dma_loc; //TODO: Temporay, move to somwhere elses
         println!(
             "| HCD: DMA address {:#x} mapped from {:#x} to {:#x}",
