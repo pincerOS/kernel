@@ -782,7 +782,8 @@ pub fn UsbAllocateDevice(mut devices: Box<UsbDevice>) -> ResultCode {
                 let hprt = read_volatile(DOTG_HPRT);
                 let speed = match (hprt >> 17) & 0b11 {
                     0b00 => {
-                        device.speed = UsbSpeed::High;
+                        // device.speed = UsbSpeed::High;
+                        device.speed = UsbSpeed::Full;
                         "High-Speed"
                     },
                     0b01 => {
