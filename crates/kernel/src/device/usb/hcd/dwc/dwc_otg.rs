@@ -707,15 +707,15 @@ fn HcdChannelSendWait(
             );
 
             transfer = buffer_length - dwc_sc.channel[channel as usize].transfer_size.TransferSize;
-            // println!("| HCD: Transfer to packet progress: {}/{} with packets {} from {}\n", transfer, buffer_length, dwc_sc.channel[channel as usize].transfer_size.PacketCount, packets);
+            println!("| HCD: Transfer to packet progress: {}/{} with packets {} from {}\n", transfer, buffer_length, dwc_sc.channel[channel as usize].transfer_size.PacketCount, packets);
             // If the packet count hasn’t changed, break out of the loop.
             if packets == dwc_sc.channel[channel as usize].transfer_size.PacketCount {
-                // println!("| HCD: Transfer to packet got stuck.");
+                println!("| HCD: Transfer to packet got stuck.");
                 break;
             }
             // Continue looping if there are still packets in progress.
             if dwc_sc.channel[channel as usize].transfer_size.PacketCount == 0 {
-                // println!("| HCD: Transfer to packet completed.");
+                println!("| HCD: Transfer to packet completed.");
                 break;
             }
         }
@@ -734,7 +734,7 @@ fn HcdChannelSendWait(
             } else {
                 device.error = UsbTransferError::ConnectionError;
             }
-
+            println!("| HCD: Transfer to packet got stuck.");
             return ResultCode::ErrorDevice;
         }
 
@@ -973,6 +973,21 @@ pub unsafe fn HcdSubmitInterruptMessage(
     return ResultCode::OK;
 }
 
+pub fn printDWCErrors(channel: u32) {
+    let hprt = read_volatile(DOTG_HPRT);
+    let gintsts = read_volatile(DOTG_GINTSTS);
+    let haint = read_volatile(DOTG_HAINT);
+    let hcint = read_volatile(DOTG_HCINT(channel as usize));
+    let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+
+    println!("| HCD hprt: {:#x}", hprt);
+    println!("| HCD gintsts: {:#x}", gintsts);
+    println!("| HCD haint: {:#x}", haint);
+    println!("| HCD hcint: {:#x}", hcint);
+    println!("| HCD hcchar: {:#x}", hcchar);
+    println!("| HCD channel: {:#x}", channel);
+}
+
 pub unsafe fn HcdSubmitControlMessage(
     device: &mut UsbDevice,
     pipe: UsbPipeAddress,
@@ -1045,10 +1060,13 @@ pub unsafe fn HcdSubmitControlMessage(
             data_buffer,
             buffer_length,
             request,
-            PacketId::Data1,
+            PacketId::Data0,
         );
         if result != ResultCode::OK {
             println!("| HCD: Coult not send data to device\n");
+
+            printDWCErrors(0);
+
             return result;
         }
 
