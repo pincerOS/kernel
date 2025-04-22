@@ -302,8 +302,8 @@ pub unsafe fn UsbGetDescriptor(
                 _reserved: 0,
             },
             buffer,
-            // length,
-            minimumLength,
+            length,
+            // minimumLength,
             &mut UsbDeviceRequest {
                 request_type: 0x80 | recipient,
                 request: UsbDeviceRequestRequest::GetDescriptor,
