@@ -129,7 +129,8 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             );
         }
     } else {
-        panic!("| Endpoint {}: Unknown interrupt, aborting {}.", channel, hcint);
+        println!("| Endpoint {}: Unknown interrupt, ignoring {}.", channel, hcint);
+        return;
     }
 
     let mut buffer = unsafe { buffer.assume_init() };
