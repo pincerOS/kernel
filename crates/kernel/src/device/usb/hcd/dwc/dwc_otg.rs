@@ -1184,6 +1184,18 @@ fn HcdTransmitFifoFlush(fifo: CoreFifoFlush) -> ResultCode {
     return ResultCode::OK;
 }
 
+fn DwcOtgTxFifoReset(value: u32) {
+    write_volatile(DOTG_GRSTCTL, value);
+
+    //wait for the reset to complete
+    for _ in 0..16 {
+        let value = read_volatile(DOTG_GRSTCTL);
+        if (value & (GRSTCTL_TXFFLSH | GRSTCTL_RXFFLSH)) == 0 {
+            break;
+        }
+    }
+}
+
 /**
     \brief Triggers the receive fifo flush for a given fifo.
 
@@ -1294,11 +1306,11 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
 
     write_volatile(DOTG_PCGCCTL, 0xFFFFFFFF);
 
-    micro_delay(10000);
+    micro_delay(30000);
 
     write_volatile(DOTG_PCGCCTL, 0);
 
-    micro_delay(10000);
+    micro_delay(30000);
 
     let mut hcfg = read_volatile(DOTG_HCFG);
     //FSPhyType = Dedicated full-speed interface 2'b01
@@ -1356,9 +1368,10 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     let hcfg = read_volatile(DOTG_HCFG);
     if (hcfg & HCFG_MULTISEGDMA) == 0 {
         let num_hst_chans =
-            (read_volatile(DOTG_GHWCFG2) & GHWCFG2_NUMHSTCHNL_MASK) >> GHWCFG2_NUMHSTCHNL_SHIFT;
-
+        (read_volatile(DOTG_GHWCFG2) & GHWCFG2_NUMHSTCHNL_MASK) >> GHWCFG2_NUMHSTCHNL_SHIFT;
+        
         for channel in 0..num_hst_chans {
+            write_volatile(DOTG_HCINT(channel as usize), 0xFFFFFFFF);
             let mut chan = read_volatile(DOTG_HCCHAR(channel as usize));
             chan |= HCCHAR_EPDIR_IN | HCCHAR_CHDIS;
             chan &= !HCCHAR_CHENA;
@@ -1372,14 +1385,22 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
             write_volatile(DOTG_HCCHAR(channel as usize), chan);
 
             let mut timeout = 0;
-            chan = read_volatile(DOTG_HCCHAR(channel as usize));
-            while (chan & HCCHAR_CHENA) != 0 {
+            // chan = read_volatile(DOTG_HCCHAR(channel as usize));
+            let mut chan_int = read_volatile(DOTG_HCINT(channel as usize));
+            while (chan_int & HCINT_CHHLTD) == 0 {
                 timeout += 1;
                 if timeout > 0x100000 {
                     println!("| HCD Start ERROR: Channel {} failed to halt", channel);
                 }
-                chan = read_volatile(DOTG_HCCHAR(channel as usize));
+                chan_int = read_volatile(DOTG_HCINT(channel as usize));
             }
+            // while (chan & HCCHAR_CHENA) != 0 {
+            //     timeout += 1;
+            //     if timeout > 0x100000 {
+            //         println!("| HCD Start ERROR: Channel {} failed to halt", channel);
+            //     }
+            //     chan = read_volatile(DOTG_HCCHAR(channel as usize));
+            // }
         }
     }
 
