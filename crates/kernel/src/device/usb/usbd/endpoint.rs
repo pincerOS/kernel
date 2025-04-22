@@ -8,11 +8,12 @@
  */
 use crate::device::usb;
 
+use crate::device::usb::hcd::dwc::dwc_otg::UpdateDwcOddFrame;
 use crate::device::usb::hcd::dwc::dwc_otgreg::HCINT_FRMOVRUN;
 use crate::device::usb::UsbSendInterruptMessage;
 use usb::dwc_hub;
 use usb::hcd::dwc::dwc_otg::HcdUpdateTransferSize;
-use usb::hcd::dwc::dwc_otgreg::{HCINT_CHHLTD, HCINT_NAK, HCINT_XFERCOMPL};
+use usb::hcd::dwc::dwc_otgreg::{HCINT_CHHLTD, HCINT_NAK, HCINT_XFERCOMPL, HCINT_ACK};
 use usb::types::*;
 use usb::usbd::device::*;
 use usb::usbd::pipe::*;
@@ -24,7 +25,7 @@ use crate::sync::time::{interval, MissedTicks};
 
 use alloc::boxed::Box;
 
-pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u32, channel: u8) {
+pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u32, channel: u8) -> bool {
     let device = unsafe { &mut *endpoint.device };
 
     let transfer_size = HcdUpdateTransferSize(device, channel);
@@ -66,9 +67,10 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
             endpoint.device_endpoint_number
         );
     }
+    return true;
 }
 
-pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u32, channel: u8) {
+pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u32, channel: u8) -> bool {
     let device = unsafe { &mut *endpoint.device };
     let transfer_size = HcdUpdateTransferSize(device, channel);
     device.last_transfer = endpoint.buffer_length - transfer_size;
@@ -92,9 +94,11 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
             endpoint.device_endpoint_number
         );
     }
+
+    return true;
 }
 
-pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: u32, channel: u8) {
+pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: u32, channel: u8) -> bool {
     let device = unsafe { &mut *endpoint.device };
     let transfer_size = HcdUpdateTransferSize(device, channel);
     device.last_transfer = endpoint.buffer_length - transfer_size;
@@ -116,6 +120,10 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
     let buffer_length = device.last_transfer.clamp(0, 8);
     let mut buffer = Box::new_uninit_slice(buffer_length as usize);
 
+    if hcint & HCINT_ACK != 0 {
+        endpoint_device.endpoint_pid[endpoint.device_endpoint_number as usize] += 1;
+    }
+
     if hcint & HCINT_NAK != 0 {
         //NAK received, do nothing
         assert_eq!(buffer_length, 0);
@@ -129,9 +137,14 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
                 buffer_length as usize,
             );
         }
+    } else if hcint & HCINT_FRMOVRUN != 0 {
+        //Frame overrun
+        UpdateDwcOddFrame(channel);
+
+        return false;
     } else {
         println!("| Endpoint {}: Unknown interrupt, ignoring {}.", channel, hcint);
-        return;
+        return true;
     }
 
     let mut buffer = unsafe { buffer.assume_init() };
@@ -144,9 +157,10 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             endpoint.device_endpoint_number
         );
     }
+    return true;
 }
 
-pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor, counter: usize) {
+pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
     let device = unsafe { &mut *endpoint.device };
     let pipe = UsbPipeAddress {
         transfer_type: UsbTransfer::Interrupt,
@@ -158,7 +172,8 @@ pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor, counter: usize
         _reserved: 0,
     };
 
-    let pid = if counter % 2 == 0 {
+    let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
+    let pid = if endpoint_device.endpoint_pid[endpoint.device_endpoint_number as usize] % 2 == 0 {
         PacketId::Data0
     } else {
         PacketId::Data1
@@ -207,10 +222,8 @@ pub fn register_interrupt_endpoint(
     spawn_async_rt(async move {
         let μs = endpoint_time as u64 * 1000;
         let mut interval = interval(μs).with_missed_tick_behavior(MissedTicks::Skip);
-        let mut counter = 0;
         while interval.tick().await {
-            interrupt_endpoint_callback(endpoint, counter);
-            counter += 1;
+            interrupt_endpoint_callback(endpoint);
         }
     });
 }
@@ -255,6 +268,7 @@ impl UsbEndpointDevice {
     pub fn new() -> Self {
         UsbEndpointDevice {
             endpoints: [None; 5],
+            endpoint_pid: [0; 5],
         }
     }
 }
@@ -262,4 +276,5 @@ impl UsbEndpointDevice {
 pub struct UsbEndpointDevice {
     //TODO: update for better?: The 5 is an arbitrary number
     pub endpoints: [Option<unsafe fn(*mut u8, u32)>; 5],
+    pub endpoint_pid: [usize; 5],
 }

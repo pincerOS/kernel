@@ -110,8 +110,9 @@ pub fn dwc_otg_interrupt_handler(_ctx: &mut Context, _irq: usize) {
                     if let Some(callback) = unsafe { DWC_CHANNEL_CALLBACK.callback[i] } {
                         let hcint = hcint_channels[i];
                         schedule_rt(move || {
-                            callback(endpoint_descriptor, hcint, i as u8);
-                            schedule_next_transfer(i as u8);
+                            if callback(endpoint_descriptor, hcint, i as u8) {
+                                schedule_next_transfer(i as u8);
+                            }
                         });
                     } else {
                         println!("| DWC: No callback for channel {}.\n", i);
@@ -131,6 +132,14 @@ pub fn DwcUpdateHostFrameInterval() {
     let hfir = read_volatile(DOTG_HFIR);
     println!("| DWC: HFIR: {:#x}", hfir);
     println!("| DWC: HFIR FRINT: {:#x}\n", hfir & HFIR_FRINT_MASK);
+}
+
+pub fn UpdateDwcOddFrame(channel: u8) {
+    let frame = read_volatile(DOTG_HFNUM);
+    let mut hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+    hcchar &= !HCCHAR_ODDFRM;
+    hcchar |= (!(frame & 1)) << 29 | HCCHAR_CHENA;
+    write_volatile(DOTG_HCCHAR(channel as usize), hcchar);
 }
 
 /**
@@ -1824,7 +1833,7 @@ pub fn dwc_otg_free_channel(channel: u32) {
 }
 
 pub struct DwcChannelCallback {
-    pub callback: [Option<fn(endpoint_descriptor, u32, u8)>; ChannelCount],
+    pub callback: [Option<fn(endpoint_descriptor, u32, u8) -> bool>; ChannelCount],
     pub endpoint_descriptors: [Option<endpoint_descriptor>; ChannelCount],
 }
 
