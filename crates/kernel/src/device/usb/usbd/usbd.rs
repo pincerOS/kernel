@@ -676,19 +676,19 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
 
     device.status = UsbDeviceStatus::Default;
 
-    if let Some(parent) = device.parent {
-        unsafe {
-            if let Some(device_child_reset) = (*parent).device_child_reset {
-                result = device_child_reset(&mut *parent, device);
-                if result != ResultCode::OK {
-                    println!("| USBD: Failed to reset parent device");
-                    return result;
-                }
-            }
-        }
-    } else {
-        println!("| USBD: No parent device");
-    }
+    // if let Some(parent) = device.parent {
+    //     unsafe {
+    //         if let Some(device_child_reset) = (*parent).device_child_reset {
+    //             result = device_child_reset(&mut *parent, device);
+    //             if result != ResultCode::OK {
+    //                 println!("| USBD: Failed to reset parent device");
+    //                 return result;
+    //             }
+    //         }
+    //     }
+    // } else {
+    //     println!("| USBD: No parent device");
+    // }
 
     result = UsbSetAddress(device, address as u8);
     if result != ResultCode::OK {
@@ -745,7 +745,6 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
         //         );
         //     }
         // }
-
         if let Some(class_attach) = bus.interface_class_attach[device.interfaces[0].class as usize]
         {
             result = class_attach(device, 0);
