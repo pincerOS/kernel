@@ -455,7 +455,7 @@ pub fn HcdChannelSendWaitOne(
             if hcint & HCINT_ACK != 0 && dwc_sc.channel[channel as usize].split_control.SplitEnable
             {
                 // Try to complete the split up to 3 times.
-                println!("| HCD: Completing split to device with ACK\n");
+                println!("| HCD: Completing split to device with ACK");
                 for tries_i in 0..3 {
                     tries = tries_i;
                     write_volatile(DOTG_HCINT(channel as usize), 0x3fff);
@@ -484,7 +484,7 @@ pub fn HcdChannelSendWaitOne(
                     timeout = 0;
                     loop {
                         if timeout == RequestTimeout {
-                            println!("| HCD: Request split completion to ss has timed out.\n");
+                            println!("| HCD: Request split completion to ss has timed out.");
                             device.error = UsbTransferError::ConnectionError;
                             return ResultCode::ErrorTimeout;
                         }
@@ -500,16 +500,36 @@ pub fn HcdChannelSendWaitOne(
                     if hcint & HCINT_NYET == 0 {
                         break;
                     }
+                    println!("| HCD: Request split completion failed, retrying.");
                 }
+
+                println!("| HCD: Request split completion made progress; hcint: {:#x}", hcint);
 
                 if tries == 3 {
                     micro_delay(25000);
                     continue;
                 } else if hcint & HCINT_NAK != 0 {
+                    println!("| HCD: Request split completion NAK");
                     globalTries = globalTries.wrapping_sub(1);
                     micro_delay(25000);
                     continue;
                 } else if hcint & HCINT_XACTERR != 0 {
+                    println!("| HCD: Request split completion XACTERR");
+
+                    {
+                        let hprt = read_volatile(DOTG_HPRT);
+                        let gintsts = read_volatile(DOTG_GINTSTS);
+                        let haint = read_volatile(DOTG_HAINT);
+                        let hcint = read_volatile(DOTG_HCINT(channel as usize));
+                        let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+        
+                        println!("| HCD hprt: {:#x}", hprt);
+                        println!("| HCD gintsts: {:#x}", gintsts);
+                        println!("| HCD haint: {:#x}", haint);
+                        println!("| HCD hcint: {:#x}", hcint);
+                        println!("| HCD hcchar: {:#x}", hcchar);
+                        println!("| HCD channel: {:#x}", channel);
+                    }
                     micro_delay(25000);
                     continue;
                 }
