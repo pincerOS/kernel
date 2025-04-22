@@ -71,7 +71,7 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
     let device = unsafe { &mut *endpoint.device };
     let transfer_size = HcdUpdateTransferSize(device, channel);
     device.last_transfer = endpoint.buffer_length - transfer_size;
-    println!("Interrupt endpoint callback hcint {:x} buffer_length {}", hcint, device.last_transfer);
+
     if hcint & HCINT_CHHLTD == 0 {
         panic!("| Endpoint {}: HCINT_CHHLTD not set, aborting.", channel);
     }
@@ -114,7 +114,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
 
     let buffer_length = device.last_transfer.clamp(0, 8);
     let mut buffer = Box::new_uninit_slice(buffer_length as usize);
-    println!("Interrupt endpoint callback hcint {:x} buffer_length {}", hcint, buffer_length);
+
     if hcint & HCINT_NAK != 0 {
         //NAK received, do nothing
         assert_eq!(buffer_length, 0);
@@ -144,7 +144,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
     }
 }
 
-pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
+pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor, counter: usize) {
     let device = unsafe { &mut *endpoint.device };
     let pipe = UsbPipeAddress {
         transfer_type: UsbTransfer::Interrupt,
@@ -156,12 +156,18 @@ pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
         _reserved: 0,
     };
 
+    let pid = if counter % 2 == 0 {
+        PacketId::Data0
+    } else {
+        PacketId::Data1
+    };
+
     let result = unsafe {
         UsbSendInterruptMessage(
             device,
             pipe,
             8,
-            PacketId::Data0,
+            pid,
             endpoint.timeout,
             finish_interrupt_endpoint_callback,
             endpoint,
@@ -199,8 +205,10 @@ pub fn register_interrupt_endpoint(
     spawn_async_rt(async move {
         let μs = endpoint_time as u64 * 1000;
         let mut interval = interval(μs).with_missed_tick_behavior(MissedTicks::Skip);
+        let mut counter = 0;
         while interval.tick().await {
-            interrupt_endpoint_callback(endpoint);
+            interrupt_endpoint_callback(endpoint, counter);
+            counter += 1;
         }
     });
 }
