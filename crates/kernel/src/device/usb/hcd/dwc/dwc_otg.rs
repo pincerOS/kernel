@@ -1034,6 +1034,9 @@ pub unsafe fn HcdSubmitControlMessage(
         return result;
     }
 
+    println!("| HCD: Control message sent to device.\n");
+    printDWCErrors(0);
+
     if !buffer.is_null() {
         if pipe.direction == UsbDirection::Out {
             unsafe {

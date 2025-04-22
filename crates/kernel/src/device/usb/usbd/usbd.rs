@@ -321,7 +321,8 @@ pub unsafe fn UsbGetDescriptor(
     }
 
     if device.last_transfer < minimumLength {
-        println!("| USBD: Descriptor too short");
+        println!("| USBD: Descriptor too short {} {}", device.last_transfer, minimumLength);
+        printDWCErrors(0);
         return ResultCode::ErrorDevice;
     }
 
