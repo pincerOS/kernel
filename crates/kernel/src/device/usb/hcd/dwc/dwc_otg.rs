@@ -197,8 +197,8 @@ fn HcdPrepareChannel(
     dwc_sc.channel[channel as usize].split_control.XactPos = 0;
     dwc_sc.channel[channel as usize].split_control.CompleteSplit = false;
     dwc_sc.channel[channel as usize].split_control.SplitEnable = false;
-    // if pipe.speed != UsbSpeed::High && device.parent.is_some() && unsafe { (*device.parent.unwrap()).speed == UsbSpeed::High  && (*device.parent.unwrap()).parent.is_some() }{
-    if pipe.speed != UsbSpeed::High {
+    if pipe.speed != UsbSpeed::High && device.parent.is_some() && unsafe { (*device.parent.unwrap()).speed == UsbSpeed::High  && (*device.parent.unwrap()).parent.is_some() }{
+    // if pipe.speed != UsbSpeed::High {
         dwc_sc.channel[channel as usize].split_control.SplitEnable = true;
         if let Some(parent) = device.parent {
             unsafe {
