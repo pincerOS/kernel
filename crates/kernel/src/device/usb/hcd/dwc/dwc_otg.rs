@@ -1045,6 +1045,8 @@ pub unsafe fn HcdSubmitControlMessage(
     println!("| HCD: Control message sent to device.\n");
     printDWCErrors(0);
 
+    let mut is_data1 = true;
+
     if !buffer.is_null() {
         if pipe.direction == UsbDirection::Out {
             unsafe {
@@ -1063,7 +1065,12 @@ pub unsafe fn HcdSubmitControlMessage(
         tempPipe.direction = pipe.direction;
 
         let data_buffer = dwc_sc.databuffer.as_mut_ptr();
-
+        let pid = if is_data1 {
+            PacketId::Data1
+        } else {
+            PacketId::Data0
+        };
+        is_data1 = !is_data1;
         result = HcdChannelSendWait(
             device,
             &mut tempPipe,
@@ -1071,7 +1078,7 @@ pub unsafe fn HcdSubmitControlMessage(
             data_buffer,
             buffer_length,
             request,
-            PacketId::Data1,
+            pid,
         );
         if result != ResultCode::OK {
             println!("| HCD: Coult not send data to device\n");
@@ -1120,6 +1127,12 @@ pub unsafe fn HcdSubmitControlMessage(
         tempPipe.direction = UsbDirection::Out;
     }
 
+    let pid = if is_data1 {
+        PacketId::Data1
+    } else {
+        PacketId::Data0
+    };
+
     // tempPipe.direction = UsbDirection::In;
     //TODO: This is necessary in Real hardware I think but QEMU doesn't fully handle it
     //https://elixir.bootlin.com/qemu/v9.0.2/source/hw/usb/hcd-dwc2.c#L346
@@ -1130,7 +1143,7 @@ pub unsafe fn HcdSubmitControlMessage(
         dwc_sc.databuffer.as_mut_ptr(),
         0,
         request,
-        PacketId::Data0,
+        pid,
     );
     if result != ResultCode::OK {
         // println!("| HCD: Could not send STATUS to device.");

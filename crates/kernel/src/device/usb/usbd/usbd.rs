@@ -430,7 +430,7 @@ fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
 }
 
 fn UsbSetAddress(device: &mut UsbDevice, address: u8) -> ResultCode {
-    // println!("| USBD: Set device address to {}", address);
+    println!("| USBD: Set device address to {}", address);
     if device.status != UsbDeviceStatus::Default {
         println!("| USBD: Device not in default state");
         return ResultCode::ErrorDevice;
