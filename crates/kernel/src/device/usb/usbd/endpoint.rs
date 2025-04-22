@@ -71,7 +71,7 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
     let device = unsafe { &mut *endpoint.device };
     let transfer_size = HcdUpdateTransferSize(device, channel);
     device.last_transfer = endpoint.buffer_length - transfer_size;
-
+    println!("Interrupt endpoint callback hcint {:x} buffer_length {}", hcint, device.last_transfer);
     if hcint & HCINT_CHHLTD == 0 {
         panic!("| Endpoint {}: HCINT_CHHLTD not set, aborting.", channel);
     }
@@ -114,7 +114,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
 
     let buffer_length = device.last_transfer.clamp(0, 8);
     let mut buffer = Box::new_uninit_slice(buffer_length as usize);
-
+    println!("Interrupt endpoint callback hcint {:x} buffer_length {}", hcint, buffer_length);
     if hcint & HCINT_NAK != 0 {
         //NAK received, do nothing
         assert_eq!(buffer_length, 0);
@@ -129,7 +129,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             );
         }
     } else {
-        panic!("| Endpoint {}: Unknown interrupt, aborting.", channel);
+        panic!("| Endpoint {}: Unknown interrupt, aborting {}.", channel, hcint);
     }
 
     let mut buffer = unsafe { buffer.assume_init() };
