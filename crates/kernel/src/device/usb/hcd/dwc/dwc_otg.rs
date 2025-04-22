@@ -1391,6 +1391,9 @@ pub fn DwcInit(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
     //Host clock: 30-60Mhz
     write_volatile(DOTG_HCFG, hcfg);
 
+    let hfir = 0xBB80;
+    write_volatile(DOTG_HFIR, hfir);
+
     write_volatile(DOTG_GAHBCFG, GAHBCFG_GLBLINTRMSK);
 
     let mut hport = read_volatile(DOTG_HPRT);
