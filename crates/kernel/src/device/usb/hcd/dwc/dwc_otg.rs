@@ -28,6 +28,8 @@ use crate::device::usb::{UsbBulkMessage, UsbInterruptMessage, USB_TRANSFER_QUEUE
 use crate::device::MAILBOX;
 use crate::event::context::Context;
 use crate::event::schedule_rt;
+use crate::memory::clean_physical_buffer_for_device;
+use crate::memory::invalidate_physical_buffer_for_device;
 use crate::shutdown;
 use crate::sync::InterruptSpinLock;
 use crate::sync::SpinLock;
@@ -1382,9 +1384,9 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
 
     unsafe {
         let dma_address = 0x2FF0000;
-        use crate::memory::map_physical_noncacheable;
+        use crate::memory::map_device_block;
         let dma_loc =
-            map_physical_noncacheable(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
+            map_device_block(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
         dwc_sc.dma_loc = dma_loc; //TODO: Temporay, move to somwhere elses
         println!(
             "| HCD: DMA address {:#x} mapped from {:#x} to {:#x}",
@@ -1657,11 +1659,47 @@ pub fn HcdInitialize(_bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
     ResultCode::OK
 }
 
+fn flush_everything_before_write(addr: *mut ()) {
+    // unsafe { core::arch::asm!("isb", "dsb sy") };
+    // unsafe { invalidate_physical_buffer_for_device(addr, 16) };
+    // print!(";");
+    // crate::device::CONSOLE.get().lock().render();
+    // unsafe { core::arch::asm!("isb", "dsb sy") };
+}
+fn flush_everything_before_read(addr: *mut ()) {
+    // unsafe { core::arch::asm!("isb", "dsb sy") };
+    // unsafe { clean_physical_buffer_for_device(addr, 16) };
+    // print!(",");
+    // crate::device::CONSOLE.get().lock().render();
+    // unsafe { core::arch::asm!("isb", "dsb sy") };
+}
+fn flush_everything_after_write(addr: *mut ()) {
+    // unsafe { core::arch::asm!("isb", "dsb sy") };
+    // unsafe { clean_physical_buffer_for_device(addr, 16) };
+    // print!(":");
+    // crate::device::CONSOLE.get().lock().render();
+    // unsafe { core::arch::asm!("isb", "dsb sy") };
+}
+fn flush_everything_after_read(addr: *mut ()) {
+    // unsafe { core::arch::asm!("isb", "dsb sy") };
+    // unsafe { invalidate_physical_buffer_for_device(addr, 16) };
+    // print!(".");
+    // // crate::device::CONSOLE.get().lock().render();
+    // unsafe { core::arch::asm!("isb", "dsb sy") };
+}
+
 pub fn read_volatile(reg: usize) -> u32 {
-    unsafe { core::ptr::read_volatile((dwc_otg_driver.base_addr + reg) as *mut u32) }
+    let ptr = unsafe { (dwc_otg_driver.base_addr + reg) as *mut u32 };
+    flush_everything_before_read(ptr.cast());
+    let val = unsafe { core::ptr::read_volatile(ptr) };
+    flush_everything_after_read(ptr.cast());
+    val
 }
 pub fn write_volatile(reg: usize, val: u32) {
-    unsafe { core::ptr::write_volatile((dwc_otg_driver.base_addr + reg) as *mut u32, val) }
+    let ptr = unsafe { (dwc_otg_driver.base_addr + reg) as *mut u32 };
+    flush_everything_before_write(ptr.cast());
+    unsafe { core::ptr::write_volatile(ptr, val) };
+    flush_everything_after_write(ptr.cast());
 }
 
 pub fn get_dwc_ptr(offset: usize) -> *mut u32 {
