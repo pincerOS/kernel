@@ -8,6 +8,7 @@
  */
 use crate::device::usb;
 
+use crate::device::usb::hcd::dwc::dwc_otgreg::HCINT_FRMOVRUN;
 use crate::device::usb::UsbSendInterruptMessage;
 use usb::dwc_hub;
 use usb::hcd::dwc::dwc_otg::HcdUpdateTransferSize;
