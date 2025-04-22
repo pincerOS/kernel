@@ -260,7 +260,9 @@ pub unsafe fn HcdTransmitChannel(device: &UsbDevice, channel: u8, buffer: *mut u
             );
         }
 
-        let dma_address = 0x2FF0000 + 0x1000 * channel as usize;
+        let dma_base_phys = 0x2FF0000;
+        let dma_base_gpu = dma_base_phys | 0xC0000000;
+        let dma_address = dma_base_gpu + 0x1000 * channel as usize;
         let dma_loc = dwc_sc.dma_loc + 0x1000 * channel as usize;
         //copy from buffer to dma_loc for 32 bytes
         memory_copy(dma_loc as *mut u8, buffer, 100);
@@ -924,7 +926,7 @@ pub unsafe fn HcdSubmitBulkMessage(
         device,
         &mut tempPipe,
         channel,
-        dwc_sc.dma_phys[channel as usize] as *mut u8,
+        dwc_sc.dma_gpu_addr[channel as usize] as *mut u8,
         buffer_length,
         packet_id,
     );
@@ -958,7 +960,7 @@ pub unsafe fn HcdSubmitInterruptMessage(
         _reserved: 0,
     };
 
-    let data_buffer = dwc_sc.dma_phys[channel as usize] as *mut u8;
+    let data_buffer = dwc_sc.dma_gpu_addr[channel as usize] as *mut u8;
     let result = HcdChannelSend(
         device,
         &mut tempPipe,
@@ -1322,21 +1324,22 @@ pub fn DwcInit(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
     let dwc_sc: &mut dwc_hub = &mut *bus.dwc_sc;
 
     unsafe {
-        let dma_address = 0x2FF0000;
-        use crate::memory::map_physical_noncacheable;
+        let dma_address_phys = 0x2FF0000;
+        let dma_address_gpu = dma_address_phys | 0xC0000000;
+        use crate::memory::map_device_block;
         let dma_loc =
-            map_physical_noncacheable(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
+            map_device_block(dma_address_phys, 0x1000 * ChannelCount).as_ptr() as usize;
             // map_device_block(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
         dwc_sc.dma_loc = dma_loc; //TODO: Temporay, move to somwhere elses
         println!(
             "| HCD: DMA address {:#x} mapped from {:#x} to {:#x}",
-            dma_address,
+            dma_address_gpu,
             dma_loc,
             dma_loc + 0x1000 * ChannelCount
         );
         for i in 0..ChannelCount {
             dwc_sc.dma_addr[i as usize] = dma_loc + (i * 0x1000);
-            dwc_sc.dma_phys[i as usize] = dma_address + (i * 0x1000);
+            dwc_sc.dma_gpu_addr[i as usize] = dma_address_gpu + (i * 0x1000);
         }
     }
 
@@ -1430,20 +1433,21 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     let dwc_sc: &mut dwc_hub = &mut *bus.dwc_sc;
 
     unsafe {
-        let dma_address = 0x2FF0000;
+        let dma_address_phys = 0x2FF0000;
+        let dma_address_gpu = dma_address_phys | 0xC0000000;
         use crate::memory::map_device_block;
         let dma_loc =
-            map_device_block(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
+            map_device_block(dma_address_phys, 0x1000 * ChannelCount).as_ptr() as usize;
         dwc_sc.dma_loc = dma_loc; //TODO: Temporay, move to somwhere elses
         println!(
             "| HCD: DMA address {:#x} mapped from {:#x} to {:#x}",
-            dma_address,
+            dma_address_gpu,
             dma_loc,
             dma_loc + 0x1000 * ChannelCount
         );
         for i in 0..ChannelCount {
             dwc_sc.dma_addr[i as usize] = dma_loc + (i * 0x1000);
-            dwc_sc.dma_phys[i as usize] = dma_address + (i * 0x1000);
+            dwc_sc.dma_gpu_addr[i as usize] = dma_address_gpu + (i * 0x1000);
         }
     }
 
@@ -1836,7 +1840,7 @@ pub struct dwc_hub {
     pub databuffer: [u8; 1024],
     pub phy_initialised: bool,
     pub dma_loc: usize,
-    pub dma_phys: [usize; ChannelCount],
+    pub dma_gpu_addr: [usize; ChannelCount],
     pub dma_addr: [usize; ChannelCount],
     pub channel: [host_channel; ChannelCount],
 }
@@ -1951,7 +1955,7 @@ impl dwc_hub {
             databuffer: [0; 1024],
             phy_initialised: false,
             dma_loc: 0,
-            dma_phys: [0; ChannelCount],
+            dma_gpu_addr: [0; ChannelCount],
             dma_addr: [0; ChannelCount],
             channel: [host_channel::default(); ChannelCount],
         }

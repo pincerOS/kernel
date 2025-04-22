@@ -298,6 +298,7 @@ impl VideoCoreMailbox {
         assert!(addr <= u32::MAX as u64 && addr % 16 == 0);
         assert!(channel as u32 <= Self::CHANNEL_MASK);
 
+        let addr = addr | 0xC0000000; // Tell the GPU to treat it as non-cacheable
         let value = (addr as u32 & !Self::CHANNEL_MASK) | (channel as u32 & Self::CHANNEL_MASK);
 
         // TODO: are mailbox messages 1-to-1, or can there be spurious
