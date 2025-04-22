@@ -58,14 +58,19 @@ pub fn UsbInitialise(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
     }
 
     println!("| HcdInitialize");
-    if HcdInitialize(bus, base_addr) != ResultCode::OK {
-        println!("Error: HcdInitialize failed");
-        return ResultCode::ErrorDevice;
-    }
+    // if HcdInitialize(bus, base_addr) != ResultCode::OK {
+    //     println!("Error: HcdInitialize failed");
+    //     return ResultCode::ErrorDevice;
+    // }
 
-    println!("| HcdStart");
-    if HcdStart(bus) != ResultCode::OK {
-        println!("Error: HcdStart failed");
+    // println!("| HcdStart");
+    // if HcdStart(bus) != ResultCode::OK {
+    //     println!("Error: HcdStart failed");
+    //     return ResultCode::ErrorDevice;
+    // }
+    
+    if DwcInit(bus, base_addr) != ResultCode::OK {
+        println!("Error: DwcInit failed");
         return ResultCode::ErrorDevice;
     }
 

@@ -26,6 +26,7 @@ use crate::device::usb::usbd::descriptors::*;
 use crate::device::usb::usbd::device::*;
 use crate::device::usb::usbd::pipe::*;
 use crate::device::usb::usbd::request::*;
+use crate::sync::init;
 
 use core::cmp::min;
 use core::mem::size_of;
@@ -278,22 +279,33 @@ pub unsafe fn HcdProcessRootHubMessage(
                 0x23 => {
                     match request.value {
                         4 => {
-                            //FeatureReset
-                            let mut pwr = read_volatile(DOTG_PCGCCTL);
-                            pwr &= !(1 << 5);
-                            pwr &= !(1 << 0);
-                            write_volatile(DOTG_PCGCCTL, pwr);
-                            write_volatile(DOTG_PCGCCTL, 0);
+                            println!("Roothub Exec: Port Reset");
+                            
+                            let hprt = read_volatile(DOTG_HPRT);
+                            write_volatile(DOTG_HPRT, hprt | HPRT_PRTRST);
 
-                            let mut hprt = read_volatile(DOTG_HPRT);
-                            hprt &= !HPRT_PRTSUSP;
-                            hprt |= HPRT_PRTRST;
-                            hprt |= HPRT_PRTPWR;
-                            write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x1180));
-                            micro_delay(60000);
+                            micro_delay(ms_to_micro(63));
 
-                            hprt &= !HPRT_PRTRST;
-                            write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x1000));
+                            write_volatile(DOTG_HPRT, hprt);
+                            micro_delay(ms_to_micro(63));
+
+                            init_fifo();
+                            // //FeatureReset
+                            // let mut pwr = read_volatile(DOTG_PCGCCTL);
+                            // pwr &= !(1 << 5);
+                            // pwr &= !(1 << 0);
+                            // write_volatile(DOTG_PCGCCTL, pwr);
+                            // write_volatile(DOTG_PCGCCTL, 0);
+
+                            // let mut hprt = read_volatile(DOTG_HPRT);
+                            // hprt &= !HPRT_PRTSUSP;
+                            // hprt |= HPRT_PRTRST;
+                            // hprt |= HPRT_PRTPWR;
+                            // write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x1180));
+                            // micro_delay(60000);
+
+                            // hprt &= !HPRT_PRTRST;
+                            // write_volatile(DOTG_HPRT, hprt & (0x1f140 | 0x1000));
                         }
                         8 => {
                             //FeaturePower

@@ -420,11 +420,13 @@ pub fn HcdChannelSendWaitOne(
                 let gintsts = read_volatile(DOTG_GINTSTS);
                 let haint = read_volatile(DOTG_HAINT);
                 let hcint = read_volatile(DOTG_HCINT(channel as usize));
+                let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
 
                 println!("| HCD hprt: {:#x}", hprt);
                 println!("| HCD gintsts: {:#x}", gintsts);
                 println!("| HCD haint: {:#x}", haint);
                 println!("| HCD hcint: {:#x}", hcint);
+                println!("| HCD hcchar: {:#x}", hcchar);
                 println!("| HCD channel: {:#x}", channel);
 
                 device.error = UsbTransferError::ConnectionError;
@@ -1220,6 +1222,160 @@ fn HcdReceiveFifoFlush() -> ResultCode {
     return ResultCode::OK;
 }
 
+pub fn ms_to_micro(ms: u32) -> u32 {
+    return ms * 1000;
+}
+
+pub fn init_fifo() -> ResultCode{
+    let cfg3 = read_volatile(DOTG_GHWCFG3);
+    let mut fifo_size = 4 * (cfg3 >> 16);
+
+    let fifo_regs = 4 * 16;
+    if fifo_size < fifo_regs {
+        panic!("| HCD ERROR: FIFO size is too small");
+    }
+
+    fifo_size -= fifo_regs;
+    fifo_size /= 2;
+    fifo_size &= !3;
+
+    write_volatile(DOTG_GRXFSIZ, fifo_size);
+    let mut tx_start = fifo_size;
+    fifo_size /= 2;
+
+    write_volatile(DOTG_GNPTXFSIZ, ((fifo_size / 4) << 16) | (tx_start / 4));
+    tx_start += fifo_size;
+
+    write_volatile(DOTG_HPTXFSIZ, ((fifo_size / 4) << 16) | (tx_start / 4));
+
+    write_volatile(DOTG_GINTMSK, GINTMSK_HCHINTMSK);
+
+    if HcdTransmitFifoFlush(CoreFifoFlush::FlushAll) != ResultCode::OK {
+        return ResultCode::ErrorDevice;
+    }
+
+    if HcdReceiveFifoFlush() != ResultCode::OK {
+        return ResultCode::ErrorDevice;
+    }
+
+    ResultCode::OK
+}
+
+pub fn DwcInit(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
+    unsafe {
+        dwc_otg_driver = DWC_OTG::init(base_addr);
+    }
+
+    if mbox_set_power_on() != ResultCode::OK {
+        return ResultCode::ErrorDevice;
+    }
+
+    let dwc_sc: &mut dwc_hub = &mut *bus.dwc_sc;
+
+    unsafe {
+        let dma_address = 0x2FF0000;
+        use crate::memory::map_physical_noncacheable;
+        let dma_loc =
+            map_physical_noncacheable(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
+        dwc_sc.dma_loc = dma_loc; //TODO: Temporay, move to somwhere elses
+        println!(
+            "| HCD: DMA address {:#x} mapped from {:#x} to {:#x}",
+            dma_address,
+            dma_loc,
+            dma_loc + 0x1000 * ChannelCount
+        );
+        for i in 0..ChannelCount {
+            dwc_sc.dma_addr[i as usize] = dma_loc + (i * 0x1000);
+            dwc_sc.dma_phys[i as usize] = dma_address + (i * 0x1000);
+        }
+    }
+
+    dwc_otg_register_interrupt_handler();
+
+    let vendor_id = read_volatile(DOTG_GSNPSID);
+    let user_id = read_volatile(DOTG_GUID);
+
+    println!("| HCD: Vendor ID: {:#x} User ID: {:#x}", vendor_id, user_id);
+
+    let version = read_volatile( DOTG_GSNPSID);
+    println!("| HCD: Version: {:#x}", version);
+
+    //disconnect
+    write_volatile(DOTG_DCTL, DCTL_SFTDISCON);
+
+    //wait for disconnect
+    micro_delay(ms_to_micro(32));
+
+    write_volatile(DOTG_GRSTCTL, GRSTCTL_CSFTRST);
+
+    //wait for reset
+    micro_delay(ms_to_micro(10));
+
+    write_volatile(DOTG_GUSBCFG, GUSBCFG_FORCEHOSTMODE);
+    write_volatile(DOTG_GOTGCTL, 0);
+
+    //clear global NAK
+    write_volatile(DOTG_DCTL, DCTL_CGOUTNAK | DCTL_CGNPINNAK);
+
+    //disable usb port
+    write_volatile(DOTG_PCGCCTL, 0xFFFFFFFF);
+
+    micro_delay(ms_to_micro(10));
+
+    //enable usb port
+    write_volatile(DOTG_PCGCCTL, 0);
+    micro_delay(ms_to_micro(10));
+
+    if init_fifo() != ResultCode::OK {
+        println!("| HCD ERROR: Failed to init FIFO");
+        return ResultCode::ErrorDevice;
+    }
+
+    //setup clock
+    let mut hcfg = read_volatile(DOTG_HCFG);
+    hcfg &= !(HCFG_FSLSSUPP | HCFG_FSLSPCLKSEL_MASK);
+    hcfg |= (1 << HCFG_FSLSPCLKSEL_SHIFT) | HCFG_FSLSSUPP;
+    //Host clock: 30-60Mhz
+    write_volatile(DOTG_HCFG, hcfg);
+
+    write_volatile(DOTG_GAHBCFG, GAHBCFG_GLBLINTRMSK);
+
+    let mut hport = read_volatile(DOTG_HPRT);
+    if (hport & HPRT_PRTPWR) == 0 {
+        println!("| HCD Powering on port");
+        hport |= HPRT_PRTPWR;
+        write_volatile(DOTG_HPRT, hport);
+        micro_delay(10000);
+    }
+
+    //Enable DMA
+    let mut gahbcfg = read_volatile(DOTG_GAHBCFG);
+    gahbcfg |= GAHBCFG_DMAEN | GAHBCFG_GLBLINTRMSK;
+    gahbcfg &= !(1 << 23);
+    write_volatile(DOTG_GAHBCFG, gahbcfg);
+
+    let hcfg = read_volatile(DOTG_HCFG);
+    let h_dmaen = hcfg & (1 << 23);
+    let cfg4 = read_volatile(DOTG_GHWCFG4);
+    let c_dmad = cfg4 & (1 << 31);
+    let c_dmaen = cfg4 & (1 << 30);
+    let gahbcfg = read_volatile(DOTG_GAHBCFG);
+    let g_dmaen = gahbcfg & GAHBCFG_DMAEN;
+    let gsnpsid = read_volatile(DOTG_GSNPSID);
+
+    println!(
+        "| HCD: DMA enabled: {}, DMA description: {}, dma en {}, gdmaen {}, GSNPSID: {:#x}",
+        h_dmaen,
+        c_dmad,
+        c_dmaen,
+        g_dmaen,
+        gsnpsid & 0xfff
+    );
+
+    ResultCode::OK
+}
+
+
 pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     let dwc_sc: &mut dwc_hub = &mut *bus.dwc_sc;
 
@@ -1422,7 +1578,7 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     }
 
     write_volatile(DOTG_GINTSTS, 0xFFFFFFFF);
-    dwc_otg_register_interrupt_handler();
+    
 
     micro_delay(10000);
     write_volatile(DOTG_GINTMSK, GINTMSK_HCHINTMSK);
@@ -1431,14 +1587,14 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     write_volatile(DOTG_GAHBCFG, GAHBCFG_GLBLINTRMSK);
 
 
-    hport = read_volatile(DOTG_HPRT);
-    hport |= HPRT_PRTRST;
-    write_volatile(DOTG_HPRT, hport);
+    // hport = read_volatile(DOTG_HPRT);
+    // hport |= HPRT_PRTRST;
+    // write_volatile(DOTG_HPRT, hport);
 
-    micro_delay(50000);
-    hport &= !HPRT_PRTRST;
-    write_volatile(DOTG_HPRT, hport);
-    micro_delay(50000);
+    // micro_delay(50000);
+    // hport &= !HPRT_PRTRST;
+    // write_volatile(DOTG_HPRT, hport);
+    // micro_delay(50000);
 
     return ResultCode::OK;
 }
