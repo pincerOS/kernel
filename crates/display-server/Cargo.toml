@@ -12,6 +12,7 @@ thunderdome = { version = "0.6", default-features = false }
 display-proto = { path = "../display-proto" }
 ulib = { path = "../ulib", features = ["heap-impl"] }
 gfx = { path = "../gfx" }
+lz4 = { path = "../lz4" }
 
 [dev-dependencies]
 ulib = { path = "../ulib", features = ["test"] }

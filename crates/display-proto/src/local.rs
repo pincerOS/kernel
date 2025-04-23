@@ -74,4 +74,16 @@ impl BufferHandle {
     pub fn get_sem_fd(&self, sem: SemDescriptor) -> u32 {
         self.fds[sem.0 as usize]
     }
+
+    pub fn set_title(&mut self, title: &[u8]) {
+        let truncated_len = title.len().min(7 * 8 - 1);
+        let mut title_event = super::TitleEvent {
+            len: truncated_len as u8,
+            data: [0; 7 * 8 - 1],
+        };
+        title_event.data[..truncated_len].copy_from_slice(&title[..truncated_len]);
+        self.client_to_server_queue()
+            .try_send_data(title_event)
+            .ok();
+    }
 }

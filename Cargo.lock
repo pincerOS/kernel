@@ -65,6 +65,7 @@ dependencies = [
  "gfx",
  "glam",
  "linked_list_allocator",
+ "lz4",
  "thunderdome",
  "ulib",
 ]
