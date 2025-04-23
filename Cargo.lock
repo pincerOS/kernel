@@ -167,6 +167,18 @@ name = "lz4"
 version = "0.1.0"
 
 [[package]]
+name = "paint"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "display-client",
+ "gfx",
+ "glam",
+ "lz4",
+ "ulib",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
