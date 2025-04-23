@@ -24,7 +24,9 @@ impl Device for CDCECM {
 
     // fn recv(&mut self, buffer: &mut [u8], buffer_len: u32) -> Result<usize> {
     fn recv(&mut self, buffer: &mut [u8], buffer_len: u32) {
-        NetReceive(buffer.as_mut_ptr(), buffer_len);
+        unsafe {
+            NetReceive(buffer.as_mut_ptr(), buffer_len);
+        }
     }
 
     fn mtu(&self) -> usize {
