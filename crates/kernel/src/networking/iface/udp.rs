@@ -1,6 +1,6 @@
 use crate::networking::iface::*;
 use crate::networking::repr::*;
-use crate::networking::socket::{SocketAddr, TaggedSocket};
+use crate::networking::socket::SocketAddr;
 use crate::networking::Result;
 
 use crate::device::usb::device::net::interface as get_interface;
@@ -45,7 +45,7 @@ pub fn recv_udp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Re
 
     for (_, socket) in &mut interface.sockets {
         if socket.binding_equals(local_socket_addr) {
-            socket.recv_enqueue(0, 0, 0, udp_packet.payload.clone(), sender_socket_addr);
+            let _ = socket.recv_enqueue(0, 0, 0, udp_packet.payload.clone(), sender_socket_addr);
         }
     }
 
@@ -54,7 +54,7 @@ pub fn recv_udp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Re
         && (&udp_packet.payload[236..240] == &[0x63, 0x82, 0x53, 0x63])
     {
         let dhcp_packet = DhcpPacket::deserialize(udp_packet.payload.as_slice()).unwrap();
-        interface
+        let _ = interface
             .dhcp
             .process_dhcp_packet(get_interface(), dhcp_packet);
     }

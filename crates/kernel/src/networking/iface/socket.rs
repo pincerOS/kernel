@@ -4,7 +4,7 @@ use crate::sync;
 
 pub fn socket_send_loop() {
     for (_, socket) in &mut interface().sockets {
-        socket.send();
+        let _ = socket.send();
     }
 
     // WARN: this is not good

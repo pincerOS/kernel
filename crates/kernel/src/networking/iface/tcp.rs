@@ -1,6 +1,6 @@
 use crate::networking::iface::*;
 use crate::networking::repr::*;
-use crate::networking::socket::{SocketAddr, TaggedSocket};
+use crate::networking::socket::SocketAddr;
 use crate::networking::Result;
 
 use alloc::vec::Vec;
@@ -57,7 +57,7 @@ pub fn recv_tcp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Re
 
     for (_, socket) in &mut interface.sockets {
         if socket.binding_equals(local_socket_addr) {
-            socket.recv_enqueue(
+            let _ = socket.recv_enqueue(
                 tcp_packet.seq_number,
                 tcp_packet.ack_number,
                 tcp_packet.flags,

@@ -1,6 +1,5 @@
 use byteorder::{ByteOrder, NetworkEndian};
 
-use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::networking::utils::checksum::internet_checksum;

@@ -82,7 +82,7 @@ impl TaggedSocket {
     pub fn connect(&mut self, saddr: SocketAddr) -> Result<()> {
         match self {
             // TaggedSocket::Raw(socket) => socket.recv(),
-            TaggedSocket::Udp(socket) => Err(Error::Ignored),
+            TaggedSocket::Udp(_socket) => Err(Error::Ignored),
             TaggedSocket::Tcp(socket) => socket.connect(saddr),
         }
     }
@@ -90,7 +90,7 @@ impl TaggedSocket {
     pub fn listen(&mut self, num_req: usize) -> Result<()> {
         match self {
             // TaggedSocket::Raw(socket) => socket.recv(),
-            TaggedSocket::Udp(socket) => Err(Error::Ignored),
+            TaggedSocket::Udp(_socket) => Err(Error::Ignored),
             TaggedSocket::Tcp(socket) => socket.listen(num_req),
         }
     }
@@ -98,7 +98,7 @@ impl TaggedSocket {
     pub fn accept(&mut self) -> Result<SocketAddr> {
         match self {
             // TaggedSocket::Raw(socket) => socket.recv(),
-            TaggedSocket::Udp(socket) => Err(Error::Ignored),
+            TaggedSocket::Udp(_socket) => Err(Error::Ignored),
             TaggedSocket::Tcp(socket) => socket.accept(),
         }
     }

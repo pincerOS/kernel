@@ -1,5 +1,4 @@
 use crate::networking::iface::udp;
-use crate::networking::repr::{Ipv4Packet, Ipv4Protocol, UdpPacket};
 use crate::networking::socket::bindings::NEXT_SOCKETFD;
 use crate::networking::socket::tagged::TaggedSocket;
 use crate::networking::socket::SocketAddr;
@@ -7,11 +6,10 @@ use crate::networking::utils::ring::Ring;
 use crate::networking::{Error, Result};
 
 use crate::device::usb::device::net::interface;
-use crate::event::thread;
 
 use alloc::vec;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU16, Ordering};
+use core::sync::atomic::Ordering;
 
 fn new_ring_packet_buffer(capacity: usize) -> Ring<(Vec<u8>, SocketAddr)> {
     let default_entry = (Vec::new(), SocketAddr::default()); // or some placeholder address
@@ -82,7 +80,7 @@ impl UdpSocket {
                 (payload.clone(), *addr)
             }) {
                 Ok((payload, dest)) => {
-                    udp::send_udp_packet(
+                    let _ = udp::send_udp_packet(
                         interface(),
                         dest.addr,
                         payload,
