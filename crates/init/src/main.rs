@@ -37,17 +37,26 @@ pub extern "C" fn main() {
 
     for _ in 0..4 {
         let console_path = "console.elf".as_bytes();
+        let shell_path = "shell".as_bytes();
+
         spawn_elf(&ulib::sys::SpawnArgs {
             fd: ulib::sys::openat(root_fd, console_path, 0, 0).unwrap(),
             stdin: None,
             stdout: None,
             stderr: None,
-            args: &[ArgStr {
-                len: console_path.len(),
-                ptr: console_path.as_ptr(),
-            }],
+            args: &[
+                ArgStr {
+                    len: console_path.len(),
+                    ptr: console_path.as_ptr(),
+                },
+                ArgStr {
+                    len: shell_path.len(),
+                    ptr: shell_path.as_ptr(),
+                },
+            ],
         })
         .unwrap();
+
         unsafe { sys_sleep_ms(1000) };
     }
 

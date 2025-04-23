@@ -230,15 +230,28 @@ impl WindowManager {
         self.active = Some(window);
     }
 
-    fn alt_tab(&mut self) {
+    fn alt_tab(&mut self, reverse: bool) {
         if self.layering.is_empty() {
             self.active = None;
         } else {
-            let old = self.active.map(|i| i.slot()).unwrap_or(0);
-            for i in (old + 1..self.windows.capacity() as u32).chain(0..=old) {
-                if let Some(idx) = self.windows.contains_slot(i) {
-                    self.select_window(idx);
-                    break;
+            if reverse {
+                let old = self.active.map(|i| i.slot()).unwrap_or(0);
+                for i in (0..old)
+                    .rev()
+                    .chain((old..self.windows.capacity() as u32).rev())
+                {
+                    if let Some(idx) = self.windows.contains_slot(i) {
+                        self.select_window(idx);
+                        break;
+                    }
+                }
+            } else {
+                let old = self.active.map(|i| i.slot()).unwrap_or(0);
+                for i in (old + 1..self.windows.capacity() as u32).chain(0..=old) {
+                    if let Some(idx) = self.windows.contains_slot(i) {
+                        self.select_window(idx);
+                        break;
+                    }
                 }
             }
             // active = (active + 1) % clients.len();
@@ -390,7 +403,8 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
             window_manager.windows[window].client = idx;
         }
 
-        intermediate_fb.fill(0);
+        let bg_color = 0xFFC8FFFF;
+        intermediate_fb.fill(0x00000001000000010000000100000001 * bg_color);
 
         // TODO: better scheduling for this
         loop {
@@ -405,10 +419,12 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
             let code = remap_keycode(code);
 
             match (code, pressed) {
-                (proto::ScanCode::TAB, true) => {
-                    // TODO: modifiers
-                    window_manager.alt_tab();
-                    continue;
+                (ScanCode::TAB, true) => {
+                    if modifiers.alt_pressed() {
+                        let reverse = modifiers.shift_pressed();
+                        window_manager.alt_tab(reverse);
+                        continue;
+                    }
                 }
                 (ScanCode::LEFT_SHIFT, p) => modifiers.set(Modifiers::L_SHIFT, p),
                 (ScanCode::RIGHT_SHIFT, p) => modifiers.set(Modifiers::R_SHIFT, p),
@@ -418,7 +434,52 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                 (ScanCode::RIGHT_ALT, p) => modifiers.set(Modifiers::R_ALT, p),
                 (ScanCode::LEFT_SUPER, p) => modifiers.set(Modifiers::L_SUPER, p),
                 (ScanCode::RIGHT_SUPER, p) => modifiers.set(Modifiers::R_SUPER, p),
+                (ScanCode::T, true) if modifiers.ctrl_pressed() && modifiers.alt_pressed() => {
+                    spawn_console();
+                }
                 _ => (),
+            }
+
+            // TODO: key repeat???
+
+            if let Some(active) = window_manager.active {
+                let window = &mut window_manager.windows[active];
+
+                let move_scale = if modifiers.shift_pressed() {
+                    128
+                } else if modifiers.alt_pressed() {
+                    1
+                } else {
+                    16
+                };
+
+                match (code, pressed) {
+                    (ScanCode::LEFT, true) if modifiers.super_pressed() => {
+                        window.pos.x = window.pos.x.saturating_sub(move_scale);
+                        continue;
+                    }
+                    (ScanCode::RIGHT, true) if modifiers.super_pressed() => {
+                        window.pos.x = (window.pos.x)
+                            .saturating_add(move_scale)
+                            .min(fb.width as u16 - 1);
+                        continue;
+                    }
+                    (ScanCode::UP, true) if modifiers.super_pressed() => {
+                        window.pos.y = window.pos.y.saturating_sub(move_scale);
+                        continue;
+                    }
+                    (ScanCode::DOWN, true) if modifiers.super_pressed() => {
+                        window.pos.y = (window.pos.y)
+                            .saturating_add(move_scale)
+                            .min(fb.height as u16 - 1);
+                        continue;
+                    }
+                    (ScanCode::F4, true) if modifiers.alt_pressed() => {
+                        window_manager.request_close.push(active);
+                        continue;
+                    }
+                    _ => (),
+                };
             }
 
             if let Some(active) = window_manager.active {
@@ -733,6 +794,22 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
     }
 }
 
+fn spawn_console() {
+    let path = b"/console.elf";
+    let file = ulib::sys::openat(3, path, 0, 0).unwrap();
+    ulib::sys::spawn_elf(&ulib::sys::SpawnArgs {
+        fd: file,
+        stdin: None,
+        stdout: None,
+        stderr: None,
+        args: &[ulib::sys::ArgStr {
+            len: path.len(),
+            ptr: path.as_ptr(),
+        }],
+    })
+    .unwrap();
+}
+
 fn remap_keycode(code: isize) -> proto::ScanCode {
     use proto::ScanCode;
     match code {
@@ -794,9 +871,16 @@ fn remap_keycode(code: isize) -> proto::ScanCode {
         0x3A => ScanCode::F1,
         0x3B => ScanCode::F2,
         0x3C => ScanCode::F3,
-        // ...
+        0x3D => ScanCode::F4,
+        0x3E => ScanCode::F5,
+        0x3F => ScanCode::F6,
+        0x40 => ScanCode::F7,
+        0x41 => ScanCode::F8,
+        0x42 => ScanCode::F9,
+        0x43 => ScanCode::F10,
+        0x44 => ScanCode::F11,
         0x45 => ScanCode::F12,
-        // 0x46 => ScanCode::PRINT_SCREEN
+        // 0x46 => ScanCode::PRINT_SCREEN,
         0x47 => ScanCode::SCROLL_LOCK,
         0x48 => ScanCode::PAUSE,
         0x49 => ScanCode::INSERT,
