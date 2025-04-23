@@ -203,6 +203,10 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                 unsafe { ptr.write_volatile(*arg_ptr) };
             }
             argv = user_sp;
+
+            // TODO: make sure this is correct for mlibc; align the stack to 16 bytes
+            // for ldp/stp
+            user_sp &= !0b1111;
             user_sp -= core::mem::size_of::<usize>();
             let ptr = (user_sp) as *mut usize;
             // println!("Writing argv {} at addr {:p}", argv, user_sp as *const usize);
