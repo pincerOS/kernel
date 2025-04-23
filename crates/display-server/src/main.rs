@@ -7,6 +7,7 @@ extern crate display_proto as proto;
 #[macro_use]
 extern crate ulib;
 
+use alloc::string::String;
 use alloc::vec::Vec;
 use proto::BufferHandle;
 use thunderdome::{Arena, Index};
@@ -23,6 +24,7 @@ struct BufferInfo {
 
 struct Client {
     handle: BufferHandle,
+    title: String,
     present_ready: bool,
 }
 
@@ -76,6 +78,7 @@ fn handle_incoming(
     let client = Client {
         handle,
         present_ready: false,
+        title: String::new(),
     };
     (window, client)
 }
@@ -321,6 +324,16 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
         load_image(include_bytes!("../assets/close-pressed.qoi"));
     assert!(close_height == close2_height && close_width == close2_width);
 
+    let compressed_font = include_bytes_align!(u32, "../../console/ctrld-fixed-10r.pcf.lz4");
+    let size = lz4::frame::read_frame(compressed_font)
+        .unwrap()
+        .0
+        .content_size()
+        .unwrap();
+    let mut font_data = alloc::vec![0; size as usize];
+    let font_data = lz4::decode_into(compressed_font, &mut font_data).unwrap();
+    let font = gfx::format::pcf::load_pcf(font_data).unwrap();
+
     let mut to_remove = Vec::<Index>::new();
 
     let mut intermediate_fb = alloc::vec![0u128; fb.data.len()];
@@ -447,6 +460,7 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
         }
 
         for (i, client) in clients.iter_mut() {
+            use proto::EventData;
             let mut ev_limit = 10;
             while let Some(msg) = client.handle.client_to_server_queue().try_recv() {
                 if ev_limit == 0 {
@@ -455,15 +469,21 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                 ev_limit -= 1;
                 match msg.kind {
                     proto::EventKind::PRESENT => {
-                        // HACK: treat newest window as active
-                        use proto::EventData;
                         let proto::PresentEvent = proto::PresentEvent::parse(&msg).unwrap();
                         client.present_ready = true;
                         any_updated = true;
                     }
+                    proto::EventKind::TITLE => {
+                        let proto::TitleEvent { len, data } =
+                            proto::TitleEvent::parse(&msg).unwrap();
+                        let buf = &data[..(len as usize).min(data.len())];
+                        client.title = alloc::string::String::from_utf8_lossy(buf).into_owned();
+                        println!("Updated title: {:?}", client.title);
+                        any_updated = true;
+                    }
                     proto::EventKind::DISCONNECT => {
                         // TODO: auto-disconnect on process exit?
-                        println!("Client {:?} disconnected.", i);
+                        println!("[disp] client {:?} disconnected.", i);
                         to_remove.push(i);
                         break;
                     }
@@ -475,6 +495,7 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
         }
 
         let title_height = 12;
+        let title_fg_color = 0xFF000000;
         let title_bg_color_active = 0xFFFFFFFF;
         let title_bg_color_inactive = 0xFFCCCCCC;
 
@@ -529,6 +550,19 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
             }
 
             let out = bytemuck::cast_slice_mut::<_, u32>(&mut intermediate_fb);
+            let buf = &mut out
+                [window_y * fb.stride..(window_y + title_height).min(fb.height) * fb.stride];
+            let title_start = (fb.stride * 2) + window_x + 2;
+            font.draw_string(
+                &client.title,
+                buf,
+                title_start,
+                Some(effective_width.saturating_sub(2)),
+                fb.stride,
+                1,
+                title_fg_color,
+            );
+
             // Draw close button
 
             let close_pressed = match hovered {
