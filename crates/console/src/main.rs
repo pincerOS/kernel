@@ -15,10 +15,32 @@ mod vt100;
 use display_client::proto;
 use gfx::{color, format};
 
-use ulib::sys::{pipe, pwrite_all, spawn_elf, FileDesc, SpawnArgs};
+use ulib::sys::{pipe, pwrite_all, spawn_elf, ArgStr, FileDesc, SpawnArgs};
 
 #[no_mangle]
-pub extern "C" fn main() {
+fn main(argc: usize, argv: *const *const u8) {
+    let argv_array = unsafe { core::slice::from_raw_parts(argv, argc) };
+    let args = argv_array
+        .iter()
+        .copied()
+        .map(|arg| unsafe { core::ffi::CStr::from_ptr(arg) }.to_bytes())
+        .map(|arg| core::str::from_utf8(arg).unwrap())
+        .collect::<alloc::vec::Vec<_>>();
+
+    let remaining_args;
+    let mut scale = 1;
+
+    if let (Some("--scale"), Some(scale_str)) = (args.get(1).map(|s| *s), args.get(2)) {
+        if let Ok(s) = scale_str.parse::<usize>() {
+            scale = s;
+        }
+        remaining_args = &args[3..];
+    } else if args.len() > 0 {
+        remaining_args = &args[1..];
+    } else {
+        remaining_args = &[];
+    }
+
     // Useful font resources:
     // - https://adafruit.github.io/web-bdftopcf/
     // - https://github.com/Tecate/bitmap-fonts
@@ -31,10 +53,9 @@ pub extern "C" fn main() {
         .unwrap();
     let mut font_data = alloc::vec![0; size as usize];
     let font_data = lz4::decode_into(compressed_font, &mut font_data).unwrap();
-
     let font = format::pcf::load_pcf(font_data).unwrap();
 
-    let mut buf = display_client::connect(320, 240);
+    let mut buf = display_client::connect(320 * scale as u16, 240 * scale as u16);
 
     let (width, height) = (
         buf.video_meta.width as usize,
@@ -42,11 +63,9 @@ pub extern "C" fn main() {
     );
     let row_stride = buf.video_meta.row_stride as usize / 4;
 
-    println!("Filling screen");
     buf.video_mem().fill(color::rgba(0, 0, 0, 255));
 
     let char_dims = font.dimensions();
-    let scale = 1;
     let hpad = 2;
     let vpad = 0;
 
@@ -69,7 +88,20 @@ pub extern "C" fn main() {
     let mut editor = editor::LineEditor::new();
 
     let cwd = 3;
-    let fd = ulib::sys::openat(cwd, b"shell", 0, 0).unwrap();
+    let fd;
+
+    if remaining_args.len() > 1 {
+        fd = ulib::sys::openat(cwd, remaining_args[0].as_bytes(), 0, 0);
+    } else {
+        fd = ulib::sys::openat(cwd, b"/shell", 0, 0);
+    }
+    let fd = match fd {
+        Ok(f) => f,
+        Err(_) => {
+            println!("Failed to open executable.");
+            ulib::sys::exit(1);
+        }
+    };
 
     let (_shell, shell_stdin_tx, shell_stdout_rx) = {
         let (shell_stdin_rx, shell_stdin_tx) = pipe(0).unwrap();
@@ -77,7 +109,13 @@ pub extern "C" fn main() {
 
         let shell = spawn_elf(&SpawnArgs {
             fd,
-            args: &[],
+            args: &remaining_args
+                .iter()
+                .map(|a| ArgStr {
+                    len: a.len(),
+                    ptr: a.as_ptr(),
+                })
+                .collect::<alloc::vec::Vec<_>>(),
             stdin: Some(shell_stdin_rx),
             stdout: Some(shell_stdout_tx),
             stderr: Some(shell_stdout_tx),
