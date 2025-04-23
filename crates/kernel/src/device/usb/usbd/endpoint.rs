@@ -48,7 +48,7 @@ pub fn finish_bulk_endpoint_callback_in(
             "| Endpoint {} in: HCINT_NAK with transfer, aborting. hcint: {:x} last transfer: {}",
             channel, hcint, device.last_transfer
         );
-        return;
+        return; // WARN: aaron said to comment this out
     } else if hcint & HCINT_CHHLTD == 0 {
         panic!(
             "| Endpoint {} in: HCINT_CHHLTD not set, aborting. hcint: {:x} last transfer: {}",
