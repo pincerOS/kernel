@@ -45,10 +45,18 @@ pub fn finish_bulk_endpoint_callback_in(
         //     );
         // }
         println!(
-            "| Endpoint {} in: HCINT_NAK with transfer, aborting. hcint: {:x} last transfer: {}",
+            "| Endpoint {} in: HCINT_NAK with transfer hcint: {:x} last transfer: {}",
             channel, hcint, device.last_transfer
         );
-        return; // WARN: aaron said to comment this out
+
+        if device.last_transfer > 0 && (hcint & HCINT_CHHLTD == 0) && (hcint & HCINT_XFERCOMPL == 0) {
+            DwcActivateChannel(channel);
+
+            return false;
+        } else {
+            return true;
+        }
+        // return; // WARN: aaron said to comment this out
     } else if hcint & HCINT_CHHLTD == 0 {
         panic!(
             "| Endpoint {} in: HCINT_CHHLTD not set, aborting. hcint: {:x} last transfer: {}",
@@ -149,7 +157,8 @@ pub fn finish_interrupt_endpoint_callback(
 
     if hcint & HCINT_NAK != 0 {
         //NAK received, do nothing
-        assert_eq!(buffer_length, 0);
+        // assert_eq!(buffer_length, 0);
+        // println!("| Interrupt Endpoint {}: HCINT_NAK received hcint: {:x}.", channel, hcint);
     } else if hcint & HCINT_XFERCOMPL != 0 {
         //Transfer complete
         //copy from dma_addr to buffer
