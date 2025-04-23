@@ -62,7 +62,7 @@ pub fn rndis_initialize_msg(device: &mut UsbDevice) -> ResultCode {
     };
 
     if result != ResultCode::OK {
-        print!("| RNDIS: Failed to send initialize message.\n");
+        println!("| RNDIS: Failed to send initialize message.");
         return ResultCode::ErrorDevice;
     }
 
@@ -94,7 +94,7 @@ pub fn rndis_initialize_msg(device: &mut UsbDevice) -> ResultCode {
     };
 
     if result != ResultCode::OK {
-        print!("| RNDIS: Failed to receive initialize message.\n");
+        println!("| RNDIS: Failed to receive initialize message.");
         return ResultCode::ErrorDevice;
     }
 
@@ -143,7 +143,7 @@ pub unsafe fn rndis_query_msg(
     buffer_length: u32,
 ) -> ResultCode {
     if buffer_length < size_of::<RndisQueryMsgCmplt>() as u32 {
-        print!("| RNDIS: Buffer length is too small.\n");
+        println!("| RNDIS: Buffer length is too small.");
         return ResultCode::ErrorArgument;
     }
 
@@ -185,7 +185,7 @@ pub unsafe fn rndis_query_msg(
     };
 
     if result != ResultCode::OK {
-        print!("| RNDIS: Failed to send query message.\n");
+        println!("| RNDIS: Failed to send query message.");
         return ResultCode::ErrorDevice;
     }
 
@@ -217,7 +217,7 @@ pub unsafe fn rndis_query_msg(
     };
 
     if result != ResultCode::OK {
-        print!("| RNDIS: Failed to receive query message.\n");
+        println!("| RNDIS: Failed to receive query message.");
         return ResultCode::ErrorDevice;
     }
     // println!("| RNDIS: Received query message.");
@@ -297,7 +297,7 @@ pub fn rndis_set_msg(device: &mut UsbDevice, oid: OID, value: u32) {
     };
 
     if result != ResultCode::OK {
-        print!("| RNDIS: Failed to send set message.\n");
+        println!("| RNDIS: Failed to send set message.");
     }
 
     let buffer = &mut RndisSetMsgCmplt::default();
@@ -329,7 +329,7 @@ pub fn rndis_set_msg(device: &mut UsbDevice, oid: OID, value: u32) {
     };
 
     if result != ResultCode::OK {
-        print!("| RNDIS: Failed to receive set message.\n");
+        println!("| RNDIS: Failed to receive set message.");
     }
 
     // let msg_cmplt = unsafe { &*(buffer.as_mut_ptr() as *mut RndisSetMsgCmplt) };
@@ -404,7 +404,7 @@ pub unsafe fn rndis_send_packet(
     };
 
     if result != ResultCode::OK {
-        print!("| RNDIS: Failed to send packet message.\n");
+        println!("| RNDIS: Failed to send packet message.");
         return result;
     }
 
@@ -437,7 +437,7 @@ pub unsafe fn rndis_receive_packet(
     };
 
     if result != ResultCode::OK {
-        print!("| RNDIS: Failed to receive packet message.\n");
+        println!("| RNDIS: Failed to receive packet message.");
         return result;
     }
 

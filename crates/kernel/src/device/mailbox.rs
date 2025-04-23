@@ -226,27 +226,27 @@ define_property!(0x00038009 => struct PropSetTurbo {
 #[derive(Debug)]
 pub struct MailboxError;
 
-struct HexDisplay<'a, T>(&'a [T]);
+// struct HexDisplay<'a, T>(&'a [T]);
 
-impl<T: core::fmt::LowerHex> core::fmt::LowerHex for HexDisplay<'_, T> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let mut list = f.debug_list();
-        for i in self.0 {
-            list.entry(&format_args!("{:#x}", i));
-        }
-        list.finish()
-    }
-}
+// impl<T: core::fmt::LowerHex> core::fmt::LowerHex for HexDisplay<'_, T> {
+//     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+//         let mut list = f.debug_list();
+//         for i in self.0 {
+//             list.entry(&format_args!("{:#x}", i));
+//         }
+//         list.finish()
+//     }
+// }
 
-impl<T: core::fmt::UpperHex> core::fmt::UpperHex for HexDisplay<'_, T> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let mut list = f.debug_list();
-        for i in self.0 {
-            list.entry(&format_args!("{:#X}", i));
-        }
-        list.finish()
-    }
-}
+// impl<T: core::fmt::UpperHex> core::fmt::UpperHex for HexDisplay<'_, T> {
+//     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+//         let mut list = f.debug_list();
+//         for i in self.0 {
+//             list.entry(&format_args!("{:#X}", i));
+//         }
+//         list.finish()
+//     }
+// }
 
 impl VideoCoreMailbox {
     const MBOX_READ: usize = 0x00;

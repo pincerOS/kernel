@@ -113,11 +113,11 @@ pub fn dwc_otg_interrupt_handler(_ctx: &mut Context, _irq: usize) {
                             }
                         });
                     } else {
-                        println!("| DWC: No callback for channel {}.\n", i);
+                        println!("| DWC: No callback for channel {}.", i);
                         shutdown();
                     }
                 } else {
-                    println!("| DWC: No endpoint descriptor for channel {}.\n", i);
+                    println!("| DWC: No endpoint descriptor for channel {}.", i);
                     shutdown();
                 }
             }
@@ -250,7 +250,7 @@ fn HcdPrepareChannel(
 
     dwc_sc.channel[channel as usize].transfer_size.packet_id = packet_id;
     let hctsiz = convert_host_transfer_size(dwc_sc.channel[channel as usize].transfer_size);
-    // println!("| HCTSIZE {:#x}\n", hctsiz);
+    // println!("| HCTSIZE {:#x}", hctsiz);
     write_volatile(DOTG_HCTSIZ(channel as usize), hctsiz);
 
     return ResultCode::OK;
@@ -272,7 +272,7 @@ pub unsafe fn HcdTransmitChannel(device: &UsbDevice, channel: u8, buffer: *mut u
 
         if ((buffer as usize) & 3) != 0 {
             println!(
-                "HCD: Transfer buffer {:#x} is not DWORD aligned. Ignored, but dangerous.\n",
+                "HCD: Transfer buffer {:#x} is not DWORD aligned. Ignored, but dangerous.",
                 buffer as usize,
             );
         }
@@ -293,8 +293,8 @@ pub unsafe fn HcdTransmitChannel(device: &UsbDevice, channel: u8, buffer: *mut u
 
         let dma_buffer = (dma_address) as *mut u8;
         // let dma_buffer = buffer;
-        // println!("Buffer address: {:#x}\n", buffer as usize);
-        // println!("DMA buffer address: {:#x}\n", dma_buffer as usize);
+        // println!("Buffer address: {:#x}", buffer as usize);
+        // println!("DMA buffer address: {:#x}", dma_buffer as usize);
 
         dwc_sc.channel[channel as usize].dma_address = dma_buffer;
         write_volatile(DOTG_HCDMA(channel as usize), dma_buffer as u32);
@@ -324,25 +324,25 @@ fn HcdChannelInterruptToError(device: &mut UsbDevice, hcint: u32, isComplete: bo
 
     if hcint & HCINT_AHBERR != 0 {
         device.error = UsbTransferError::AhbError;
-        println!("| HCD: AHB error on channel {}\n", device.last_transfer);
+        println!("| HCD: AHB error on channel {}", device.last_transfer);
         return ResultCode::ErrorDevice;
     }
 
     if hcint & HCINT_STALL != 0 {
         device.error = UsbTransferError::Stall;
-        println!("| HCD: Stall on channel {}\n", device.last_transfer);
+        println!("| HCD: Stall on channel {}", device.last_transfer);
         return ResultCode::ErrorDevice;
     }
 
     if hcint & HCINT_NAK != 0 {
         device.error = UsbTransferError::NoAcknowledge;
-        println!("| HCD: NAK on channel {}\n", device.last_transfer);
+        println!("| HCD: NAK on channel {}", device.last_transfer);
         return ResultCode::ErrorDevice;
     }
 
     if hcint & HCINT_ACK == 0 {
         println!(
-            "| HCD: ACK not received on channel {}\n",
+            "| HCD: ACK not received on channel {}",
             device.last_transfer
         );
         result = ResultCode::ErrorTimeout;
@@ -350,26 +350,26 @@ fn HcdChannelInterruptToError(device: &mut UsbDevice, hcint: u32, isComplete: bo
 
     if hcint & HCINT_NYET != 0 {
         device.error = UsbTransferError::NotYetError;
-        println!("| HCD: NYET on channel {}\n", device.last_transfer);
+        println!("| HCD: NYET on channel {}", device.last_transfer);
         return ResultCode::ErrorDevice;
     }
 
     if hcint & HCINT_BBLERR != 0 {
         device.error = UsbTransferError::Babble;
-        println!("| HCD: Babble on channel {}\n", device.last_transfer);
+        println!("| HCD: Babble on channel {}", device.last_transfer);
         return ResultCode::ErrorDevice;
     }
 
     if hcint & HCINT_FRMOVRUN != 0 {
         device.error = UsbTransferError::BufferError;
-        println!("| HCD: Frame overrun on channel {}\n", device.last_transfer);
+        println!("| HCD: Frame overrun on channel {}", device.last_transfer);
         return ResultCode::ErrorDevice;
     }
 
     if hcint & HCINT_DATATGLERR != 0 {
         device.error = UsbTransferError::BitError;
         println!(
-            "| HCD: Data toggle error on channel {}\n",
+            "| HCD: Data toggle error on channel {}",
             device.last_transfer
         );
         return ResultCode::ErrorDevice;
@@ -378,7 +378,7 @@ fn HcdChannelInterruptToError(device: &mut UsbDevice, hcint: u32, isComplete: bo
     if hcint & HCINT_XACTERR != 0 {
         device.error = UsbTransferError::ConnectionError;
         println!(
-            "| HCD: Transaction error on channel {}\n",
+            "| HCD: Transaction error on channel {}",
             device.last_transfer
         );
         return ResultCode::ErrorDevice;
@@ -386,7 +386,7 @@ fn HcdChannelInterruptToError(device: &mut UsbDevice, hcint: u32, isComplete: bo
 
     if hcint & HCINT_XFERCOMPL == 0 && isComplete {
         println!(
-            "| HCD: Transfer not complete on channel {}\n",
+            "| HCD: Transfer not complete on channel {}",
             device.last_transfer
         );
         result = ResultCode::ErrorTimeout;
@@ -448,7 +448,7 @@ pub fn HcdChannelSendWaitOne(
                 break;
             }
         }
-        // println!("| HCD: Channel interrupt {:#x}\n", hcint);
+        // println!("| HCD: Channel interrupt {:#x}", hcint);
 
         let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
         convert_into_host_transfer_size(
@@ -550,7 +550,7 @@ pub fn HcdChannelSendWaitOne(
 
                 result = HcdChannelInterruptToError(device, hcint, false);
                 if result != ResultCode::OK {
-                    println!("| HCD: Request split completion to failed.\n");
+                    println!("| HCD: Request split completion to failed.");
                     return result;
                 }
             } else if hcint & HCINT_NAK != 0 {
@@ -568,7 +568,7 @@ pub fn HcdChannelSendWaitOne(
                 !dwc_sc.channel[channel as usize].split_control.SplitEnable,
             );
             if result != ResultCode::OK {
-                println!("HCD: Request to failed.\n");
+                println!("HCD: Request to failed.");
                 return ResultCode::ErrorRetry;
             }
         }
@@ -577,14 +577,14 @@ pub fn HcdChannelSendWaitOne(
     }
 
     if globalTries == 3 || actualTries == 10 {
-        println!("| HCD: Request to s has failed 3 times.\n");
+        println!("| HCD: Request to s has failed 3 times.");
         result = HcdChannelInterruptToError(
             device,
             hcint,
             !dwc_sc.channel[channel as usize].split_control.SplitEnable,
         );
         if result != ResultCode::OK {
-            println!("| HCD: Request to failed.\n");
+            println!("| HCD: Request to failed.");
             return result;
         }
         device.error = UsbTransferError::ConnectionError;
@@ -610,7 +610,7 @@ fn HcdChannelSendWait(
     loop {
         // Check for timeout after three attempts.
         if tries == 3 {
-            println!("HCD: Failed to send to packet after 3 attempts.\n");
+            println!("HCD: Failed to send to packet after 3 attempts.");
             return ResultCode::ErrorTimeout;
         }
         tries += 1;
@@ -619,7 +619,7 @@ fn HcdChannelSendWait(
         let result = HcdPrepareChannel(device, channel, buffer_length, packet_id, pipe);
         if result != ResultCode::OK {
             device.error = UsbTransferError::ConnectionError;
-            println!("HCD: Could not prepare data channel to packet.\n");
+            println!("HCD: Could not prepare data channel to packet.");
             return result;
         }
 
@@ -645,7 +645,7 @@ fn HcdChannelSendWait(
             if result != ResultCode::OK {
                 if result == ResultCode::ErrorRetry {
                     // Restart the entire process on ErrorRetry.
-                    println!("| HCD: Retrying to packet.\n");
+                    println!("| HCD: Retrying to packet.");
                     break;
                 }
                 println!("| DWC: Result is {:#?}", result);
@@ -678,7 +678,7 @@ fn HcdChannelSendWait(
         }
 
         if result == ResultCode::ErrorRetry {
-            println!("| HCD: Retrying to packet.\n");
+            println!("| HCD: Retrying to packet.");
             continue;
         }
 
@@ -727,7 +727,7 @@ fn HcdTransmitChannelNoWait(device: &UsbDevice, channel: u8, buffer: *mut u8) {
 
         if ((buffer as usize) & 3) != 0 {
             println!(
-                "HCD: Transfer buffer in no wait {:#x} is not DWORD aligned. Ignored, but dangerous.\n",
+                "HCD: Transfer buffer in no wait {:#x} is not DWORD aligned. Ignored, but dangerous.",
                 buffer as usize,
             );
         }
@@ -821,14 +821,14 @@ fn HcdChannelSend(
     let result = HcdPrepareChannel(device, channel, buffer_length, packet_id, pipe);
     if result != ResultCode::OK {
         device.error = UsbTransferError::ConnectionError;
-        println!("HCD: Could not prepare data channel to packet.\n");
+        println!("HCD: Could not prepare data channel to packet.");
         return result;
     }
 
     let result = HcdChannelSendOne(device, pipe, channel, buffer, 0);
     if result != ResultCode::OK {
         device.error = UsbTransferError::ConnectionError;
-        println!("HCD: Could not send data to packet.\n");
+        println!("HCD: Could not send data to packet.");
         return result;
     }
 
@@ -990,7 +990,7 @@ pub unsafe fn HcdSubmitControlMessage(
     );
 
     if result != ResultCode::OK {
-        println!("| HCD: Failed to send control message to device.\n");
+        println!("| HCD: Failed to send control message to device.");
         return result;
     }
 
@@ -1030,7 +1030,7 @@ pub unsafe fn HcdSubmitControlMessage(
             pid,
         );
         if result != ResultCode::OK {
-            println!("| HCD: Coult not send data to device\n");
+            println!("| HCD: Coult not send data to device");
 
             printDWCErrors(0);
 
@@ -1044,7 +1044,7 @@ pub unsafe fn HcdSubmitControlMessage(
             if dwc_sc.channel[0].transfer_size.TransferSize <= buffer_length {
                 device.last_transfer = buffer_length - dwc_sc.channel[0].transfer_size.TransferSize;
             } else {
-                println!("| HCD: Weird transfer size\n");
+                println!("| HCD: Weird transfer size");
                 device.last_transfer = buffer_length;
             }
             unsafe {

@@ -77,7 +77,7 @@ fn HidSetProtocol(device: &mut UsbDevice, interface: u8, protocol: u16) -> Resul
     };
 
     if result != ResultCode::OK {
-        print!("| HID: Failed to set protocol.\n");
+        println!("| HID: Failed to set protocol.");
         return result;
     }
 
@@ -118,7 +118,7 @@ fn HidGetReport(
     };
 
     if result != ResultCode::OK {
-        print!("| HID: Failed to get report.\n");
+        println!("| HID: Failed to get report.");
         return result;
     }
 

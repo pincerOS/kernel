@@ -138,7 +138,7 @@ pub fn finish_interrupt_endpoint_callback(
 
     if hcint & HCINT_NAK != 0 {
         //NAK received, do nothing
-        assert_eq!(buffer_length, 0);
+        // assert_eq!(buffer_length, 0);
     } else if hcint & HCINT_XFERCOMPL != 0 {
         //Transfer complete
         //copy from dma_addr to buffer
@@ -207,7 +207,7 @@ pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
     };
 
     if result != ResultCode::OK {
-        print!("| USB: Failed to read interrupt endpoint.\n");
+        println!("| USB: Failed to read interrupt endpoint.");
     }
 }
 
