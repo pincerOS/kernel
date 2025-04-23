@@ -459,6 +459,7 @@ pub fn HcdChannelSendWaitOne(
             }
         }
         // println!("| HCD: Channel interrupt {:#x}\n", hcint);
+        println!("| HCD: Channel halt send wait");
 
         let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
         convert_into_host_transfer_size(

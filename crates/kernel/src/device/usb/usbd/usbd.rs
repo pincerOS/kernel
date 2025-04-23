@@ -521,7 +521,7 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         println!("| USBD: Device not in addressed state");
         return ResultCode::ErrorDevice;
     }
-
+    println!("| USBD: Configuring device {}", device.number);
     let configuration_ptr = &mut device.configuration as *mut UsbConfigurationDescriptor as *mut u8;
     let mut result = unsafe {
         UsbGetDescriptor(
@@ -539,6 +539,8 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         println!("| USBD: Failed to get configuration descriptor");
         return result;
     }
+
+    println!("| USBD: Configuration descriptor: {:?}", device.configuration);
 
     // let configuration_dev = &mut device.configuration;
     // println!(
