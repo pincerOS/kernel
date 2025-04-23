@@ -84,7 +84,7 @@ fn handle_incoming(
 }
 
 fn init_buffer(width: usize, height: usize) -> BufferInfo {
-    println!("init_buffer");
+    // println!("[disp] init_buffer({}, {})", width, height);
     let vmem_size = width * height * 4;
 
     let header_size = size_of::<proto::BufferHeader>().next_multiple_of(4096);
@@ -93,7 +93,7 @@ fn init_buffer(width: usize, height: usize) -> BufferInfo {
     let fd = unsafe { ulib::sys::sys_memfd_create() } as u32;
 
     let buffer = unsafe { mmap(0, total_size, 0, 0, fd, 0) }.unwrap();
-    println!("buffer allocated, {buffer:p}");
+    // println!("buffer allocated, {buffer:p}");
 
     let present_sem_fd = ulib::sys::sem_create(0).unwrap();
     let present_sem = proto::SemDescriptor(1);
@@ -126,10 +126,10 @@ fn init_buffer(width: usize, height: usize) -> BufferInfo {
         present_sem,
     };
 
-    println!("Writing header");
+    // println!("Writing header");
     let ptr = buffer.cast::<proto::BufferHeader>();
     unsafe { ptr.write(header) };
-    println!("init done");
+    // println!("init done");
 
     BufferInfo {
         fd,
