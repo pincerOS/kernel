@@ -479,6 +479,8 @@ fn UsbSetConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         return ResultCode::ErrorDevice;
     }
 
+    println!("| USBD: Setting device configuration to {}", configuration);
+
     let result = unsafe {
         UsbControlMessage(
             device,
@@ -576,6 +578,8 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         return result;
     }
 
+    println!("| USBD: Full configuration descriptor: {:?}", fullDescriptor);
+
     device.configuration_index = configuration;
     configuration_val = device.configuration.configuration_value;
 
@@ -586,10 +590,12 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
     let end = (fullDescriptor as usize) + device.configuration.total_length as usize;
     header = unsafe { header.byte_add((*header).descriptor_length as usize) };
     while (header as usize) < end {
+        println!("| USBD: Reading header");
         unsafe {
             match (*header).descriptor_type {
                 DescriptorType::Interface => {
                     let interface = header as *mut UsbInterfaceDescriptor;
+                    println!("| USBD: Interface descriptor: {:?}", interface);
                     if last_interface != (*interface).number as usize {
                         last_interface = (*interface).number as usize;
                         memory_copy(
@@ -598,6 +604,7 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
                             interface as *const u8,
                             size_of::<UsbInterfaceDescriptor>(),
                         );
+                        println!("| USBD: Interface descriptor: {:?}", device.interfaces[last_interface]);
                         last_endpoint = 0;
                         is_alternate = false;
                     } else {
@@ -616,15 +623,18 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
                         return ResultCode::ErrorDevice;
                     }
                     let endpoint = header as *mut UsbEndpointDescriptor;
+                    
                     memory_copy(
                         &mut device.endpoints[last_interface][last_endpoint]
                             as *mut UsbEndpointDescriptor as *mut u8,
                         endpoint as *const u8,
                         size_of::<UsbEndpointDescriptor>(),
                     );
+                    println!("| USBD: Endpoint descriptor: {:?}", device.endpoints[last_interface][last_endpoint]);
                     last_endpoint += 1;
                 }
                 _ => {
+                    println!("| USBD: Unknown descriptor type");
                     if (*header).descriptor_length == 0 {
                         break;
                     }
@@ -634,6 +644,7 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         }
     }
 
+    println!("| USBD: Finish reading header");
     result = UsbSetConfigure(device, configuration_val);
 
     if result != ResultCode::OK {
