@@ -299,6 +299,40 @@ fn load_image(img: &[u8]) -> (usize, usize, Vec<u32>) {
     (width, height, buf)
 }
 
+bitflags::bitflags! {
+    #[derive(Debug, Copy, Clone)]
+    pub struct Modifiers: u8 {
+        const L_SHIFT = 1 << 0;
+        const L_CTRL = 1 << 1;
+        const L_ALT = 1 << 2;
+        const L_SUPER = 1 << 3;
+        const R_SHIFT = 1 << 4;
+        const R_CTRL = 1 << 5;
+        const R_ALT = 1 << 6;
+        const R_SUPER = 1 << 7;
+
+        const SHIFT = Self::L_SHIFT.bits() | Self::R_SHIFT.bits();
+        const CTRL = Self::L_CTRL.bits() | Self::R_CTRL.bits();
+        const ALT = Self::L_ALT.bits() | Self::R_ALT.bits();
+        const SUPER = Self::L_SUPER.bits() | Self::R_SUPER.bits();
+    }
+}
+
+impl Modifiers {
+    pub fn shift_pressed(self) -> bool {
+        self.intersects(Self::SHIFT)
+    }
+    pub fn ctrl_pressed(self) -> bool {
+        self.intersects(Self::CTRL)
+    }
+    pub fn alt_pressed(self) -> bool {
+        self.intersects(Self::ALT)
+    }
+    pub fn super_pressed(self) -> bool {
+        self.intersects(Self::SUPER)
+    }
+}
+
 fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
     let mut clients = Arena::new();
 
@@ -341,6 +375,8 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
 
     let mut any_updated = true;
 
+    let mut modifiers = Modifiers::empty();
+
     loop {
         let mut buf = [0u64; 32];
         while let Ok((len, msg)) = recv_nonblock(server_socket, bytemuck::bytes_of_mut(&mut buf)) {
@@ -358,6 +394,8 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
 
         // TODO: better scheduling for this
         loop {
+            use proto::ScanCode;
+
             let key = unsafe { ulib::sys::sys_poll_key_event() };
             if key < 0 {
                 break;
@@ -372,6 +410,14 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                     window_manager.alt_tab();
                     continue;
                 }
+                (ScanCode::LEFT_SHIFT, p) => modifiers.set(Modifiers::L_SHIFT, p),
+                (ScanCode::RIGHT_SHIFT, p) => modifiers.set(Modifiers::R_SHIFT, p),
+                (ScanCode::LEFT_CTRL, p) => modifiers.set(Modifiers::L_CTRL, p),
+                (ScanCode::RIGHT_CTRL, p) => modifiers.set(Modifiers::R_CTRL, p),
+                (ScanCode::LEFT_ALT, p) => modifiers.set(Modifiers::L_ALT, p),
+                (ScanCode::RIGHT_ALT, p) => modifiers.set(Modifiers::R_ALT, p),
+                (ScanCode::LEFT_SUPER, p) => modifiers.set(Modifiers::L_SUPER, p),
+                (ScanCode::RIGHT_SUPER, p) => modifiers.set(Modifiers::R_SUPER, p),
                 _ => (),
             }
 
@@ -425,6 +471,24 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                             window_manager.dragging = None;
                             window_manager.mouse_down = false;
                         }
+
+                        match hovered {
+                            HoveredState::Window(idx, local_pos) => {
+                                let window = &window_manager.windows[idx];
+                                let client = clients.get_mut(window.client).unwrap();
+                                let event = proto::InputEvent {
+                                    kind: proto::InputEvent::KIND_MOUSE,
+                                    data1: if pressed { 2 } else { 3 },
+                                    data2: local_pos.x as u32,
+                                    data3: local_pos.y as u32,
+                                    data4: button as u32,
+                                };
+                                let queue = client.handle.server_to_client_queue();
+                                queue.try_send_data(event).ok();
+                            }
+                            HoveredState::None => (),
+                            _ => (),
+                        }
                     }
                     _ => (),
                 }
@@ -442,8 +506,45 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                         .as_u16vec2();
                     window_manager.mouse_move(cursor);
                     cursor_moved = true;
+
+                    // TODO: dragging off window, still send mouse up to original window
+                    let hovered = window_manager.hovered(cursor);
+                    match hovered {
+                        HoveredState::Window(idx, local_pos) => {
+                            let window = &window_manager.windows[idx];
+                            let client = clients.get_mut(window.client).unwrap();
+                            let event = proto::InputEvent {
+                                kind: proto::InputEvent::KIND_MOUSE,
+                                data1: 1,
+                                data2: local_pos.x as u32,
+                                data3: local_pos.y as u32,
+                                data4: 0,
+                            };
+                            let queue = client.handle.server_to_client_queue();
+                            queue.try_send_data(event).ok();
+                        }
+                        _ => (),
+                    }
                 } else if ev.code == ulib::sys::REL_WHEEL {
-                    println!("Mouse wheel: {}", ev.value as i32);
+                    // println!("Mouse wheel: {}", ev.value as i32);
+
+                    let hovered = window_manager.hovered(cursor);
+                    match hovered {
+                        HoveredState::Window(idx, _local_pos) => {
+                            let window = &window_manager.windows[idx];
+                            let client = clients.get_mut(window.client).unwrap();
+                            let event = proto::InputEvent {
+                                kind: proto::InputEvent::KIND_SCROLL,
+                                data1: ev.value as u32,
+                                data2: 0,
+                                data3: 0,
+                                data4: 0,
+                            };
+                            let queue = client.handle.server_to_client_queue();
+                            queue.try_send_data(event).ok();
+                        }
+                        _ => (),
+                    }
                 }
             }
         }
@@ -713,7 +814,7 @@ fn remap_keycode(code: isize) -> proto::ScanCode {
         0xE0 => ScanCode::LEFT_CTRL,
         0xE1 => ScanCode::LEFT_SHIFT,
         0xE2 => ScanCode::LEFT_ALT,
-        0xE3 => ScanCode::LEFT_SHIFT,
+        0xE3 => ScanCode::LEFT_SUPER,
         0xE4 => ScanCode::RIGHT_CTRL,
         0xE5 => ScanCode::RIGHT_SHIFT,
         0xE6 => ScanCode::RIGHT_ALT,

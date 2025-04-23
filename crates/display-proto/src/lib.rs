@@ -261,6 +261,10 @@ impl InputEvent {
     pub const KIND_SCROLL: u32 = 3;
     // data1 = x delta (pixels)
     // data2 = y delta (pixels)
+
+    pub const MODE_MOUSE_MOVE: u32 = 1;
+    pub const MODE_MOUSE_DOWN: u32 = 2;
+    pub const MODE_MOUSE_UP: u32 = 3;
 }
 
 unsafe impl bytemuck::Zeroable for InputEvent {}

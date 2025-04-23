@@ -66,6 +66,7 @@ dependencies = [
 name = "display-server"
 version = "0.1.0"
 dependencies = [
+ "bitflags",
  "bytemuck",
  "display-proto",
  "gfx",
