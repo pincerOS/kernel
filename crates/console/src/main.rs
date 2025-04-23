@@ -7,38 +7,13 @@ extern crate display_client;
 #[macro_use]
 extern crate ulib;
 
-pub mod format;
-
-mod color;
 pub mod editor;
 mod grid;
 mod input;
 mod vt100;
 
 use display_client::proto;
-
-#[macro_use]
-#[doc(hidden)]
-pub(crate) mod macros {
-    // https://users.rust-lang.org/t/can-i-conveniently-compile-bytes-into-a-rust-program-with-a-specific-alignment/24049/2
-    #[repr(C)]
-    pub struct AlignedAs<Align, Bytes: ?Sized> {
-        pub _align: [Align; 0],
-        pub bytes: Bytes,
-    }
-    macro_rules! include_bytes_align {
-        ($align_ty:ty, $path:literal) => {{
-            // const block expression to encapsulate the static
-            use $crate::macros::AlignedAs;
-            // this assignment is made possible by CoerceUnsized
-            static ALIGNED: &AlignedAs<$align_ty, [u8]> = &AlignedAs {
-                _align: [],
-                bytes: *include_bytes!($path),
-            };
-            &ALIGNED.bytes
-        }};
-    }
-}
+use gfx::{color, format};
 
 use ulib::sys::{pipe, pwrite_all, spawn_elf, FileDesc, SpawnArgs};
 
@@ -59,7 +34,7 @@ pub extern "C" fn main() {
 
     let font = format::pcf::load_pcf(font_data).unwrap();
 
-    let mut buf = display_client::connect();
+    let mut buf = display_client::connect(320, 240);
 
     let (width, height) = (
         buf.video_meta.width as usize,
@@ -94,7 +69,7 @@ pub extern "C" fn main() {
     let mut editor = editor::LineEditor::new();
 
     let cwd = 3;
-    let fd = ulib::sys::openat(cwd, b"shell.elf", 0, 0).unwrap();
+    let fd = ulib::sys::openat(cwd, b"shell", 0, 0).unwrap();
 
     let (_shell, shell_stdin_tx, shell_stdout_rx) = {
         let (shell_stdin_rx, shell_stdin_tx) = pipe(0).unwrap();
@@ -111,13 +86,18 @@ pub extern "C" fn main() {
         (shell, shell_stdin_tx, shell_stdout_rx)
     };
 
-    loop {
+    'outer: loop {
         let time_us = unsafe { ulib::sys::sys_get_time_ms() as u64 } * 1000;
 
         while let Some(ev) = buf.server_to_client_queue().try_recv() {
             match ev.kind {
                 proto::EventKind::INPUT => {
                     handle_input(ev, &mut modifiers, &mut editor, shell_stdin_tx, time_us)
+                }
+                proto::EventKind::REQUEST_CLOSE => {
+                    println!("Close requested, exiting.");
+                    // TODO: kill child process?
+                    break 'outer;
                 }
                 _ => (),
             }
@@ -153,6 +133,13 @@ pub extern "C" fn main() {
         // signal(video)? for sync
         ulib::sys::sem_down(buf.get_sem_fd(buf.present_sem)).unwrap();
     }
+
+    buf.client_to_server_queue()
+        .try_send(proto::Event {
+            kind: proto::EventKind::DISCONNECT,
+            data: [0; 7],
+        })
+        .ok();
 }
 
 fn render_grid(

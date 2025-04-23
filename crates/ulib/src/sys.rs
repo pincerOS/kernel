@@ -88,9 +88,9 @@ syscall!(22 => pub fn sys_sleep_ms(time: usize));
 pub struct RawFB {
     pub fd: usize,
     pub size: usize,
-    pub pitch: usize,
     pub width: usize,
     pub height: usize,
+    pub pitch: usize,
 }
 
 core::arch::global_asm!(
@@ -99,17 +99,17 @@ core::arch::global_asm!(
     "svc #{num}",
     "str x0, [x7, {fd_offset}]",
     "str x1, [x7, {size_offset}]",
-    "str x2, [x7, {pitch_offset}]",
-    "str x3, [x7, {width_offset}]",
-    "str x4, [x7, {height_offset}]",
+    "str x2, [x7, {width_offset}]",
+    "str x3, [x7, {height_offset}]",
+    "str x4, [x7, {pitch_offset}]",
     "ret",
     name = sym sys_acquire_fb,
     num = const 23,
     fd_offset = const offset_of!(RawFB, fd),
     size_offset = const offset_of!(RawFB, size),
-    pitch_offset = const offset_of!(RawFB, pitch),
     width_offset = const offset_of!(RawFB, width),
     height_offset = const offset_of!(RawFB, height),
+    pitch_offset = const offset_of!(RawFB, pitch),
 );
 unsafe extern "C" {
     pub fn sys_acquire_fb(width: usize, height: usize, res: *mut RawFB) -> isize;
@@ -121,6 +121,8 @@ syscall!(25 => pub fn sys_poll_key_event() -> isize);
 syscall!(26 => pub fn sys_sem_create(value: usize) -> isize);
 syscall!(27 => pub fn sys_sem_up(fd: usize) -> isize);
 syscall!(28 => pub fn sys_sem_down(fd: usize) -> isize);
+
+syscall!(30 => pub fn sys_poll_mouse_event(buf: *mut u8, buf_len: usize) -> isize);
 
 /* * * * * * * * * * * * * * * * * * * */
 /* Syscall wrappers                    */
@@ -303,22 +305,24 @@ pub struct SpawnArgs<'a> {
     pub stdin: Option<FileDesc>,
     pub stdout: Option<FileDesc>,
     pub stderr: Option<FileDesc>,
+    // TODO: ArgStr should be &[u8], but needs a repr(C) layout
     pub args: &'a [ArgStr],
 }
 
 pub fn spawn_elf(args: &SpawnArgs) -> Result<FileDesc, usize> {
+    // This is a hack, which only works for spawn.  Don't try to use this
+    // elsewhere.
+    fn current_sp() -> usize {
+        let sp: usize;
+        unsafe { core::arch::asm!("mov {0}, sp", out(reg) sp) };
+        sp
+    }
     let current_stack = current_sp();
     let target_pc = exec_child as usize;
     let arg = args as *const SpawnArgs;
 
     let wait_fd = unsafe { spawn(target_pc, current_stack, arg as usize, 0) };
     wait_fd
-}
-
-fn current_sp() -> usize {
-    let sp: usize;
-    unsafe { core::arch::asm!("mov {0}, sp", out(reg) sp) };
-    sp
 }
 
 extern "C" fn exec_child(spawn_args: *const SpawnArgs) -> ! {
@@ -340,4 +344,36 @@ extern "C" fn exec_child(spawn_args: *const SpawnArgs) -> ! {
     let _res = unsafe { execve_fd(spawn_args.fd, flags, args, env) };
     // TODO: notify parent of spawn failure
     exit(1);
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct InputEvent {
+    pub time: u64,
+    pub kind: u16,
+    pub code: u16,
+    pub value: u32,
+}
+
+pub const EVENT_KEY: u16 = 0x01;
+pub const EVENT_RELATIVE: u16 = 0x02;
+
+pub const REL_XY: u16 = 0x01;
+pub const REL_WHEEL: u16 = 0x02;
+
+pub fn poll_mouse_event() -> Option<InputEvent> {
+    let mut event = InputEvent {
+        time: 0,
+        kind: 0,
+        code: 0,
+        value: 0,
+    };
+    let res =
+        unsafe { sys_poll_mouse_event((&raw mut event).cast::<u8>(), size_of::<InputEvent>()) };
+    let res = int_to_error(res);
+    if res.is_ok() {
+        Some(event)
+    } else {
+        None
+    }
 }

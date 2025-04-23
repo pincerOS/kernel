@@ -13,5 +13,5 @@ tinyvec = "1.9"
 device-tree = { path = "../device-tree" }
 endian = { path = "../endian" }
 elf = { path = "../elf" }
-initfs = { path = "../initfs"}
 filesystem = { path = "../filesystem" }
+initfs = { path = "../initfs"}

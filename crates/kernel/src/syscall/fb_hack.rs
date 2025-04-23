@@ -79,6 +79,98 @@ impl fd::FileDescriptor for FramebufferFd {
     }
 }
 
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct InputEvent {
+    pub time: u64,
+    pub kind: u16,
+    pub code: u16,
+    pub value: u32,
+}
+
+unsafe impl bytemuck::Zeroable for InputEvent {}
+unsafe impl bytemuck::Pod for InputEvent {}
+
+pub const EVENT_KEY: u16 = 0x01;
+pub const EVENT_RELATIVE: u16 = 0x02;
+
+pub const REL_XY: u16 = 0x01;
+pub const REL_WHEEL: u16 = 0x02;
+
+pub trait InputSource {
+    fn next<'a>(&'a self) -> fd::SmallFuture<'a, Result<InputEvent, ()>>;
+}
+
+pub struct MouseInput;
+
+impl InputSource for MouseInput {
+    fn next<'a>(&'a self) -> fd::SmallFuture<'a, Result<InputEvent, ()>> {
+        use crate::device::usb::mouse::{MouseButton, MouseEvent, MOUSE_EVENTS};
+
+        // TODO: proper async interface
+        if let Some(event) = MOUSE_EVENTS.poll() {
+            let time = crate::sync::get_time() as u64;
+            let event = match event {
+                MouseEvent::Move { x, y } => InputEvent {
+                    time,
+                    kind: EVENT_RELATIVE,
+                    code: REL_XY,
+                    value: ((y as i16 as u16 as u32) << 16) | (x as i16 as u16 as u32),
+                },
+                MouseEvent::Button {
+                    button,
+                    state,
+                    all: _,
+                } => {
+                    let button = match button {
+                        MouseButton::Left => 1,
+                        MouseButton::Right => 2,
+                        MouseButton::Middle => 3,
+                        MouseButton::M4 => 4,
+                        MouseButton::M5 => 5,
+                    };
+                    InputEvent {
+                        time,
+                        kind: EVENT_KEY,
+                        code: 0x1000 | button,
+                        value: state as u32,
+                    }
+                }
+                MouseEvent::Wheel { delta } => InputEvent {
+                    time,
+                    kind: EVENT_RELATIVE,
+                    code: REL_WHEEL,
+                    value: delta as i32 as u32,
+                },
+            };
+            fd::boxed_future(async move { Ok(event) })
+        } else {
+            fd::boxed_future(async move { Err(()) })
+        }
+    }
+}
+
+pub struct KeyboardInput;
+
+impl InputSource for KeyboardInput {
+    fn next<'a>(&'a self) -> fd::SmallFuture<'a, Result<InputEvent, ()>> {
+        use crate::device::usb::keyboard::KEY_EVENTS;
+        // TODO: proper async interface
+        if let Some(event) = KEY_EVENTS.poll() {
+            let time = crate::sync::get_time() as u64;
+            let event = InputEvent {
+                time,
+                kind: EVENT_KEY,
+                code: event.code as u16,
+                value: event.pressed as u32,
+            };
+            fd::boxed_future(async move { Ok(event) })
+        } else {
+            fd::boxed_future(async move { Err(()) })
+        }
+    }
+}
+
 pub unsafe fn sys_poll_key_event(ctx: &mut Context) -> *mut Context {
     run_event_handler(ctx, |context: HandlerContext<'_>| {
         let res = crate::device::usb::keyboard::KEY_EVENTS.poll();
@@ -87,6 +179,32 @@ pub unsafe fn sys_poll_key_event(ctx: &mut Context) -> *mut Context {
             None => (-1isize) as usize,
         };
         context.resume_return(code)
+    })
+}
+
+pub unsafe fn sys_poll_mouse_event(ctx: &mut Context) -> *mut Context {
+    let buf_ptr = ctx.regs[0];
+    let buf_len = ctx.regs[1].min(u32::MAX as usize) as u32;
+
+    // TODO: expose this as a /dev vfs file
+    run_async_handler(ctx, async move |context: HandlerContext<'_>| {
+        let event = MouseInput.next().await;
+
+        if let Ok(ev) = event {
+            // TODO: sound abstraction for usermode buffers...
+            // (prevent TOCTOU issues, pin pages to prevent user unmapping them,
+            // deal with unmapped pages...)
+            // TODO: check user buffers
+            context.with_user_vmem(|| {
+                let buf = unsafe {
+                    core::slice::from_raw_parts_mut(buf_ptr as *mut u8, buf_len as usize)
+                };
+                buf[..size_of::<InputEvent>()].copy_from_slice(bytemuck::bytes_of(&ev));
+            });
+            context.resume_return(0)
+        } else {
+            context.resume_return(-1isize as usize)
+        }
     })
 }
 

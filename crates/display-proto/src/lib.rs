@@ -9,6 +9,20 @@ pub use local::BufferHandle;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct ConnRequest {
+    pub width: u16,
+    pub height: u16,
+    pub min_width: u16,
+    pub min_height: u16,
+    pub max_width: u16,
+    pub max_height: u16,
+}
+
+unsafe impl bytemuck::Zeroable for ConnRequest {}
+unsafe impl bytemuck::Pod for ConnRequest {}
+
 #[allow(non_camel_case_types)]
 type au8 = AtomicU8;
 #[allow(non_camel_case_types)]
@@ -203,6 +217,8 @@ impl EventKind {
     pub const PRESENT: EventKind = EventKind(1);
     pub const INPUT: EventKind = EventKind(2);
     pub const DISCONNECT: EventKind = EventKind(3);
+    pub const TITLE: EventKind = EventKind(4);
+    pub const REQUEST_CLOSE: EventKind = EventKind(5);
 }
 
 #[derive(Copy, Clone)]
@@ -245,6 +261,10 @@ impl InputEvent {
     pub const KIND_SCROLL: u32 = 3;
     // data1 = x delta (pixels)
     // data2 = y delta (pixels)
+
+    pub const MODE_MOUSE_MOVE: u32 = 1;
+    pub const MODE_MOUSE_DOWN: u32 = 2;
+    pub const MODE_MOUSE_UP: u32 = 3;
 }
 
 unsafe impl bytemuck::Zeroable for InputEvent {}
@@ -263,6 +283,43 @@ impl EventData for InputEvent {
         let data: [u8; size_of::<Self>()] = unsafe { core::mem::transmute(*self) };
         bytemuck::cast_slice_mut(&mut out)[..size_of::<Self>()].copy_from_slice(&data);
         out
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct TitleEvent {
+    pub len: u8,
+    pub data: [u8; 7 * 8 - 1],
+}
+unsafe impl bytemuck::Zeroable for TitleEvent {}
+unsafe impl bytemuck::AnyBitPattern for TitleEvent {}
+impl EventData for TitleEvent {
+    const KIND: EventKind = EventKind::TITLE;
+    fn parse_data(data: &[u64; 7]) -> Option<Self> {
+        const _ASSERT: () = assert!(size_of::<TitleEvent>() <= size_of::<[u64; 7]>());
+        let bytes = &bytemuck::bytes_of(data)[..size_of::<Self>()];
+        Some(*bytemuck::from_bytes(bytes))
+    }
+    fn serialize_data(&self) -> [u64; 7] {
+        let mut out = [0u64; 7];
+        let data: [u8; size_of::<Self>()] = unsafe { core::mem::transmute(*self) };
+        bytemuck::cast_slice_mut(&mut out)[..size_of::<Self>()].copy_from_slice(&data);
+        out
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct RequestCloseEvent;
+
+impl EventData for RequestCloseEvent {
+    const KIND: EventKind = EventKind::REQUEST_CLOSE;
+    fn parse_data(_data: &[u64; 7]) -> Option<Self> {
+        Some(RequestCloseEvent)
+    }
+    fn serialize_data(&self) -> [u64; 7] {
+        [0u64; 7]
     }
 }
 
@@ -403,6 +460,7 @@ define_scancodes! {
 }
 
 #[cfg(target_arch = "aarch64")]
+#[track_caller]
 pub fn memcpy128(dst: &mut [u128], src: &[u128]) {
     let len = dst.len();
     assert_eq!(len, src.len());

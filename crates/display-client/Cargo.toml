@@ -7,5 +7,7 @@ edition = "2021"
 display-proto = { path = "../display-proto" }
 ulib = { path = "../ulib" }
 
+bytemuck = { version = "1.19.0", default-features = false }
+
 [dev-dependencies]
 ulib = { path = "../ulib", features = ["test"] }

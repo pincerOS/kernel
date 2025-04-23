@@ -5,7 +5,7 @@
 
 use core::mem::offset_of;
 
-use bytemuck::{try_cast_slice, try_from_bytes, AnyBitPattern, Pod, Zeroable};
+use bytemuck::{AnyBitPattern, Pod, Zeroable, try_cast_slice, try_from_bytes};
 
 type le_u32 = u32;
 
@@ -566,6 +566,9 @@ impl<'a> BitmapData<'a> {
         // TODO: caching and performance improvements
         if scan == 1 {
             let rows = height;
+            let max_rows = (buffer.len().saturating_sub(start)) / buf_row_stride;
+            let rows = rows.min((max_rows / scale) * scale);
+
             let row_size = width.div_ceil(8);
             let row_stride = row_size.next_multiple_of(row_pad);
             // let safety_margin = (scale - 1) * buf_row_stride + (scale - 1);
