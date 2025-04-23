@@ -5,13 +5,13 @@ extern crate alloc;
 extern crate kernel;
 
 use kernel::event::thread;
-use kernel::networking::repr::Ipv4Address;
-use kernel::networking::socket::{
-    bind, connect, recv_from, send_to, SocketAddr, TcpSocket, UdpSocket,
-};
+// use kernel::networking::repr::Ipv4Address;
+// use kernel::networking::socket::{
+//     bind, connect, recv_from, send_to, SocketAddr, TcpSocket, UdpSocket,
+// };
 use kernel::*;
 
-use core::str;
+// use core::str;
 
 #[no_mangle]
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
@@ -21,17 +21,17 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     let count = 32;
     let barrier = alloc::sync::Arc::new(sync::Barrier::new(count + 1));
 
-    // for i in 0..count {
-    //     let b = barrier.clone();
-    //     thread::thread(move || {
-    //         println!("Starting thread {i}");
-    //         sync::spin_sleep(500_000);
-    //         println!("Ending thread {i}");
-    //         b.sync_blocking();
-    //     });
-    // }
-    // barrier.sync_blocking();
-    // println!("End of preemption test");
+    for i in 0..count {
+        let b = barrier.clone();
+        thread::thread(move || {
+            println!("Starting thread {i}");
+            sync::spin_sleep(500_000);
+            println!("Ending thread {i}");
+            b.sync_blocking();
+        });
+    }
+    barrier.sync_blocking();
+    println!("End of preemption test");
 
     // [udp send test]
     // let s = UdpSocket::new();

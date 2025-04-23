@@ -186,6 +186,7 @@ pub mod Protocols {
     pub const UDP: u8 = 17;
 }
 
+#[allow(dead_code)]
 pub mod flags {
     pub const DONT_FRAGMENT: u8 = 0b00000010;
     pub const NOT_LAST: u8 = 0b00000001;

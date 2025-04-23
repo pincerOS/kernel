@@ -1,7 +1,5 @@
 use crate::device::usb::device::net::interface;
-use crate::event::thread;
 use crate::networking::iface::tcp;
-use crate::networking::repr::{Ipv4Packet, Ipv4Protocol, TcpPacket};
 use crate::networking::socket::bindings::{NEXT_EPHEMERAL, NEXT_SOCKETFD};
 use crate::networking::socket::tagged::TaggedSocket;
 use crate::networking::socket::SocketAddr;
@@ -9,8 +7,7 @@ use crate::networking::utils::ring::Ring;
 use crate::networking::{Error, Result};
 use alloc::vec;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU16, Ordering};
-use core::time::Duration;
+use core::sync::atomic::Ordering;
 
 fn new_ring_packet_buffer(capacity: usize) -> Ring<(Vec<u8>, SocketAddr)> {
     let default_entry = (Vec::new(), SocketAddr::default());
@@ -329,8 +326,8 @@ impl TcpSocket {
         &mut self,
         flags: u8,
         seq_number: u32,
-        ack_number: u32,
-        sender: SocketAddr,
+        _ack_number: u32,
+        _sender: SocketAddr,
     ) -> Result<()> {
         match self.state {
             TcpState::Established => {

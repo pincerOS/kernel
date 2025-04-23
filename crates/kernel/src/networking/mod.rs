@@ -18,8 +18,6 @@ use core::result::Result as CoreResult;
 use crate::networking::repr::Ipv4Address;
 use crate::networking::socket::SocketAddr;
 
-use crate::device::system_timer;
-
 // TODO: make more detailed
 #[derive(Debug)]
 pub struct IOError;

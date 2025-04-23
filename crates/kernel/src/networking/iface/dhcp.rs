@@ -2,20 +2,16 @@ use crate::device::system_timer;
 use crate::device::usb::device::net::interface;
 use crate::networking::iface::*;
 use crate::networking::repr::*;
-use crate::networking::socket::{TaggedSocket, UdpSocket};
-use crate::networking::SocketAddr;
 use crate::networking::{Error, Result};
 
-use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
-use log::{debug, info};
 
 const DHCP_SERVER_PORT: u16 = 67;
 const DHCP_CLIENT_PORT: u16 = 68;
 const DEFAULT_LEASE_RETRY: usize = 3;
-const DISCOVER_TIMEOUT: u64 = 2;
-const REQUEST_TIMEOUT: u64 = 5;
+// const DISCOVER_TIMEOUT: u64 = 2;
+// const REQUEST_TIMEOUT: u64 = 5;
 
 // Basic DHCP client state machine
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,8 +29,6 @@ pub struct DhcpClient {
     state: DhcpState,
     xid: u32,
     retries: usize,
-    discover_timeout: u64,
-    request_timeout: u64,
     last_action_time: u64,
     server_identifier: Option<Ipv4Address>,
     offered_ip: Option<Ipv4Address>,
@@ -44,7 +38,6 @@ pub struct DhcpClient {
     subnet_mask: u32,
     router: Option<Ipv4Address>,
     dns_servers: Vec<Ipv4Address>,
-    udp_socket: Option<UdpSocket>,
 }
 
 impl DhcpClient {
@@ -58,8 +51,8 @@ impl DhcpClient {
             state: DhcpState::Idle,
             xid: 0,
             retries: DEFAULT_LEASE_RETRY,
-            discover_timeout: DISCOVER_TIMEOUT,
-            request_timeout: REQUEST_TIMEOUT,
+            // discover_timeout: DISCOVER_TIMEOUT,
+            // request_timeout: REQUEST_TIMEOUT,
             last_action_time: 0,
             server_identifier: None,
             offered_ip: None,
@@ -69,7 +62,7 @@ impl DhcpClient {
             subnet_mask: 24,
             router: None,
             dns_servers: Vec::new(),
-            udp_socket: None,
+            // udp_socket: None,
         }
     }
 
@@ -78,10 +71,10 @@ impl DhcpClient {
             return Ok(()); // already in progress
         }
 
-        let socketaddr = SocketAddr {
-            addr: *interface().ipv4_addr,
-            port: DHCP_CLIENT_PORT,
-        };
+        // let socketaddr = SocketAddr {
+        //     addr: *interface().ipv4_addr,
+        //     port: DHCP_CLIENT_PORT,
+        // };
 
         // let udp_socket = UdpSocket::new(socketaddr, 128);
         // interface()
@@ -135,7 +128,7 @@ impl DhcpClient {
                 self.offered_ip = Some(packet.yiaddr);
                 self.server_identifier = packet.get_server_identifier();
 
-                debug!("DHCP: Received offer for IP {}", packet.yiaddr);
+                println!("DHCP: Received offer for IP {}", packet.yiaddr);
 
                 if let (Some(server_id), Some(offered_ip)) =
                     (self.server_identifier, self.offered_ip)
@@ -207,7 +200,7 @@ impl DhcpClient {
                     return Err(Error::Ignored);
                 }
 
-                debug!("DHCP: Received NAK, restarting discovery");
+                println!("DHCP: Received NAK, restarting discovery");
 
                 // Reset and start over
                 self.state = DhcpState::Discovering;
@@ -219,7 +212,7 @@ impl DhcpClient {
             }
             _ => {
                 // Ignore unexpected messages
-                debug!(
+                println!(
                     "DHCP: Ignoring message type {:?} in state {:?}",
                     msg_type, self.state
                 );
@@ -271,7 +264,7 @@ pub fn send_dhcp_request(
     requested_ip: Ipv4Address,
     server_id: Ipv4Address,
 ) -> Result<()> {
-    debug!("DHCP: Sending REQUEST for {}", requested_ip);
+    println!("DHCP: Sending REQUEST for {}", requested_ip);
 
     let packet = DhcpPacket {
         op: 1,    // BOOTREQUEST
@@ -312,7 +305,7 @@ pub fn send_dhcp_renew(
     current_ip: Ipv4Address,
     server_id: Ipv4Address,
 ) -> Result<()> {
-    debug!("DHCP: Sending RENEW for {}", current_ip);
+    println!("DHCP: Sending RENEW for {}", current_ip);
 
     let packet = DhcpPacket {
         op: 1,    // BOOTREQUEST
@@ -343,7 +336,7 @@ pub fn send_dhcp_rebind(
     xid: u32,
     current_ip: Ipv4Address,
 ) -> Result<()> {
-    debug!("DHCP: Sending REBIND for {}", current_ip);
+    println!("DHCP: Sending REBIND for {}", current_ip);
 
     let packet = DhcpPacket {
         op: 1,    // BOOTREQUEST
@@ -373,7 +366,7 @@ pub fn send_dhcp_release(
     current_ip: Ipv4Address,
     server_id: Ipv4Address,
 ) -> Result<()> {
-    debug!("DHCP: Sending RELEASE for {}", current_ip);
+    println!("DHCP: Sending RELEASE for {}", current_ip);
 
     let packet = DhcpPacket {
         op: 1,    // BOOTREQUEST
@@ -411,90 +404,90 @@ fn send_dhcp_packet(interface: &mut Interface, packet: &DhcpPacket) -> Result<()
     )
 }
 
-fn send_dhcp_packet_workaround(
-    interface: &mut Interface,
-    xid: u32,
-    requested_ip: Ipv4Address,
-    server_id: Ipv4Address,
-    packet: DhcpPacket,
-) -> Result<()> {
-    let sub_mask = packet.get_subnet_mask().unwrap();
-    let mask_bytes = sub_mask.as_bytes();
-    let mut count = 0;
-
-    for &byte in mask_bytes {
-        let mut b = byte;
-        while b > 0 {
-            count += b & 1;
-            b >>= 1;
-        }
-    }
-
-    interface.ipv4_addr = Ipv4Cidr::new(packet.yiaddr, count as u32).unwrap();
-
-    if let Some(router) = packet.get_router() {
-        interface.default_gateway = router;
-    }
-
-    interface.dns = packet.get_dns_servers();
-
-    println!("DHCP: Bound to IP {}", interface.ipv4_addr,);
-
-    let packet = DhcpPacket {
-        op: 1,    // BOOTREQUEST
-        htype: 1, // Ethernet
-        hlen: 6,  // MAC address length
-        hops: 0,
-        xid,
-        secs: 0,
-        flags: 0x0000,
-        ciaddr: Ipv4Address::new([0, 0, 0, 0]),
-        yiaddr: Ipv4Address::new([0, 0, 0, 0]),
-        siaddr: Ipv4Address::new([0, 0, 0, 0]),
-        giaddr: Ipv4Address::new([0, 0, 0, 0]),
-        chaddr: interface.ethernet_addr,
-        options: vec![
-            DhcpOption::message_type(DhcpMessageType::Request),
-            DhcpOption::server_identifier(server_id),
-            DhcpOption::requested_ip(requested_ip),
-            DhcpOption::parameters(vec![
-                DhcpParam::SubnetMask,
-                DhcpParam::BroadcastAddr,
-                DhcpParam::TimeOffset,
-                DhcpParam::Router,
-                DhcpParam::DomainName,
-                DhcpParam::DNS,
-                DhcpParam::Hostname,
-            ]),
-            DhcpOption::end(),
-        ],
-    };
-
-    let src_addr = Ipv4Address::new([0, 0, 0, 0]);
-    let dst_addr = Ipv4Address::new([255, 255, 255, 255]);
-
-    let udp_packet = UdpPacket::new(
-        DHCP_CLIENT_PORT,
-        DHCP_SERVER_PORT,
-        packet.serialize(),
-        src_addr,
-        dst_addr,
-    );
-
-    let ipv4_packet = Ipv4Packet::new(
-        src_addr,
-        dst_addr,
-        Ipv4Protocol::UDP,
-        udp_packet.serialize(),
-    );
-
-    ethernet::send_ethernet_frame(
-        interface,
-        ipv4_packet.serialize(),
-        EthernetAddress::from_bytes(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff]).unwrap(),
-        EthernetType::IPV4,
-    )
-}
+// fn send_dhcp_packet_workaround(
+//     interface: &mut Interface,
+//     xid: u32,
+//     requested_ip: Ipv4Address,
+//     server_id: Ipv4Address,
+//     packet: DhcpPacket,
+// ) -> Result<()> {
+//     let sub_mask = packet.get_subnet_mask().unwrap();
+//     let mask_bytes = sub_mask.as_bytes();
+//     let mut count = 0;
+//
+//     for &byte in mask_bytes {
+//         let mut b = byte;
+//         while b > 0 {
+//             count += b & 1;
+//             b >>= 1;
+//         }
+//     }
+//
+//     interface.ipv4_addr = Ipv4Cidr::new(packet.yiaddr, count as u32).unwrap();
+//
+//     if let Some(router) = packet.get_router() {
+//         interface.default_gateway = router;
+//     }
+//
+//     interface.dns = packet.get_dns_servers();
+//
+//     println!("DHCP: Bound to IP {}", interface.ipv4_addr,);
+//
+//     let packet = DhcpPacket {
+//         op: 1,    // BOOTREQUEST
+//         htype: 1, // Ethernet
+//         hlen: 6,  // MAC address length
+//         hops: 0,
+//         xid,
+//         secs: 0,
+//         flags: 0x0000,
+//         ciaddr: Ipv4Address::new([0, 0, 0, 0]),
+//         yiaddr: Ipv4Address::new([0, 0, 0, 0]),
+//         siaddr: Ipv4Address::new([0, 0, 0, 0]),
+//         giaddr: Ipv4Address::new([0, 0, 0, 0]),
+//         chaddr: interface.ethernet_addr,
+//         options: vec![
+//             DhcpOption::message_type(DhcpMessageType::Request),
+//             DhcpOption::server_identifier(server_id),
+//             DhcpOption::requested_ip(requested_ip),
+//             DhcpOption::parameters(vec![
+//                 DhcpParam::SubnetMask,
+//                 DhcpParam::BroadcastAddr,
+//                 DhcpParam::TimeOffset,
+//                 DhcpParam::Router,
+//                 DhcpParam::DomainName,
+//                 DhcpParam::DNS,
+//                 DhcpParam::Hostname,
+//             ]),
+//             DhcpOption::end(),
+//         ],
+//     };
+//
+//     let src_addr = Ipv4Address::new([0, 0, 0, 0]);
+//     let dst_addr = Ipv4Address::new([255, 255, 255, 255]);
+//
+//     let udp_packet = UdpPacket::new(
+//         DHCP_CLIENT_PORT,
+//         DHCP_SERVER_PORT,
+//         packet.serialize(),
+//         src_addr,
+//         dst_addr,
+//     );
+//
+//     let ipv4_packet = Ipv4Packet::new(
+//         src_addr,
+//         dst_addr,
+//         Ipv4Protocol::UDP,
+//         udp_packet.serialize(),
+//     );
+//
+//     ethernet::send_ethernet_frame(
+//         interface,
+//         ipv4_packet.serialize(),
+//         EthernetAddress::from_bytes(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff]).unwrap(),
+//         EthernetType::IPV4,
+//     )
+// }
 
 // fn send_dhcp_packet(interface: &mut Interface, packet: &DhcpPacket) -> Result<()> {
 //     let data = packet.serialize();

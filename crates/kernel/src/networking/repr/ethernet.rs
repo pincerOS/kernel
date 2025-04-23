@@ -141,24 +141,24 @@ impl Frame {
     // pub fn verify_fcs(&self) -> bool { }
 }
 
-fn calculate_crc32(data: &[u8]) -> u32 {
-    const CRC32_POLYNOMIAL: u32 = 0x04C11DB7;
-
-    let mut crc: u32 = 0xFFFFFFFF;
-
-    for &byte in data {
-        crc ^= (byte as u32) << 24;
-
-        for _ in 0..8 {
-            if (crc & 0x80000000) != 0 {
-                crc = (crc << 1) ^ CRC32_POLYNOMIAL;
-            } else {
-                crc <<= 1;
-            }
-        }
-    }
-
-    crc ^= 0xFFFFFFFF;
-
-    crc
-}
+// fn calculate_crc32(data: &[u8]) -> u32 {
+//     const CRC32_POLYNOMIAL: u32 = 0x04C11DB7;
+//
+//     let mut crc: u32 = 0xFFFFFFFF;
+//
+//     for &byte in data {
+//         crc ^= (byte as u32) << 24;
+//
+//         for _ in 0..8 {
+//             if (crc & 0x80000000) != 0 {
+//                 crc = (crc << 1) ^ CRC32_POLYNOMIAL;
+//             } else {
+//                 crc <<= 1;
+//             }
+//         }
+//     }
+//
+//     crc ^= 0xFFFFFFFF;
+//
+//     crc
+// }

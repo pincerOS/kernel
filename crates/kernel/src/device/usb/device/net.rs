@@ -13,7 +13,6 @@ use crate::device::system_timer;
 use crate::networking::iface::cdcecm::CDCECM;
 use crate::networking::iface::*;
 use crate::networking::repr::*;
-use crate::networking::socket::*;
 use crate::networking::utils::arp_cache::ArpCache;
 
 use crate::device::usb::types::*;
@@ -116,7 +115,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // 3. initalize and statically set ip address and gateway
     // 4. initialize arp table
 
-    let mut mac_addr: &mut [u8; 6];
+    let mac_addr: &mut [u8; 6];
     unsafe {
         let mut b = vec![0u8; 30];
         let query = rndis_query_msg(device, OID::OID_802_3_PERMANENT_ADDRESS, b.as_mut_ptr(), 30);
@@ -170,7 +169,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     }
 
     // start dhcp
-    interface().dhcp.start();
+    let _ = interface().dhcp.start();
 
     // begin receieve series
     let buf = vec![0u8; 1500];
@@ -191,9 +190,7 @@ pub fn recv(buf: *mut u8, buf_len: u32) {
         slice::from_raw_parts(buf, buf_len as usize)
     };
 
-    unsafe {
-        ethernet::recv_ethernet_frame(interface(), slice, buf_len);
-    }
+    let _ = ethernet::recv_ethernet_frame(interface(), slice, buf_len);
 }
 
 pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {

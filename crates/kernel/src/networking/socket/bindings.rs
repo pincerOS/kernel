@@ -2,7 +2,6 @@ use core::fmt::{Display, Formatter, Result as FmtResult};
 use core::hash::Hash;
 use core::sync::atomic::{AtomicU16, Ordering};
 
-use alloc::collections::btree_set::BTreeSet;
 use alloc::vec::Vec;
 
 use crate::device::usb::device::net::interface;

@@ -326,9 +326,9 @@ pub fn rndis_set_msg(device: &mut UsbDevice, oid: OID, value: u32) -> ResultCode
         return ResultCode::ErrorDevice;
     }
 
-    let msg_cmplt = unsafe { &*(buffer as *mut RndisSetMsgCmplt) };
+    let _msg_cmplt = unsafe { &*(buffer as *mut RndisSetMsgCmplt) };
     let message_type = buffer.message_type;
-    let message_length = buffer.message_length;
+    let _message_length = buffer.message_length;
     let request_id = buffer.request_id;
     let status = buffer.status;
 
