@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bytemuck = { version = "1.21.0", features = ["derive", "min_const_generics"] }
+bytemuck = { version = "1.21.0", features = ["min_const_generics"] }
 
 [features]
 std = []
-default = ["std"]
+default = []

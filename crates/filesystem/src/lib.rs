@@ -1,24 +1,6 @@
 #![no_std]
 #![warn(clippy::large_stack_arrays)]
 
-// initial alex suggestions:
-// want to move away from strings and use bytes
-// minimize usage of vec
-// get_word and get_half_word to from_bytes_le
-// alloc::vec::Vec and alloc::string::String instead of std::prelude
-// no intermediate vec for find() of dir entries
-// make read_inode_block simpler
-// read_block
-// logical_block_length -> logical_block_count
-// BLOCK_SIZE converting from a constant to superblock-defined (urgent)
-// make a slice of the buffer and use that on logical block read
-// trim_end_matches is wrong: after we read in truncate to the right length
-// at the first part read blocks and then go through directory entries because ext provides a
-// guranteee that dir entries wont cross boundaries--should get rid of raw bytes
-// making a get_dir_entries external iteration code (check code alex sent Bobby on Discord)
-// for test writing use python bytes syntax to get array of bytes instead of string
-// if you see an error and dont know about it use cargo check
-
 extern crate alloc;
 
 use alloc::collections::BTreeMap;
@@ -33,13 +15,8 @@ use core::slice;
 
 use i_mode::{EXT2_S_IFDIR, EXT2_S_IFREG};
 
-#[cfg(feature = "std")]
-extern crate std;
-
-#[cfg(feature = "std")]
-use std::print;
-
 #[cfg(test)]
+#[cfg(feature = "std")]
 mod tests;
 
 #[cfg(feature = "std")]
@@ -96,19 +73,11 @@ pub trait BlockDevice {
         Ok(())
     }
 
-    fn write_sectors(
-        &mut self,
-        start_index: u64,
-        sectors: usize,
-        buffer: &[u8],
-    ) -> Result<(), BlockDeviceError> {
-        let mut tmp_buf: [u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
-        for i in 0..sectors {
-            let cur_sector = start_index + (i as u64);
-            for j in 0..SECTOR_SIZE {
-                tmp_buf[j] = buffer[(i * SECTOR_SIZE) + j];
-            }
-            self.write_sector(cur_sector, &tmp_buf)?;
+    fn write_sectors(&mut self, start_index: u64, buffer: &[u8]) -> Result<(), BlockDeviceError> {
+        assert!(buffer.len() % SECTOR_SIZE == 0);
+        for (buf_segment, sector) in buffer.chunks_exact(SECTOR_SIZE).zip(start_index..) {
+            let array: &[u8; SECTOR_SIZE] = buf_segment.try_into().unwrap();
+            self.write_sector(sector, array)?;
         }
         Ok(())
     }
@@ -125,7 +94,7 @@ pub struct Ext2<Device> {
 type DeferredWriteMap = BTreeMap<usize, Vec<u8>>;
 
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone)]
 struct DirectoryEntryData {
     inode_num: u32,
     rec_len: u16,
@@ -133,6 +102,8 @@ struct DirectoryEntryData {
     file_type: u8,
     name_characters: [u8; 0],
 }
+
+const _: () = assert!(size_of::<DirectoryEntryData>() == 8);
 
 pub struct DirectoryEntryRef<'a> {
     inode_num: u32,
@@ -151,7 +122,7 @@ impl DirectoryEntryData {
 // https://www.nongnu.org/ext2-doc/ext2.html
 
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone)]
 pub struct Superblock {
     s_inodes_count: u32,
     s_blocks_count: u32,
@@ -202,6 +173,8 @@ pub struct Superblock {
     s_first_meta_bg: u32,
     unused_alignment_4: [u8; 760],
 }
+
+const _: () = assert!(size_of::<Superblock>() == 1024);
 
 impl Superblock {
     fn get_num_of_block_groups(&self) -> u32 {
@@ -268,10 +241,8 @@ pub mod s_algo_bitmap {
     pub const EXT2_LZO_ALG: u32 = 0x0010;
 }
 
-const _: () = assert!(size_of::<Superblock>() == 1024);
-
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone)]
 pub struct BGD {
     bg_block_bitmap: u32,
     bg_inode_bitmap: u32,
@@ -286,7 +257,7 @@ pub struct BGD {
 const _: () = assert!(size_of::<BGD>() == 32);
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug)]
 pub struct INode {
     i_mode: u16,
     i_uid: u16,
@@ -307,6 +278,8 @@ pub struct INode {
     i_faddr: u32,
     i_osd2: [u8; 12],
 }
+
+const _: () = assert!(size_of::<INode>() == 128);
 
 struct INodeBlockInfo {
     block_num: usize,
@@ -364,8 +337,6 @@ pub mod i_flags {
     pub const EXT2_RESERVED_FL: u32 = 0x80000000;
 }
 
-const _: () = assert!(size_of::<INode>() == 128);
-
 pub mod file_type {
     pub const EXT2_FT_UNKNOWN: u8 = 0;
     pub const EXT2_FT_REG_FILE: u8 = 1;
@@ -384,6 +355,18 @@ pub struct INodeWrapper {
     inode: INode,
     _inode_num: u32,
 }
+
+unsafe impl bytemuck::Zeroable for DirectoryEntryData {}
+unsafe impl bytemuck::Pod for DirectoryEntryData {}
+
+unsafe impl bytemuck::Zeroable for Superblock {}
+unsafe impl bytemuck::Pod for Superblock {}
+
+unsafe impl bytemuck::Zeroable for BGD {}
+unsafe impl bytemuck::Pod for BGD {}
+
+unsafe impl bytemuck::Zeroable for INode {}
+unsafe impl bytemuck::Pod for INode {}
 
 // TODO(Bobby): replace this with how we get time without std
 #[cfg(feature = "std")]
@@ -454,10 +437,9 @@ where
         assert_eq!(buffer.len(), block_size);
         let start_sector_numerator: usize = logical_block_start * block_size;
         let start_sector: usize = start_sector_numerator / SECTOR_SIZE;
-        let sectors: usize = block_size / SECTOR_SIZE;
 
         let write_result: Result<(), BlockDeviceError> =
-            device.write_sectors(start_sector as u64, sectors, buffer);
+            device.write_sectors(start_sector as u64, buffer);
 
         if write_result.is_ok() {
             Ok(())
@@ -509,11 +491,8 @@ where
         inode_num: usize,
         deferred_writes: Option<&DeferredWriteMap>,
     ) -> Result<INode, Ext2Error> {
-        let inode_block_info: INodeBlockInfo = Self::get_block_that_has_inode(
-            superblock,
-            block_group_descriptor_tables,
-            inode_num,
-        );
+        let inode_block_info: INodeBlockInfo =
+            Self::get_block_that_has_inode(superblock, block_group_descriptor_tables, inode_num);
         let block_size = superblock.get_block_size();
         let mut block_buffer: Vec<u8> = vec![0; block_size];
 
@@ -1222,19 +1201,18 @@ where
     }
 
     pub fn num_of_block_groups(&self) -> usize {
-        let num_of_block_groups_from_blocks: usize = ((self.superblock.s_blocks_count as f32)
-            / (self.superblock.s_blocks_per_group as f32))
-            .ceil() as usize;
-        let num_of_block_groups_from_inodes: usize = ((self.superblock.s_inodes_count as f32)
-            / (self.superblock.s_inodes_per_group as f32))
-            .ceil() as usize;
+        let bg_count_from_blocks = self
+            .superblock
+            .s_blocks_count
+            .div_ceil(self.superblock.s_blocks_per_group);
+        let bg_count_from_inodes = self
+            .superblock
+            .s_inodes_count
+            .div_ceil(self.superblock.s_inodes_per_group);
 
-        assert_eq!(
-            num_of_block_groups_from_blocks,
-            num_of_block_groups_from_inodes
-        );
+        assert_eq!(bg_count_from_blocks, bg_count_from_inodes);
 
-        num_of_block_groups_from_blocks
+        bg_count_from_blocks as usize
     }
 
     pub fn get_inline_block_capacity(&self) -> usize {
@@ -1519,7 +1497,7 @@ impl INodeWrapper {
         &self,
         ext2: &mut Ext2<D>,
         num_of_blocks: usize,
-        all_blocks_or_fail: bool,
+        _all_blocks_or_fail: bool,
         deferred_writes: &mut DeferredWriteMap,
     ) -> Result<Vec<usize>, Ext2Error> {
         let block_size: usize = ext2.superblock.get_block_size();
@@ -2141,7 +2119,7 @@ impl INodeWrapper {
         // TODO:
         let mut deferred_writes = BTreeMap::new();
         let block_size: usize = ext2.superblock.get_block_size();
-        let block_info: INodeBlockInfo = Ext2::<D>::get_block_that_has_inode(
+        let _block_info: INodeBlockInfo = Ext2::<D>::get_block_that_has_inode(
             &ext2.superblock,
             &ext2.block_group_descriptor_tables,
             self._inode_num as usize,
@@ -2253,8 +2231,9 @@ impl INodeWrapper {
             self.update_size(bytes_written, ext2);
             self.get_deferred_write_inode(ext2, &mut deferred_writes)?;
             ext2.write_back_deferred_writes(deferred_writes)?;
+
             let new_slice: &[u8] = &new_data[allocated_block_count * block_size..new_data.len()];
-            bytes_written += self.append_file(ext2, new_slice, all_bytes_or_fail)? as u64;
+            self.append_file(ext2, new_slice, all_bytes_or_fail)?;
         } else {
             self.truncate_file(ext2, new_data.len() as u64 - self.size() as u64)?;
             for i in 0..allocated_block_count {
