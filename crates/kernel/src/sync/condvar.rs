@@ -5,6 +5,7 @@ use crate::event::task::event_for_waker;
 use crate::event::{scheduler::Queue, Event, SCHEDULER};
 
 use super::lock::SpinLockGuard;
+use super::SpinLock;
 
 /// A condition variable.
 ///
@@ -71,14 +72,9 @@ impl Condvar {
     where
         T: Send + Sync,
     {
-        let lock = guard.lock;
-        let task = WaitFuture {
-            this: self,
-            guard: Some(guard),
-        };
-        async {
-            task.await;
-            lock.lock()
+        WaitFuture {
+            this: Some(self),
+            lock: guard.lock,
         }
     }
 
@@ -89,19 +85,23 @@ impl Condvar {
     /// checking if the condition specified by the passed closure is
     /// satisfied.  When the condition is false, this will return a
     /// newly locked lock-guard to the caller.
-    pub async fn wait_while<'a, T, F>(
-        &self,
-        mut guard: SpinLockGuard<'a, T>,
-        mut condition: F,
-    ) -> SpinLockGuard<'a, T>
+    pub fn wait_while<'a, 'b, T, F>(
+        &'b self,
+        guard: SpinLockGuard<'a, T>,
+        condition: F,
+    ) -> impl Future<Output = SpinLockGuard<'a, T>> + use<'a, 'b, T, F>
     where
         F: FnMut(&mut T) -> bool + Send + Sync,
         T: Send + Sync,
     {
-        while condition(&mut *guard) {
-            guard = self.wait(guard).await;
+        let lock = guard.lock;
+        core::mem::forget(guard);
+        WaitWhileFuture {
+            this: self,
+            lock,
+            first_time: true,
+            condition,
         }
-        guard
     }
 
     /// Block the current thread until the condition variable has been
@@ -113,7 +113,8 @@ impl Condvar {
     pub fn wait_blocking<'a, T>(&self, guard: SpinLockGuard<'a, T>) -> SpinLockGuard<'a, T> {
         let lock = guard.lock;
         core::mem::forget(guard);
-        context_switch(SwitchAction::QueueAddUnlock(&self.queue, &lock.inner));
+        let inner = unsafe { lock.get_inner() };
+        context_switch(SwitchAction::QueueAddUnlock(&self.queue, inner));
         lock.lock()
     }
 
@@ -138,32 +139,83 @@ impl Condvar {
 }
 
 struct WaitFuture<'a, 'b, T> {
-    this: &'b Condvar,
-    guard: Option<SpinLockGuard<'a, T>>,
+    this: Option<&'b Condvar>,
+    lock: &'a SpinLock<T>,
 }
 
 unsafe impl<T: Send> Send for WaitFuture<'_, '_, T> {}
 
-impl<T> Future for WaitFuture<'_, '_, T> {
-    type Output = ();
+impl<'a, T> Future for WaitFuture<'a, '_, T> {
+    type Output = SpinLockGuard<'a, T>;
     fn poll(
         mut self: core::pin::Pin<&mut Self>,
         ctx: &mut core::task::Context<'_>,
     ) -> core::task::Poll<Self::Output> {
-        match self.guard.take() {
-            Some(guard) => {
+        match self.this.take() {
+            Some(this) => {
                 // TODO: this is a hack that only works on our executor,
                 // and will break other async libraries
                 let task = event_for_waker(ctx.waker()).unwrap();
-                self.this.queue.add(task);
-                drop(guard);
+                this.queue.add(task);
+                let inner = unsafe { self.lock.get_inner() };
+                inner.unlock();
                 core::task::Poll::Pending
             }
             None => {
                 // TODO: make sure the task wasn't just spuriously polled
                 // (track if notify was called on this specific one)
-                core::task::Poll::Ready(())
+                let inner = self.lock.lock();
+                core::task::Poll::Ready(inner)
             }
+        }
+    }
+}
+
+// This is just:
+// async move {
+//     while condition(&mut *guard) {
+//         guard = self.wait(guard).await;
+//     }
+//     guard
+// }
+// But Rust is currently really bad at small future sizes:
+// https://github.com/rust-lang/rust/issues/62958
+struct WaitWhileFuture<'a, 'b, T, F> {
+    this: &'b Condvar,
+    lock: &'a SpinLock<T>,
+    condition: F,
+    first_time: bool,
+}
+
+unsafe impl<T: Send, F: Send> Send for WaitWhileFuture<'_, '_, T, F> {}
+
+impl<'a, T, F> Future for WaitWhileFuture<'a, '_, T, F>
+where
+    F: FnMut(&mut T) -> bool + Send + Sync,
+{
+    type Output = SpinLockGuard<'a, T>;
+    fn poll(
+        self: core::pin::Pin<&mut Self>,
+        ctx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Self::Output> {
+        let this = unsafe { self.get_unchecked_mut() };
+        let mut guard = if this.first_time {
+            // already locked
+            this.first_time = false;
+            unsafe { this.lock.force_acquire() }
+        } else {
+            this.lock.lock()
+        };
+
+        if !(this.condition)(&mut *guard) {
+            core::task::Poll::Ready(guard)
+        } else {
+            // TODO: this is a hack that only works on our executor,
+            // and will break other async libraries
+            let task = event_for_waker(ctx.waker()).unwrap();
+            this.this.queue.add(task);
+            drop(guard);
+            core::task::Poll::Pending
         }
     }
 }

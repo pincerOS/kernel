@@ -56,7 +56,7 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
         if flags == 1 {
             // Same process, shared memory
             process = old_process.clone();
-            wait_fd = (-1isize) as usize;
+            wait_fd = i32::MAX as usize;
         } else {
             process = Arc::new(old_process.fork().await);
             let descriptor = WaitFd(process.exit_code.clone());
@@ -105,7 +105,7 @@ struct WaitFd(Arc<BlockingOnceCell<ExitStatus>>);
 impl FileDescriptor for WaitFd {
     fn is_same_file(&self, other: &dyn FileDescriptor) -> bool {
         let other = other.as_any().downcast_ref::<Self>();
-        other.map(|o| Arc::ptr_eq(&self.0, &o.0)).unwrap_or(true)
+        other.map(|o| Arc::ptr_eq(&self.0, &o.0)).unwrap_or(false)
     }
     fn kind(&self) -> fd::FileKind {
         fd::FileKind::Other

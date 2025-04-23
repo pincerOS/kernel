@@ -2,6 +2,13 @@
 
 set -e
 
+# Check if sdcard.img exists, create it if not
+if [ ! -f sdcard.img ]; then
+    echo "Creating SD card image"
+    qemu-img create -f raw sdcard.img 32M
+    echo "SD card image created"
+fi
+
 QEMU_TARGET_HARDWARE=${QEMU_TARGET_HARDWARE-"-M raspi4b -dtb bcm2711-rpi-4-b.dtb"}
 QEMU_DEBUG=${QEMU_DEBUG-"mmu,guest_errors"}
 QEMU_DISPLAY=${QEMU_DISPLAY-"none"}
@@ -38,6 +45,7 @@ SERIAL_ALT="pipe:$UART_PIPE"
 qemu-system-aarch64 \
     ${QEMU_TARGET_HARDWARE} \
     -kernel kernel.bin \
+    -drive file=sdcard.img,if=sd,format=raw \
     -serial stdio \
     -serial "${SERIAL_ALT}" \
     -display "${QEMU_DISPLAY}" \
@@ -49,4 +57,4 @@ qemu-system-aarch64 \
 # -device usb-net,netdev=net0 \
 # -netdev user,id=net0,hostfwd=tcp::2222-:22 \
 # -object filter-dump,id=f1,netdev=net0,file=net0.pcap \
-# -trace enable=net*\
+# -trace enable=net* \
