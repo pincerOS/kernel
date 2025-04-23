@@ -353,9 +353,11 @@ pub fn page_fault_handler(ctx: &mut Context, far: usize, _iss: DataAbortISS) -> 
         match vme {
             None => {
                 let exit_code = &proc.exit_code;
-                exit_code.set(crate::process::ExitStatus {
-                    status: -1i32 as u32,
-                });
+                exit_code
+                    .try_set(crate::process::ExitStatus {
+                        status: -1i32 as u32,
+                    })
+                    .ok();
                 drop(mem);
 
                 println!("Invalid user access at addr {far:#10x}");
