@@ -210,19 +210,19 @@ pub fn HidAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         }
     }
 
-    let _header =
-        device.full_configuration.as_mut().unwrap().as_mut_ptr() as *mut UsbDescriptorHeader;
-    {
-        let mut buffer = Box::new([0u8; 30]);
-        let _result = HidGetReport(
-            device,
-            HidReportType::Feature,
-            0,
-            interface_number as u8,
-            8,
-            buffer.as_mut_ptr(),
-        );
-    }
+    // let _header =
+    //     device.full_configuration.as_mut().unwrap().as_mut_ptr() as *mut UsbDescriptorHeader;
+    // {
+    //     let mut buffer = Box::new([0u8; 30]);
+    //     let _result = HidGetReport(
+    //         device,
+    //         HidReportType::Feature,
+    //         0,
+    //         interface_number as u8,
+    //         8,
+    //         buffer.as_mut_ptr(),
+    //     );
+    // }
 
     //TODO: Hardcoded for keyboard atm
     //https://github.com/tmk/tmk_keyboard/wiki/USB%3A-HID-Usage-Table
