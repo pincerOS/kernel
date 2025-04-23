@@ -24,6 +24,9 @@ typedef uint32_t pixel_t;
 #endif  // CMAP256
 
 
+extern uint32_t DG_ResX;
+extern uint32_t DG_ResY;
+
 extern pixel_t* DG_ScreenBuffer;
 
 void doomgeneric_Create(int argc, char **argv);

@@ -27,8 +27,8 @@ fn main() {
         .define("LINUX", None)
         .define("SNDSERV", None)
         .define("_DEFAULT_SOURCE", None)
-        .define("DOOMGENERIC_RESX", Some("320"))
-        .define("DOOMGENERIC_RESY", Some("240"))
+        .define("DOOMGENERIC_RESX", Some("DG_ResX"))
+        .define("DOOMGENERIC_RESY", Some("DG_ResY"))
         .includes([newlib_root.join("include"), libgcc_include]);
 
     let debug = std::env::var("DEBUG").unwrap();
