@@ -8,16 +8,23 @@ use super::super::usbd::device::*;
  */
 use core::slice;
 
+use crate::device::usb;
 use crate::networking::iface::*;
 use crate::networking::repr::*;
 
+use crate::device::system_timer::micro_delay;
+use crate::device::usb::hcd::dwc::dwc_otg::ms_to_micro;
 use crate::device::usb::types::*;
 use crate::device::usb::usbd::endpoint::register_interrupt_endpoint;
 use crate::device::usb::usbd::endpoint::*;
 use crate::device::usb::usbd::request::*;
+use crate::device::mailbox::HexDisplay;
 use crate::shutdown;
 
 use alloc::boxed::Box;
+use crate::device::usb::device::ax88179::axge_send_packet;
+use crate::device::usb::device::ax88179::axge_init;
+use crate::device::usb::device::ax88179::axge_receive_packet;
 use alloc::vec;
 
 use super::rndis::*;
@@ -25,6 +32,8 @@ use super::rndis::*;
 pub static mut NET_DEVICE: NetDevice = NetDevice {
     receive_callback: None,
     device: None,
+    net_send: None,
+    net_receive: None,
 };
 
 pub static mut INTERFACE: Option<Interface> = None;
@@ -52,26 +61,24 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     //     device.interfaces[interface_number as usize].protocol
     // );
     println!("| Net: Usb Hub Detected");
-    rndis_initialize_msg(device);
 
-    let mut buffer = [0u8; 52];
+    if device.descriptor.vendor_id == 0xB95 && device.descriptor.product_id == 0x1790 {
+        println!("| Net: AX88179 Detected");
+        axge_init(device);
 
-    unsafe {
-        rndis_query_msg(
-            device,
-            OID::OID_GEN_CURRENT_PACKET_FILTER,
-            buffer.as_mut_ptr(),
-            30,
-        );
+        unsafe {
+            NET_DEVICE.net_send = Some(axge_send_packet);
+            NET_DEVICE.net_receive = Some(axge_receive_packet);
+        }
 
-        rndis_set_msg(device, OID::OID_GEN_CURRENT_PACKET_FILTER, 0xF);
+    } else {
+        println!("| Net: RNDIS Device Detected");
+        rndis_init(device);
 
-        rndis_query_msg(
-            device,
-            OID::OID_GEN_CURRENT_PACKET_FILTER,
-            buffer.as_mut_ptr(),
-            30,
-        );
+        unsafe {
+            NET_DEVICE.net_send = Some(rndis_send_packet);
+            NET_DEVICE.net_receive = Some(rndis_receive_packet);
+        }
     }
 
     let driver_data = Box::new(UsbEndpointDevice::new());
@@ -91,21 +98,21 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     //     device.endpoints[interface_number as usize][0 as usize].interval
     // );
 
-    register_interrupt_endpoint(
-        device,
-        device.endpoints[interface_number as usize][0 as usize].interval as u32,
-        endpoint_address_to_num(
-            device.endpoints[interface_number as usize][0 as usize].endpoint_address,
-        ),
-        UsbDirection::In,
-        size_from_number(
-            device.endpoints[interface_number as usize][0 as usize]
-                .packet
-                .MaxSize as u32,
-        ),
-        0,
-        10,
-    );
+    // register_interrupt_endpoint(
+    //     device,
+    //     device.endpoints[interface_number as usize][0 as usize].interval as u32,
+    //     endpoint_address_to_num(
+    //         device.endpoints[interface_number as usize][0 as usize].endpoint_address,
+    //     ),
+    //     UsbDirection::In,
+    //     size_from_number(
+    //         device.endpoints[interface_number as usize][0 as usize]
+    //             .packet
+    //             .MaxSize as u32,
+    //     ),
+    //     0,
+    //     10,
+    // );
 
     // 1. new network interface
     // 2. initialize mac address
@@ -152,7 +159,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // to us through the rgistered `recv` function which then queues another receive
     let buf = vec![0u8; 1500];
     unsafe {
-        rndis_receive_packet(device, buf.into_boxed_slice(), 1500); // TODO: ask aaron if I need to use another function?
+        NetInitiateReceive(buf.into_boxed_slice(), 1500); // TODO: ask aaron if I need to use another function?
     }
 
     // start dhcp
@@ -165,6 +172,30 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // socket::socket_send_loop();
 
     return ResultCode::OK;
+}
+
+pub fn NetInitiateReceive(buffer: Box<[u8]>, buffer_length: u32) {
+    unsafe {
+        if let Some(receive_func) = NET_DEVICE.net_receive {
+            let device = NET_DEVICE.device.unwrap();
+            let usb_device = &mut *device;
+            receive_func(usb_device, buffer, buffer_length);
+        } else {
+            println!("| Net: No callback for initiate receive.");
+        }
+    }
+}
+
+pub fn NetSendPacket(buffer: *mut u8, buffer_length: u32) {
+    unsafe {
+        if let Some(send_func) = NET_DEVICE.net_send {
+            let device = NET_DEVICE.device.unwrap();
+            let usb_device = &mut *device;
+            send_func(usb_device, buffer, buffer_length);
+        } else {
+            println!("| Net: No callback for send.");
+        }
+    }
 }
 
 pub unsafe fn recv(buf: *mut u8, buf_len: u32) {
@@ -181,16 +212,16 @@ pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
         return;
     }
 
-    if buffer32[0] != 0 {
-        println!("| Net: Buffer1: {:?}", buffer32[0]);
-        shutdown();
+    if buffer_length > 0 {
+        println!("| NET: analyze {:x}", HexDisplay(unsafe { core::slice::from_raw_parts(buffer, buffer_length as usize) }));
+        // TODO:
     }
 }
 
 pub fn NetSend(_buffer: *mut u8, _buffer_length: u32) {
-    // Do nothing for now
-    // Called when USB packet is actually sent out
-    println!("NetSend called");
+    //Do nothing for now
+    //Called when USB packet is actually sent out
+    // println!("| Net: Sent of length {}", _buffer_length);
 }
 
 pub unsafe fn NetReceive(buffer: *mut u8, buffer_length: u32) {
@@ -204,6 +235,10 @@ pub unsafe fn NetReceive(buffer: *mut u8, buffer_length: u32) {
             println!("| Net: No callback for receive.");
         }
     }
+
+    // let mut device = unsafe { &mut *NET_DEVICE.device.unwrap() };
+    // let b = Box::new([0u8; 1]);
+    // NetInitiateReceive(device,b, 1500);
 }
 
 pub fn RegisterNetReceiveCallback(callback: unsafe fn(*mut u8, u32)) {
@@ -212,23 +247,13 @@ pub fn RegisterNetReceiveCallback(callback: unsafe fn(*mut u8, u32)) {
     }
 }
 
-pub unsafe fn NetSendPacket(buffer: *mut u8, buffer_length: u32) {
-    unsafe {
-        if let Some(device) = NET_DEVICE.device {
-            let usb_dev = &mut *device;
-            rndis_send_packet(usb_dev, buffer, buffer_length);
-        } else {
-            println!("| Net: No device found.");
-            shutdown();
-        }
-    }
-}
 
 pub struct NetDevice {
     pub receive_callback: Option<unsafe fn(*mut u8, u32)>,
     // pub receive_callback: Option<fn(&mut Interface, &[u8], u32)>,
     pub device: Option<*mut UsbDevice>,
-    // pub default_interface: Option<Box<Interface>>,
+    pub net_send: Option<unsafe fn(&mut UsbDevice, *mut u8, u32) -> ResultCode>,
+    pub net_receive: Option<unsafe fn(&mut UsbDevice, Box<[u8]>, u32) -> ResultCode>,
 }
 
 #[repr(u32)]

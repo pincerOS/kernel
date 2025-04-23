@@ -2,7 +2,7 @@ use crate::networking::iface::{arp, ipv4, Interface};
 use crate::networking::repr::{EthernetAddress, EthernetFrame, EthernetType};
 use crate::networking::{Error, Result};
 
-use crate::device::usb::device::net::NET_DEVICE;
+use crate::device::usb::device::net::{NetInitiateReceive, NET_DEVICE};
 use crate::device::usb::device::rndis::rndis_receive_packet;
 use crate::event::thread;
 
@@ -58,7 +58,8 @@ pub fn recv_ethernet_frame(interface: &mut Interface, eth_buffer: &[u8], _len: u
         let buf = vec![0u8; 1500];
         unsafe {
             let device = &mut *NET_DEVICE.device.unwrap();
-            rndis_receive_packet(device, buf.into_boxed_slice(), 1500);
+            // rndis_receive_packet(device, buf.into_boxed_slice(), 1500);
+            NetInitiateReceive(buf.into_boxed_slice(), 1500);
         }
     });
 
