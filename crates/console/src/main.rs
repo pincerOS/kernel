@@ -109,13 +109,18 @@ pub extern "C" fn main() {
         (shell, shell_stdin_tx, shell_stdout_rx)
     };
 
-    loop {
+    'outer: loop {
         let time_us = unsafe { ulib::sys::sys_get_time_ms() as u64 } * 1000;
 
         while let Some(ev) = buf.server_to_client_queue().try_recv() {
             match ev.kind {
                 proto::EventKind::INPUT => {
                     handle_input(ev, &mut modifiers, &mut editor, shell_stdin_tx, time_us)
+                }
+                proto::EventKind::REQUEST_CLOSE => {
+                    println!("Close requested, exiting.");
+                    // TODO: kill child process?
+                    break 'outer;
                 }
                 _ => (),
             }
@@ -151,6 +156,13 @@ pub extern "C" fn main() {
         // signal(video)? for sync
         ulib::sys::sem_down(buf.get_sem_fd(buf.present_sem)).unwrap();
     }
+
+    buf.client_to_server_queue()
+        .try_send(proto::Event {
+            kind: proto::EventKind::DISCONNECT,
+            data: [0; 7],
+        })
+        .ok();
 }
 
 fn render_grid(

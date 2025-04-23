@@ -153,14 +153,18 @@ struct WindowManager {
     layering: Vec<Index>,
 
     active: Option<Index>,
+    mouse_down: bool,
 
     dragging: Option<(Index, U16Vec2)>,
+
+    request_close: Vec<Index>,
 }
 
 enum HoveredState {
     None,
     Window(Index, U16Vec2),
     Titlebar(Index, U16Vec2),
+    CloseButton(Index),
 }
 
 impl WindowManager {
@@ -172,6 +176,8 @@ impl WindowManager {
             layering: Vec::new(),
             active: None,
             dragging: None,
+            mouse_down: false,
+            request_close: Vec::new(),
         }
     }
 
@@ -207,6 +213,7 @@ impl WindowManager {
     }
 
     fn remove_window(&mut self, window: Index) {
+        // TODO: alt-f4 can leave windows active, but receiving no input until alt-tab
         self.windows.remove(window);
         self.layering.retain(|f| *f != window);
         if self.active == Some(window) {
@@ -238,38 +245,31 @@ impl WindowManager {
 
     fn hovered(&self, cursor: U16Vec2) -> HoveredState {
         let title_height = 12;
+        let close_width = 12;
+
         for (idx, window) in self.iter_windows_draw_order_rev() {
             let x_range = window.pos.x..window.pos.x.saturating_add(window.size.x);
-            let title_y_range = window.pos.y..window.pos.y.saturating_add(title_height);
-            let window_y_range = window.pos.y.saturating_add(title_height)
-                ..window.pos.y.saturating_add(window.size.y);
+            let y_top = window.pos.y;
+            let y_split = window.pos.y.saturating_add(title_height);
+            let y_bottom = y_split.saturating_add(window.size.y);
+
+            let title_y_range = y_top..y_split;
+            let window_y_range = y_split..y_bottom;
             if x_range.contains(&cursor.x) && title_y_range.contains(&cursor.y) {
-                return HoveredState::Titlebar(idx, cursor - window.pos);
+                let close_x = window.pos.x + window.size.x - close_width;
+                let close_range_x = close_x..close_x + close_width;
+                let close_range_y = window.pos.y..window.pos.y + close_width;
+                if close_range_x.contains(&cursor.x) && close_range_y.contains(&cursor.y) {
+                    return HoveredState::CloseButton(idx);
+                } else {
+                    return HoveredState::Titlebar(idx, cursor - window.pos);
+                }
             } else if x_range.contains(&cursor.x) && window_y_range.contains(&cursor.y) {
-                return HoveredState::Window(
-                    idx,
-                    cursor - window.pos - U16Vec2::new(0, title_height),
-                );
+                let local_pos = cursor - window.pos - U16Vec2::new(0, title_height);
+                return HoveredState::Window(idx, local_pos);
             }
         }
         HoveredState::None
-    }
-
-    fn click(&mut self, button: u8, pressed: bool, cursor: U16Vec2) {
-        if button == 1 && pressed {
-            match self.hovered(cursor) {
-                HoveredState::None => (),
-                HoveredState::Titlebar(idx, offset) => {
-                    self.dragging = Some((idx, offset));
-                    self.select_window(idx);
-                }
-                HoveredState::Window(idx, _local_pos) => {
-                    self.select_window(idx);
-                }
-            }
-        } else if button == 1 && !pressed {
-            self.dragging = None;
-        }
     }
 
     fn mouse_move(&mut self, new_cursor: U16Vec2) {
@@ -284,6 +284,16 @@ impl WindowManager {
     fn iter_windows_draw_order_rev(&self) -> impl Iterator<Item = (Index, &Window)> {
         self.layering.iter().rev().map(|i| (*i, &self.windows[*i]))
     }
+}
+
+fn load_image(img: &[u8]) -> (usize, usize, Vec<u32>) {
+    let (header, data) = gfx::format::qoi::read_qoi_header(img).unwrap();
+    let width = header.width as usize;
+    let height = header.height as usize;
+    // Decode image into a bitmap buffer
+    let mut buf = alloc::vec![0u32; width * height];
+    gfx::format::qoi::decode_qoi(&header, data, &mut buf, width);
+    (width, height, buf)
 }
 
 fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
@@ -303,13 +313,13 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
     // TODO: vsync / rate management
 
     // Load image (included directly in the binary)
-    let img = include_bytes!("../cursor.qoi");
-    let (cursor_header, cursor_data) = gfx::format::qoi::read_qoi_header(img).unwrap();
-    let cursor_width = cursor_header.width as usize;
-    let cursor_height = cursor_header.height as usize;
-    // Decode image into a bitmap buffer
-    let mut cursor_buf = alloc::vec![0u32; cursor_width * cursor_height];
-    gfx::format::qoi::decode_qoi(&cursor_header, cursor_data, &mut cursor_buf, cursor_width);
+    let img = include_bytes!("../assets/cursor.qoi");
+    let (cursor_width, cursor_height, cursor_buf) = load_image(img);
+
+    let (close_width, close_height, close_buf) = load_image(include_bytes!("../assets/close.qoi"));
+    let (close2_width, close2_height, close2_buf) =
+        load_image(include_bytes!("../assets/close-pressed.qoi"));
+    assert!(close_height == close2_height && close_width == close2_width);
 
     let mut to_remove = Vec::<Index>::new();
 
@@ -363,7 +373,7 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                     data4: 0,
                 };
                 let queue = client.handle.server_to_client_queue();
-                queue.try_send_data(event).map_err(drop).unwrap();
+                queue.try_send_data(event).ok();
             }
         }
 
@@ -374,8 +384,34 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                 match ev.code {
                     0x1001..=0x1005 => {
                         let button = ev.code - 0x1000;
-                        let state = ev.value != 0;
-                        window_manager.click(button as u8, state, cursor);
+                        let pressed = ev.value != 0;
+                        let hovered = window_manager.hovered(cursor);
+
+                        if button == 1 && pressed {
+                            match hovered {
+                                HoveredState::None => (),
+                                HoveredState::Titlebar(idx, offset) => {
+                                    window_manager.dragging = Some((idx, offset));
+                                    window_manager.select_window(idx);
+                                }
+                                HoveredState::Window(idx, _local_pos) => {
+                                    window_manager.select_window(idx);
+                                }
+                                HoveredState::CloseButton(_idx) => {
+                                    // window_manager.request_close.push(idx);
+                                }
+                            }
+                            window_manager.mouse_down = true;
+                        } else if button == 1 && !pressed {
+                            match hovered {
+                                HoveredState::CloseButton(idx) => {
+                                    window_manager.request_close.push(idx);
+                                }
+                                _ => (),
+                            }
+                            window_manager.dragging = None;
+                            window_manager.mouse_down = false;
+                        }
                     }
                     _ => (),
                 }
@@ -397,6 +433,17 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                     println!("Mouse wheel: {}", ev.value as i32);
                 }
             }
+        }
+
+        for to_close in window_manager.request_close.drain(..) {
+            let window = &window_manager.windows[to_close];
+            let client = &mut clients[window.client];
+            client
+                .handle
+                .server_to_client_queue()
+                .try_send_data(proto::RequestCloseEvent)
+                .ok();
+            // TODO: if queue is full / etc, track non-acknowledgement and kill anyways
         }
 
         for (i, client) in clients.iter_mut() {
@@ -428,9 +475,14 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
         }
 
         let title_height = 12;
+        let title_bg_color_active = 0xFFFFFFFF;
+        let title_bg_color_inactive = 0xFFCCCCCC;
 
-        for (_idx, window) in window_manager.iter_windows_draw_order() {
+        let hovered = window_manager.hovered(cursor);
+
+        for (idx, window) in window_manager.iter_windows_draw_order() {
             let client = &mut clients[window.client];
+            let active = window_manager.active == Some(idx);
 
             let window_x = window.pos.x as usize;
             let window_y = window.pos.y as usize;
@@ -442,7 +494,7 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                 let client_row_stride =
                     client.handle.video_meta.row_stride as usize / size_of::<u32>();
                 let client_fb = &*client.handle.video_mem();
-                blit_buffer(
+                gfx::blit_buffer(
                     out,
                     fb.width,
                     fb.height,
@@ -462,17 +514,49 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
 
             // TODO: draw title bar, borders
 
+            let bg_color = if active {
+                title_bg_color_active
+            } else {
+                title_bg_color_inactive
+            };
+
             let width = client.handle.video_meta.width as usize;
             let effective_width = width.min(fb.width.saturating_sub(window_x));
             for r in window_y..(window_y + title_height).min(fb.height) {
                 let out = bytemuck::cast_slice_mut::<_, u32>(&mut intermediate_fb);
                 let dst_row = &mut out[r * fb.stride + window_x..][..effective_width];
-                dst_row.fill(0xFFFFFFFF);
+                dst_row.fill(bg_color);
             }
+
+            let out = bytemuck::cast_slice_mut::<_, u32>(&mut intermediate_fb);
+            // Draw close button
+
+            let close_pressed = match hovered {
+                HoveredState::CloseButton(i) => i == idx && window_manager.mouse_down,
+                _ => false,
+            };
+
+            let buf = if close_pressed {
+                &close2_buf
+            } else {
+                &close_buf
+            };
+            gfx::blit_buffer_blend(
+                out,
+                fb.width,
+                fb.height,
+                fb.stride,
+                window_x + width - close_width,
+                window_y,
+                buf,
+                close_width,
+                close_height,
+                close_width,
+            );
         }
 
         let out = bytemuck::cast_slice_mut(&mut intermediate_fb);
-        blit_buffer_blend(
+        gfx::blit_buffer_blend(
             out,
             fb.width,
             fb.height,
@@ -503,6 +587,7 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                 window_manager.remove_window(window);
             }
             clients.remove(remove);
+            any_updated = true;
         }
 
         // TODO: composite and present
@@ -510,50 +595,6 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
         // TODO: intermediate buffers to prevent flickering for apps
         // that render slowly
         unsafe { ulib::sys::sys_sleep_ms(10) };
-    }
-}
-
-fn blit_buffer(
-    dst: &mut [u32],
-    dst_w: usize,
-    dst_h: usize,
-    dst_stride: usize,
-    dst_x: usize,
-    dst_y: usize,
-    src: &[u32],
-    src_w: usize,
-    src_h: usize,
-    src_stride: usize,
-) {
-    let effective_width = src_w.min(dst_w.saturating_sub(dst_x));
-    let effective_height = src_h.min(dst_h.saturating_sub(dst_y));
-    for r in 0..effective_height {
-        let src_row = &src[r * src_stride..][..effective_width];
-        let dst_row = &mut dst[(r + dst_y) * dst_stride + dst_x..][..effective_width];
-        dst_row.copy_from_slice(src_row);
-    }
-}
-
-fn blit_buffer_blend(
-    dst: &mut [u32],
-    dst_w: usize,
-    dst_h: usize,
-    dst_stride: usize,
-    dst_x: usize,
-    dst_y: usize,
-    src: &[u32],
-    src_w: usize,
-    src_h: usize,
-    src_stride: usize,
-) {
-    let effective_width = src_w.min(dst_w.saturating_sub(dst_x));
-    let effective_height = src_h.min(dst_h.saturating_sub(dst_y));
-    for r in 0..effective_height {
-        let src_row = &src[r * src_stride..][..effective_width];
-        let dst_row = &mut dst[(r + dst_y) * dst_stride + dst_x..][..effective_width];
-        for (a, b) in src_row.iter().zip(dst_row) {
-            *b = gfx::color::blend(*a, *b);
-        }
     }
 }
 
