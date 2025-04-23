@@ -782,8 +782,8 @@ pub fn UsbAllocateDevice(mut devices: Box<UsbDevice>) -> ResultCode {
                 let hprt = read_volatile(DOTG_HPRT);
                 let speed = match (hprt >> 17) & 0b11 {
                     0b00 => {
-                        // device.speed = UsbSpeed::High;
-                        device.speed = UsbSpeed::Full;
+                        device.speed = UsbSpeed::High;
+                        // device.speed = UsbSpeed::Full;
                         "High-Speed"
                     },
                     0b01 => {
@@ -824,6 +824,7 @@ fn UsbAttachRootHub(bus: &mut UsbBus) -> ResultCode {
     }
 
     bus.devices[0].as_mut().unwrap().status = UsbDeviceStatus::Powered;
+    bus.devices[0].as_mut().unwrap().speed = UsbSpeed::High;
 
     return UsbAttachDevice(&mut (bus.devices[0].as_mut().unwrap()));
 }

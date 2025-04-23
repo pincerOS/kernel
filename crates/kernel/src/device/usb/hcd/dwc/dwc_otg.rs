@@ -1414,12 +1414,12 @@ pub fn DwcInit(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
     //setup clock
     let mut hcfg = read_volatile(DOTG_HCFG);
     hcfg &= !(HCFG_FSLSSUPP | HCFG_FSLSPCLKSEL_MASK);
-    hcfg |= (1 << HCFG_FSLSPCLKSEL_SHIFT) | HCFG_FSLSSUPP;
+    // hcfg |= (1 << HCFG_FSLSPCLKSEL_SHIFT) | HCFG_FSLSSUPP;
     //Host clock: 30-60Mhz
     write_volatile(DOTG_HCFG, hcfg);
 
-    let hfir = 0xBB80;
-    write_volatile(DOTG_HFIR, hfir);
+    // let hfir = 0xBB80;
+    // write_volatile(DOTG_HFIR, hfir);
 
     write_volatile(DOTG_GAHBCFG, GAHBCFG_GLBLINTRMSK);
 
