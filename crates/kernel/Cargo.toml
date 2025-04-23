@@ -17,4 +17,3 @@ endian = { path = "../endian" }
 elf = { path = "../elf" }
 initfs = { path = "../initfs"}
 filesystem = { path = "../filesystem" }
-networking = { path = "../networking"}
