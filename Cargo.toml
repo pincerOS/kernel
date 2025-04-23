@@ -15,6 +15,7 @@ members = [
     "crates/kernel",
     "crates/lz4",
     "crates/shell",
+    "crates/show",
     "crates/ulib",
 ]
 
