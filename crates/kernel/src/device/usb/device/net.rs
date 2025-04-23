@@ -210,7 +210,7 @@ pub fn NetSend(_buffer: *mut u8, _buffer_length: u32) {
     //Called when USB packet is actually sent out
 }
 
-pub fn NetReceive(buffer: *mut u8, buffer_length: u32) {
+pub unsafe fn NetReceive(buffer: *mut u8, buffer_length: u32) {
     println!("| Net: Receive");
 
     unsafe {
