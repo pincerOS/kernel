@@ -217,6 +217,7 @@ impl EventKind {
     pub const PRESENT: EventKind = EventKind(1);
     pub const INPUT: EventKind = EventKind(2);
     pub const DISCONNECT: EventKind = EventKind(3);
+    pub const REQUEST_CLOSE: EventKind = EventKind(5);
 }
 
 #[derive(Copy, Clone)]
@@ -277,6 +278,20 @@ impl EventData for InputEvent {
         let data: [u8; size_of::<Self>()] = unsafe { core::mem::transmute(*self) };
         bytemuck::cast_slice_mut(&mut out)[..size_of::<Self>()].copy_from_slice(&data);
         out
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct RequestCloseEvent;
+
+impl EventData for RequestCloseEvent {
+    const KIND: EventKind = EventKind::REQUEST_CLOSE;
+    fn parse_data(_data: &[u64; 7]) -> Option<Self> {
+        Some(RequestCloseEvent)
+    }
+    fn serialize_data(&self) -> [u64; 7] {
+        [0u64; 7]
     }
 }
 
