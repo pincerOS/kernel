@@ -184,7 +184,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     return ResultCode::OK;
 }
 
-pub fn recv(buf: *mut u8, buf_len: u32) {
+pub unsafe fn recv(buf: *mut u8, buf_len: u32) {
     let slice: &[u8] = unsafe {
         // Ensure ptr is not null and valid for `len` bytes
         slice::from_raw_parts(buf, buf_len as usize)
@@ -223,7 +223,7 @@ pub fn NetReceive(buffer: *mut u8, buffer_length: u32) {
     }
 }
 
-pub fn RegisterNetReceiveCallback(callback: fn(*mut u8, u32)) {
+pub fn RegisterNetReceiveCallback(callback: unsafe fn(*mut u8, u32)) {
     unsafe {
         NET_DEVICE.receive_callback = Some(callback);
     }
@@ -242,7 +242,7 @@ pub unsafe fn NetSendPacket(buffer: *mut u8, buffer_length: u32) {
 }
 
 pub struct NetDevice {
-    pub receive_callback: Option<fn(*mut u8, u32)>,
+    pub receive_callback: Option<unsafe fn(*mut u8, u32)>,
     // pub receive_callback: Option<fn(&mut Interface, &[u8], u32)>,
     pub device: Option<*mut UsbDevice>,
     // pub default_interface: Option<Box<Interface>>,
