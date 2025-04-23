@@ -29,7 +29,7 @@ pub fn send_ipv4_packet(
             // WARN: wait for mac address resolution, this is bad because it will loop infintiely
             // if it doesnt resolve, need to add TTL and decrease
             thread::thread(move || {
-                send_ipv4_packet(interface(), payload, protocol, dst_addr);
+                let _ = send_ipv4_packet(interface(), payload, protocol, dst_addr);
             });
             Err(e)
         }

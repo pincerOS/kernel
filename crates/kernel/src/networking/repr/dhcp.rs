@@ -17,10 +17,10 @@ pub enum MessageType {
     Inform = 8,
 }
 
-#[allow(non_snake_case)]
-pub mod Hardware {
-    pub const ETHERNET: u8 = 1;
-}
+// #[allow(non_snake_case)]
+// pub mod Hardware {
+//     pub const ETHERNET: u8 = 1;
+// }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Packet {

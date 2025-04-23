@@ -4,7 +4,6 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use super::Ipv4Address;
-use crate::networking::utils::checksum::internet_checksum;
 use crate::networking::{Error, Result};
 
 #[allow(non_snake_case)]
