@@ -578,7 +578,7 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         return result;
     }
 
-    println!("| USBD: Full configuration descriptor: {:?}", fullDescriptor);
+    println!("| USBD: Full configuration descriptor: {:?}", fullDescriptor as *mut UsbConfigurationDescriptor);
 
     device.configuration_index = configuration;
     configuration_val = device.configuration.configuration_value;
@@ -590,7 +590,7 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
     let end = (fullDescriptor as usize) + device.configuration.total_length as usize;
     header = unsafe { header.byte_add((*header).descriptor_length as usize) };
     while (header as usize) < end {
-        println!("| USBD: Reading header");
+        println!("| USBD: Reading header {:x} end {:x}", header as usize, end);
         unsafe {
             match (*header).descriptor_type {
                 DescriptorType::Interface => {
