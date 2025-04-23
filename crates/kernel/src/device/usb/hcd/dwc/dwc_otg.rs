@@ -318,6 +318,12 @@ pub unsafe fn HcdTransmitChannel(device: &UsbDevice, channel: u8, buffer: *mut u
     }
 }
 
+pub fn DwcActivateChannel(channel: u8) {
+    let mut hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+    hcchar |= HCCHAR_CHENA;
+    write_volatile(DOTG_HCCHAR(channel as usize), hcchar);
+}
+
 fn HcdChannelInterruptToError(device: &mut UsbDevice, hcint: u32, isComplete: bool) -> ResultCode {
     // let dwc_sc: &mut dwc_hub = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
     let mut result = ResultCode::OK;
