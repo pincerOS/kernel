@@ -19,7 +19,9 @@ pub unsafe fn sys_shutdown(ctx: &mut Context) -> *mut Context {
             println!("Not shutting down...");
             let thread = context.detach_thread();
             let exit_code = &thread.process.as_ref().unwrap().exit_code;
-            exit_code.set(crate::process::ExitStatus { status: 0 as u32 });
+            exit_code
+                .try_set(crate::process::ExitStatus { status: 0 as u32 })
+                .ok();
             unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
         }
     })
@@ -51,9 +53,11 @@ pub unsafe fn sys_exit(ctx: &mut Context) -> *mut Context {
         // TODO: split exit into process exit and thread exit?
         // TODO: ensure processes can't exit without setting this
         let exit_code = &thread.process.as_ref().unwrap().exit_code;
-        exit_code.set(crate::process::ExitStatus {
-            status: status as u32,
-        });
+        exit_code
+            .try_set(crate::process::ExitStatus {
+                status: status as u32,
+            })
+            .ok();
 
         unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
     })
@@ -115,6 +119,29 @@ pub unsafe fn sys_wait(ctx: &mut Context) -> *mut Context {
         let status = file.0.get().await;
 
         context.resume_return(status.status as usize)
+    })
+}
+
+/// syscall try_wait(fd: u32) -> i64
+pub unsafe fn sys_try_wait(ctx: &mut Context) -> *mut Context {
+    let fd = ctx.regs[0];
+
+    run_async_handler(ctx, async move |context: HandlerContext<'_>| {
+        let proc = context.cur_process().unwrap();
+
+        let file = proc.file_descriptors.lock().get(fd).cloned();
+        let Some(file) = file else {
+            return context.resume_return(-1i64 as usize);
+        };
+        let Some(file) = file.as_any().downcast_ref::<WaitFd>() else {
+            return context.resume_return(-1i64 as usize);
+        };
+
+        if let Some(status) = file.0.try_get() {
+            context.resume_return(status.status as usize)
+        } else {
+            context.resume_return(i64::MIN as usize)
+        }
     })
 }
 

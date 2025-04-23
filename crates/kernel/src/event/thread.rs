@@ -223,9 +223,11 @@ impl Thread {
 
     pub fn set_exited(&mut self, status: u32) {
         let exit_code = &self.process.as_ref().unwrap().exit_code;
-        exit_code.set(crate::process::ExitStatus {
-            status: status as u32,
-        });
+        exit_code
+            .try_set(crate::process::ExitStatus {
+                status: status as u32,
+            })
+            .ok();
     }
 }
 

@@ -103,7 +103,7 @@ fn main(argc: usize, argv: *const *const u8) {
         }
     };
 
-    let (_shell, shell_stdin_tx, shell_stdout_rx) = {
+    let (shell, shell_stdin_tx, shell_stdout_rx) = {
         let (shell_stdin_rx, shell_stdin_tx) = pipe(0).unwrap();
         let (shell_stdout_rx, shell_stdout_tx) = pipe(0).unwrap();
 
@@ -126,6 +126,11 @@ fn main(argc: usize, argv: *const *const u8) {
 
     'outer: loop {
         let time_us = unsafe { ulib::sys::sys_get_time_ms() as u64 } * 1000;
+
+        if let Some(_) = ulib::sys::try_wait(shell) {
+            println!("Console child exited, exiting.");
+            break;
+        }
 
         while let Some(ev) = buf.server_to_client_queue().try_recv() {
             match ev.kind {

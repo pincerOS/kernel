@@ -124,6 +124,8 @@ syscall!(28 => pub fn sys_sem_down(fd: usize) -> isize);
 
 syscall!(30 => pub fn sys_poll_mouse_event(buf: *mut u8, buf_len: usize) -> isize);
 
+syscall!(34 => pub fn sys_try_wait(fd: usize) -> isize);
+
 /* * * * * * * * * * * * * * * * * * * */
 /* Syscall wrappers                    */
 /* * * * * * * * * * * * * * * * * * * */
@@ -259,6 +261,15 @@ pub unsafe fn execve_fd(
 pub fn wait(fd: FileDesc) -> Result<usize, usize> {
     let res = unsafe { sys_wait(fd as usize) };
     int_to_error(res)
+}
+
+pub fn try_wait(fd: FileDesc) -> Option<Result<usize, usize>> {
+    let res = unsafe { sys_try_wait(fd as usize) };
+    if res == isize::MIN {
+        None
+    } else {
+        Some(int_to_error(res))
+    }
 }
 
 pub unsafe fn mmap(
