@@ -129,6 +129,7 @@ pub enum UsbPacketSize {
     Bits16,
     Bits32,
     Bits64,
+    Bits512,
 }
 
 pub const fn size_from_number(size: u32) -> UsbPacketSize {
@@ -138,8 +139,10 @@ pub const fn size_from_number(size: u32) -> UsbPacketSize {
         UsbPacketSize::Bits16
     } else if size <= 32 {
         UsbPacketSize::Bits32
-    } else {
+    } else if size <= 64 {
         UsbPacketSize::Bits64
+    } else {
+        UsbPacketSize::Bits512
     }
 }
 
@@ -150,5 +153,6 @@ pub fn size_to_number(packet_size: UsbPacketSize) -> u16 {
         UsbPacketSize::Bits16 => 16,
         UsbPacketSize::Bits32 => 32,
         UsbPacketSize::Bits64 => 64,
+        UsbPacketSize::Bits512 => 512,
     }
 }

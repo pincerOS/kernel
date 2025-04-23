@@ -38,6 +38,7 @@ pub enum UsbDeviceRequestRequest {
     GetStatus = 0,
     ClearFeature = 1,
     SetFeature = 3,
+    Command4 = 4,
     SetAddress = 5,
     GetDescriptor = 6,
     SetDescriptor = 7,
@@ -62,6 +63,26 @@ pub enum UsbDeviceRequestRequest {
     GetLineCoding = 0x21,
     SetControlLineState = 0x22,
     SendBreak = 0x23,
+    Command129 = 129,
+}
+
+pub fn command_to_usb_device_request(
+    cmd: u8,
+) -> UsbDeviceRequestRequest {
+    match cmd {
+        0x00 => UsbDeviceRequestRequest::GetStatus,
+        0x01 => UsbDeviceRequestRequest::ClearFeature,
+        0x02 => UsbDeviceRequestRequest::GetIdle,
+        0x03 => UsbDeviceRequestRequest::SetFeature,
+        0x04 => UsbDeviceRequestRequest::Command4,
+        0x05 => UsbDeviceRequestRequest::SetAddress,
+        0x06 => UsbDeviceRequestRequest::GetDescriptor,
+        0x07 => UsbDeviceRequestRequest::SetDescriptor,
+        0x08 => UsbDeviceRequestRequest::GetConfiguration,
+        0x09 => UsbDeviceRequestRequest::SetConfiguration,
+        129 => UsbDeviceRequestRequest::Command129,
+        _ => panic!("| USBDEVICE REQUEST cmd {} not implemented", cmd),
+    }
 }
 
 impl Default for UsbDeviceRequestRequest {

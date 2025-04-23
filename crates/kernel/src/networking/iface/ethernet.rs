@@ -2,7 +2,7 @@ use crate::networking::iface::{arp, ipv4, Interface};
 use crate::networking::repr::{EthernetAddress, EthernetFrame, EthernetType};
 use crate::networking::{Error, Result};
 
-use crate::device::usb::device::net::NET_DEVICE;
+use crate::device::usb::device::net::{NetInitiateReceive, NET_DEVICE};
 use crate::device::usb::device::rndis::rndis_receive_packet;
 use crate::event::thread;
 

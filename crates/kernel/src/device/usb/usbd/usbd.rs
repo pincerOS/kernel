@@ -165,7 +165,7 @@ pub unsafe fn UsbSendInterruptMessage(
     buffer_length: u32,
     packet_id: PacketId,
     _timeout_: u32,
-    callback: fn(endpoint_descriptor, u32, u8) -> bool,
+    callback: fn(endpoint_descriptor, u32, u8, DWCSplitControlState) -> bool,
     endpoint: endpoint_descriptor,
 ) -> ResultCode {
     let b = Box::new(UsbXfer {
@@ -210,6 +210,10 @@ pub unsafe fn UsbInterruptMessage(
         DWC_CHANNEL_CALLBACK.callback[channel as usize] = Some(usb_xfer.callback.unwrap());
         DWC_CHANNEL_CALLBACK.endpoint_descriptors[channel as usize] =
             Some(usb_xfer.endpoint_descriptor);
+    }
+
+    if usb_xfer.buffer_length != 8 {
+        println!("| USBD: Buffer length is at {} bytes", usb_xfer.buffer_length);
     }
 
     let result = unsafe {
@@ -457,6 +461,8 @@ fn UsbSetConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         return ResultCode::ErrorDevice;
     }
 
+    println!("| USBD: Setting device configuration to {}", configuration);
+
     let result = unsafe {
         UsbControlMessage(
             device,
@@ -499,7 +505,7 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         println!("| USBD: Device not in addressed state");
         return ResultCode::ErrorDevice;
     }
-
+    println!("| USBD: Configuring device {}", device.number);
     let configuration_ptr = &mut device.configuration as *mut UsbConfigurationDescriptor as *mut u8;
     let mut result = unsafe {
         UsbGetDescriptor(
@@ -517,6 +523,8 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         println!("| USBD: Failed to get configuration descriptor");
         return result;
     }
+
+    println!("| USBD: Configuration descriptor: {:?}", device.configuration);
 
     // let configuration_dev = &mut device.configuration;
     // println!(
@@ -552,6 +560,8 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         return result;
     }
 
+    println!("| USBD: Full configuration descriptor: {:?}", fullDescriptor as *mut UsbConfigurationDescriptor);
+
     device.configuration_index = configuration;
     configuration_val = device.configuration.configuration_value;
 
@@ -562,10 +572,12 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
     let end = (fullDescriptor as usize) + device.configuration.total_length as usize;
     header = unsafe { header.byte_add((*header).descriptor_length as usize) };
     while (header as usize) < end {
+        println!("| USBD: Reading header {:x} end {:x}", header as usize, end);
         unsafe {
             match (*header).descriptor_type {
                 DescriptorType::Interface => {
                     let interface = header as *mut UsbInterfaceDescriptor;
+                    println!("| USBD: Interface descriptor: {:?}", interface);
                     if last_interface != (*interface).number as usize {
                         last_interface = (*interface).number as usize;
                         memory_copy(
@@ -574,33 +586,39 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
                             interface as *const u8,
                             size_of::<UsbInterfaceDescriptor>(),
                         );
+                        println!("| USBD: Interface descriptor: {:?}", device.interfaces[last_interface]);
                         last_endpoint = 0;
                         is_alternate = false;
                     } else {
+                        println!("| USBD: Setting alternate interface");
                         is_alternate = true;
                     }
                 }
                 DescriptorType::Endpoint => {
                     if is_alternate {
-                        continue;
+                        println!("| USBD: Skipping alternate interface endpoint");
+                    } else {
+                        if last_interface == MAX_INTERFACES_PER_DEVICE
+                            || last_endpoint
+                                >= device.interfaces[last_interface].endpoint_count as usize
+                        {
+                            println!("| USBD: Unexpected endpoint descriptor interface");
+                            return ResultCode::ErrorDevice;
+                        }
+                        let endpoint = header as *mut UsbEndpointDescriptor;
+                        
+                        memory_copy(
+                            &mut device.endpoints[last_interface][last_endpoint]
+                                as *mut UsbEndpointDescriptor as *mut u8,
+                            endpoint as *const u8,
+                            size_of::<UsbEndpointDescriptor>(),
+                        );
+                        println!("| USBD: Endpoint descriptor: {:?}", device.endpoints[last_interface][last_endpoint]);
+                        last_endpoint += 1;
                     }
-                    if last_interface == MAX_INTERFACES_PER_DEVICE
-                        || last_endpoint
-                            >= device.interfaces[last_interface].endpoint_count as usize
-                    {
-                        println!("| USBD: Unexpected endpoint descriptor interface");
-                        return ResultCode::ErrorDevice;
-                    }
-                    let endpoint = header as *mut UsbEndpointDescriptor;
-                    memory_copy(
-                        &mut device.endpoints[last_interface][last_endpoint]
-                            as *mut UsbEndpointDescriptor as *mut u8,
-                        endpoint as *const u8,
-                        size_of::<UsbEndpointDescriptor>(),
-                    );
-                    last_endpoint += 1;
                 }
                 _ => {
+                    println!("| USBD: Unknown descriptor type");
                     if (*header).descriptor_length == 0 {
                         break;
                     }
@@ -610,6 +628,7 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         }
     }
 
+    println!("| USBD: Finish reading header");
     result = UsbSetConfigure(device, configuration_val);
 
     if result != ResultCode::OK {
@@ -710,6 +729,19 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
             println!("| USBD: No class attach handler");
             shutdown();
         }
+    } else if device.interfaces[0].class == InterfaceClass::InterfaceClassVendorSpecific {
+        println!("| USBD: Vendor specific device");
+
+        if device.descriptor.vendor_id == 0xB95 && device.descriptor.product_id == 0x1790 {
+            println!("| USBD: Net: AX88179 Detected");
+            let class_attach = bus.interface_class_attach[InterfaceClass::InterfaceClassCommunications as usize];
+            let result = class_attach.unwrap()(device, 0);
+            if result != ResultCode::OK {
+                println!("| USBD: Class attach handler failed");
+                return result;
+            }
+        }
+
     } else {
         println!("| USBD: Invalid interface class");
     }
@@ -776,6 +808,7 @@ fn UsbAttachRootHub(bus: &mut UsbBus) -> ResultCode {
     }
 
     bus.devices[0].as_mut().unwrap().status = UsbDeviceStatus::Powered;
+    bus.devices[0].as_mut().unwrap().speed = UsbSpeed::High;
 
     return UsbAttachDevice(&mut (bus.devices[0].as_mut().unwrap()));
 }
