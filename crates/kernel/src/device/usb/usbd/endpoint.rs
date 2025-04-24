@@ -1,3 +1,4 @@
+use crate::device::system_timer::micro_delay;
 /**
  *
  * usbd/endpoint.rs
@@ -123,6 +124,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
         println!("| Endpoint {}: split_control is SSPLIT", channel);
         if hcint & HCINT_NAK != 0 {
             println!("| Endpoint SSPLIT {}: NAK received hcint {:x}", channel, hcint);
+            DwcEnableChannel(channel);
             return false;
         } else if hcint & HCINT_FRMOVRUN != 0 {
             println!("| Endpoint SSPLIT{}: Frame overrun hcint {:x}", channel, hcint);
@@ -130,17 +132,19 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             return false;
         } else if hcint & HCINT_XACTERR != 0 {
             println!("| Endpoint SSPLIT {}: XACTERR received hcint {:x}", channel, hcint);
+            DwcEnableChannel(channel);
             return false;
         } else if hcint & HCINT_ACK != 0 {
             //ACK received
             unsafe {
                 DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] = DWCSplitControlState::CSPLIT;
             }
+            micro_delay(100);
             DwcActivateCsplit(channel);
             return false;
         } else {
             println!("| Endpoint {}: Unknown interrupt, ending task {:x}.", channel, hcint);
-            return false;
+            return true;
         }
     } else if split_control == DWCSplitControlState::CSPLIT {
         println!("| Endpoint {}: split_control is CSPLIT", channel);
@@ -152,6 +156,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             return false;
         } else if hcint & HCINT_XACTERR != 0 {
             println!("| Endpoint CSPLIT {}: XACTERR received hcint {:x}", channel, hcint);
+            micro_delay(100);
             DwcEnableChannel(channel);
             return false;
         } else if hcint & HCINT_NYET != 0 {
@@ -159,6 +164,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             //get hscplt
             let hscplt = read_volatile(DOTG_HCSPLT(channel as usize));
             println!("| Enpoint CSPLIT {}: HCSPLT {:x}", channel, hscplt);
+            micro_delay(100);
             DwcEnableChannel(channel);
             return false;
         }

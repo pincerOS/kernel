@@ -150,16 +150,18 @@ pub fn DwcActivateCsplit(channel: u8) {
     hcsplt |= HCSPLT_COMPSPLT;
     write_volatile(DOTG_HCSPLT(channel as usize), hcsplt);
 
+    let frame = read_volatile(DOTG_HFNUM);
     let mut hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
-    hcchar &= !HCCHAR_CHDIS;
-    hcchar |= HCCHAR_CHENA;
+    hcchar &= !HCCHAR_ODDFRM;
+    hcchar |= (!(frame & 1)) << 29 | HCCHAR_CHENA;
     write_volatile(DOTG_HCCHAR(channel as usize), hcchar);
 }
 
 pub fn DwcEnableChannel(channel: u8) {
+    let frame = read_volatile(DOTG_HFNUM);
     let mut hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
-    hcchar &= !HCCHAR_CHDIS;
-    hcchar |= HCCHAR_CHENA;
+    hcchar &= !HCCHAR_ODDFRM;
+    hcchar |= (!(frame & 1)) << 29 | HCCHAR_CHENA;
     write_volatile(DOTG_HCCHAR(channel as usize), hcchar);
 }
 
