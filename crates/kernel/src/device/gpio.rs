@@ -60,20 +60,6 @@ impl bcm2711_gpio_driver {
         Self { base_addr }
     }
 
-    pub unsafe fn init_with_defaults(base_addr: *mut (), apply_defaults: bool) -> Self {
-        let mut driver = bcm2711_gpio_driver { base_addr };
-
-        if apply_defaults {
-            // Set UART pins
-            driver.set_function(14, GpioFunction::Alt0); // UART TX
-            driver.set_function(15, GpioFunction::Alt0); // UART RX
-
-            // Add more defaults
-        }
-
-        driver
-    }
-
     fn reg_fsel(&self, index: usize) -> Volatile<u32> {
         Volatile(
             self.base_addr

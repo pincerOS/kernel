@@ -314,10 +314,10 @@ impl VideoCoreMailbox {
         // TODO: translate buffer addresses for non-property calls
         // (GPU memory and CPU memory may have different virtual addresses)
 
-        println!(
-            "mailbox_call({channel}, {value:#x}, {:x})",
-            HexDisplay(bytemuck::cast_slice::<_, u32>(buffer))
-        );
+//        println!(
+//            "mailbox_call({channel}, {value:#x}, {:x})",
+//            HexDisplay(bytemuck::cast_slice::<_, u32>(buffer))
+//        );
 
         unsafe {
             memory::invalidate_physical_buffer_for_device(buffer_ptr.cast(), buffer_bytes);
