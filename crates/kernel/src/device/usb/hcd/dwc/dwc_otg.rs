@@ -471,6 +471,7 @@ pub fn HcdChannelSendWaitOne(
         println!("| HCD: pipe speed {:#?}", pipe.speed);
         if pipe.speed != UsbSpeed::High {
             println!("| HCD: Split enable {:#?} hcint {:#x}", dwc_sc.channel[channel as usize].split_control.SplitEnable, hcint);
+            printDWCErrors(channel);
             if hcint & HCINT_ACK != 0 && dwc_sc.channel[channel as usize].split_control.SplitEnable
             {
                 // Try to complete the split up to 3 times.
