@@ -458,8 +458,8 @@ pub fn HcdChannelSendWaitOne(
                 break;
             }
         }
-        // println!("| HCD: Channel interrupt {:#x}\n", hcint);
-        println!("| HCD: Channel halt send wait");
+        println!("| HCD: Channel interrupt {:#x}", hcint);
+        // println!("| HCD: Channel halt send wait");
 
         let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
         convert_into_host_transfer_size(
@@ -468,7 +468,9 @@ pub fn HcdChannelSendWaitOne(
         );
         hcint = read_volatile(DOTG_HCINT(channel as usize));
 
+        println!("| HCD: pipe speed {:#?}", pipe.speed);
         if pipe.speed != UsbSpeed::High {
+            println!("| HCD: Split enable {:#?} hcint {:#x}", dwc_sc.channel[channel as usize].split_control.SplitEnable, hcint);
             if hcint & HCINT_ACK != 0 && dwc_sc.channel[channel as usize].split_control.SplitEnable
             {
                 // Try to complete the split up to 3 times.
