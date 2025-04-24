@@ -160,28 +160,11 @@ impl core::fmt::Write for UARTInner {
 impl core::fmt::Write for &UARTLock {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         let mut inner = self.lock();
-        for b in s.bytes() {
-            inner.writec(b);
-        }
+        inner.write_bytes(s.as_bytes());
         Ok(())
     }
     fn write_fmt(&mut self, args: core::fmt::Arguments<'_>) -> core::fmt::Result {
         let mut inner = self.lock();
         inner.write_fmt(args)
     }
-}
-
-#[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => {{
-        use core::fmt::Write;
-        write!($crate::device::uart::UART.get(), $($arg)*).ok();
-    }};
-}
-#[macro_export]
-macro_rules! println {
-    ($($arg:tt)*) => {{
-        use core::fmt::Write;
-        writeln!($crate::device::uart::UART.get(), $($arg)*).ok();
-    }};
 }

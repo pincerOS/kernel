@@ -119,7 +119,7 @@ impl FileDescriptor for DummyFd {
     }
 }
 
-pub struct UartFd(pub &'static crate::device::uart::UARTLock);
+pub struct UartFd(pub &'static crate::device::bcm2835_aux::MiniUartLock);
 
 const READ_NO_BLOCK: bool = true;
 

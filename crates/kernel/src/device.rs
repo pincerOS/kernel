@@ -1,5 +1,6 @@
 #[macro_use]
-pub mod uart;
+pub mod macros;
+
 pub mod bcm2835_aux;
 pub mod bcm2836_intc;
 pub mod gic;
@@ -8,6 +9,7 @@ pub mod mailbox;
 pub mod rng;
 pub mod sdcard;
 pub mod system_timer;
+pub mod uart;
 pub mod usb;
 pub mod watchdog;
 
@@ -125,37 +127,6 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
     }
 
     {
-        let gpio = discover_compatible(tree, b"brcm,bcm2711-gpio")
-            .unwrap()
-            .next()
-            .unwrap();
-        let (gpio_addr, _) = find_device_addr(gpio).unwrap().unwrap();
-        let gpio_base = unsafe { map_device(gpio_addr) }.as_ptr();
-        let gpio = unsafe { gpio::bcm2711_gpio_driver::init_with_defaults(gpio_base, true) };
-        unsafe { GPIO.init(InterruptSpinLock::new(gpio)) };
-    }
-
-    let mut uarts = discover_compatible(tree, b"arm,pl011").unwrap();
-    {
-        let uart = uarts.next().unwrap();
-        let (uart_addr, _) = find_device_addr(uart).unwrap().unwrap();
-        let uart_base = unsafe { map_device(uart_addr) }.as_ptr();
-
-        unsafe { uart::UART.init(uart::UARTLock::new(uart::UARTInner::new(uart_base))) };
-        println!("| initialized UART");
-    }
-
-    let mut miniuarts = discover_compatible(tree, b"brcm,bcm2835-aux").unwrap();
-    if let Some(miniuart) = miniuarts.next() {
-        use core::fmt::Write;
-        let (miniuart_addr, _) = find_device_addr(miniuart).unwrap().unwrap();
-        let miniuart_base = unsafe { map_device(miniuart_addr) }.as_ptr();
-        let mut miniuart = unsafe { bcm2835_aux::MiniUart::new(miniuart_base) };
-        writeln!(miniuart, "| initialized Mini UART (bcm2835-aux)").ok();
-        println!("| initialized Mini UART");
-    }
-
-    {
         let mailbox = discover_compatible(&tree, b"brcm,bcm2835-mbox")
             .unwrap()
             .next()
@@ -167,6 +138,38 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
                 mailbox_base,
             )));
         }
+    }
+
+    {
+        let gpio = discover_compatible(tree, b"brcm,bcm2711-gpio")
+            .unwrap()
+            .next()
+            .unwrap();
+        let (gpio_addr, _) = find_device_addr(gpio).unwrap().unwrap();
+        let gpio_base = unsafe { map_device(gpio_addr) }.as_ptr();
+        let gpio = unsafe { gpio::bcm2711_gpio_driver::init(gpio_base) };
+        unsafe { GPIO.init(InterruptSpinLock::new(gpio)) };
+    }
+
+    let mut uarts = discover_compatible(tree, b"arm,pl011").unwrap();
+    {
+        let uart = uarts.next().unwrap();
+        let (uart_addr, _) = find_device_addr(uart).unwrap().unwrap();
+        let uart_base = unsafe { map_device(uart_addr) }.as_ptr();
+
+        unsafe { uart::UART.init(uart::UARTLock::new(uart::UARTInner::new(uart_base))) };
+        // println!("| initialized UART");
+    }
+
+    // TODO: don't hardcode which uart is used for prints
+
+    let mut miniuarts = discover_compatible(tree, b"brcm,bcm2835-aux").unwrap();
+    if let Some(miniuart) = miniuarts.next() {
+        let (miniuart_addr, _) = find_device_addr(miniuart).unwrap().unwrap();
+        let miniuart_base = unsafe { map_device(miniuart_addr) }.as_ptr();
+        let miniuart = unsafe { bcm2835_aux::MiniUart::new(miniuart_base) };
+        unsafe { bcm2835_aux::MINI_UART.init(bcm2835_aux::MiniUartLock::new(miniuart)) };
+        println!("| initialized Mini UART");
     }
 
     {
