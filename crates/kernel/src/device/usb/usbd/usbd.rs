@@ -615,7 +615,6 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
                 DescriptorType::Endpoint => {
                     if is_alternate {
                         println!("| USBD: Skipping alternate interface endpoint");
-                        continue;
                     } else {
                         if last_interface == MAX_INTERFACES_PER_DEVICE
                             || last_endpoint
