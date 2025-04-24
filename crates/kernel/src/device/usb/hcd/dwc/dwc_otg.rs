@@ -253,7 +253,7 @@ fn HcdPrepareChannel(
     return ResultCode::OK;
 }
 
-pub unsafe fn HcdTransmitChannel(device: &UsbDevice, channel: u8, buffer: *mut u8) {
+pub unsafe fn HcdTransmitChannel(device: &UsbDevice, channel: u8, buffer: *mut u8, bufferOffset: usize, direction: UsbDirection) {
     unsafe {
         let dwc_sc: &mut dwc_hub = &mut *(device.soft_sc as *mut dwc_hub);
         let hcsplt = read_volatile(DOTG_HCSPLT(channel as usize));
@@ -276,10 +276,22 @@ pub unsafe fn HcdTransmitChannel(device: &UsbDevice, channel: u8, buffer: *mut u
 
         let dma_base_phys = 0x2FF0000;
         let dma_base_gpu = dma_base_phys | 0xC0000000;
-        let dma_address = dma_base_gpu + 0x1000 * channel as usize;
+        let mut dma_address = dma_base_gpu + 0x1000 * channel as usize;
         let dma_loc = dwc_sc.dma_loc + 0x1000 * channel as usize;
         //copy from buffer to dma_loc for 32 bytes
-        memory_copy(dma_loc as *mut u8, buffer, 100);
+
+        if direction == UsbDirection::In {
+            dma_address += bufferOffset as usize;
+            //check if dma_address is aligned to 4 bytes
+            if (dma_address & 3) != 0 {
+                println!(
+                    "HCD: DMA transfer buffer {:#x} is not DWORD aligned. Ignored, but dangerous.\n",
+                    dma_address,
+                );
+            }
+        } else { //going out
+            memory_copy(dma_loc as *mut u8, buffer, 100); //unclean
+        }
 
         crate::arch::memory::invalidate_physical_buffer_for_device(dma_loc as *mut (), 128);
 
@@ -428,7 +440,8 @@ pub fn HcdChannelSendWaitOne(
         );
 
         // Transmit data.
-        unsafe { HcdTransmitChannel(device, channel, buffer.wrapping_add(bufferOffset as usize)) };
+        // unsafe { HcdTransmitChannel(device, channel, buffer.wrapping_add(bufferOffset as usize)) };
+        unsafe { HcdTransmitChannel(device, channel, buffer, bufferOffset as usize, pipe.direction) };
         timeout = 0;
         loop {
             if timeout == RequestTimeout {
