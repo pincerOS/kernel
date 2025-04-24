@@ -614,24 +614,25 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
                 DescriptorType::Endpoint => {
                     if is_alternate {
                         continue;
+                    } else {
+                        if last_interface == MAX_INTERFACES_PER_DEVICE
+                            || last_endpoint
+                                >= device.interfaces[last_interface].endpoint_count as usize
+                        {
+                            println!("| USBD: Unexpected endpoint descriptor interface");
+                            return ResultCode::ErrorDevice;
+                        }
+                        let endpoint = header as *mut UsbEndpointDescriptor;
+                        
+                        memory_copy(
+                            &mut device.endpoints[last_interface][last_endpoint]
+                                as *mut UsbEndpointDescriptor as *mut u8,
+                            endpoint as *const u8,
+                            size_of::<UsbEndpointDescriptor>(),
+                        );
+                        println!("| USBD: Endpoint descriptor: {:?}", device.endpoints[last_interface][last_endpoint]);
+                        last_endpoint += 1;
                     }
-                    if last_interface == MAX_INTERFACES_PER_DEVICE
-                        || last_endpoint
-                            >= device.interfaces[last_interface].endpoint_count as usize
-                    {
-                        println!("| USBD: Unexpected endpoint descriptor interface");
-                        return ResultCode::ErrorDevice;
-                    }
-                    let endpoint = header as *mut UsbEndpointDescriptor;
-                    
-                    memory_copy(
-                        &mut device.endpoints[last_interface][last_endpoint]
-                            as *mut UsbEndpointDescriptor as *mut u8,
-                        endpoint as *const u8,
-                        size_of::<UsbEndpointDescriptor>(),
-                    );
-                    println!("| USBD: Endpoint descriptor: {:?}", device.endpoints[last_interface][last_endpoint]);
-                    last_endpoint += 1;
                 }
                 _ => {
                     println!("| USBD: Unknown descriptor type");
