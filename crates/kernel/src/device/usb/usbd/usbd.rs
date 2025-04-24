@@ -179,7 +179,7 @@ pub unsafe fn UsbSendInterruptMessage(
     buffer_length: u32,
     packet_id: PacketId,
     _timeout_: u32,
-    callback: fn(endpoint_descriptor, u32, u8) -> bool,
+    callback: fn(endpoint_descriptor, u32, u8, DWCSplitControlState) -> bool,
     endpoint: endpoint_descriptor,
 ) -> ResultCode {
     let b = Box::new(UsbXfer {

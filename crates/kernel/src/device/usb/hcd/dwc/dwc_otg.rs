@@ -109,8 +109,9 @@ pub fn dwc_otg_interrupt_handler(_ctx: &mut Context, _irq: usize) {
                 {
                     if let Some(callback) = unsafe { DWC_CHANNEL_CALLBACK.callback[i] } {
                         let hcint = hcint_channels[i];
+                        let dwc_split = unsafe { DWC_CHANNEL_CALLBACK.split_control_state[i] };
                         schedule_rt(move || {
-                            if callback(endpoint_descriptor, hcint, i as u8) {
+                            if callback(endpoint_descriptor, hcint, i as u8, dwc_split) {
                                 schedule_next_transfer(i as u8);
                             }
                         });
@@ -139,6 +140,17 @@ pub fn UpdateDwcOddFrame(channel: u8) {
     let mut hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
     hcchar &= !HCCHAR_ODDFRM;
     hcchar |= (!(frame & 1)) << 29 | HCCHAR_CHENA;
+    write_volatile(DOTG_HCCHAR(channel as usize), hcchar);
+}
+
+pub fn DwcActivateCsplit(channel: u8) {
+    let mut hcsplt = read_volatile(DOTG_HCSPLT(channel as usize));
+    hcsplt |= HCSPLT_COMPSPLT;
+    write_volatile(DOTG_HCSPLT(channel as usize), hcsplt);
+
+    let mut hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+    hcchar &= !HCCHAR_CHDIS;
+    hcchar |= HCCHAR_CHENA;
     write_volatile(DOTG_HCCHAR(channel as usize), hcchar);
 }
 
@@ -220,8 +232,12 @@ fn HcdPrepareChannel(
                 dwc_sc.channel[channel as usize].split_control.HubAddress = (*parent).number;
             }
         }
-        println!("| HCD Prepare Channel Port number: {:#?}", device.port_number);
+        // println!("| HCD Prepare Channel Port number: {:#?}", device.port_number);
         dwc_sc.channel[channel as usize].split_control.PortAddress = device.port_number + 1;
+
+        unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] = DWCSplitControlState::SSPLIT; }
+    } else {
+        unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] = DWCSplitControlState::NONE; }
     }
 
     let hcsplt = convert_host_split_control(dwc_sc.channel[channel as usize].split_control);
@@ -1811,6 +1827,13 @@ pub unsafe fn dwc_otg_initialize_controller(base_addr: *mut ()) {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DWCSplitControlState {
+    NONE,
+    SSPLIT,
+    CSPLIT,
+}
+
 #[derive(Default)]
 pub struct DwcChannelActive {
     pub channel: [u8; ChannelCount],
@@ -1851,8 +1874,9 @@ pub fn dwc_otg_free_channel(channel: u32) {
 }
 
 pub struct DwcChannelCallback {
-    pub callback: [Option<fn(endpoint_descriptor, u32, u8) -> bool>; ChannelCount],
+    pub callback: [Option<fn(endpoint_descriptor, u32, u8, DWCSplitControlState) -> bool>; ChannelCount],
     pub endpoint_descriptors: [Option<endpoint_descriptor>; ChannelCount],
+    pub split_control_state: [DWCSplitControlState; ChannelCount],
 }
 
 impl DwcChannelCallback {
@@ -1860,6 +1884,7 @@ impl DwcChannelCallback {
         Self {
             callback: [None; ChannelCount],
             endpoint_descriptors: [None; ChannelCount],
+            split_control_state: [DWCSplitControlState::NONE; ChannelCount],
         }
     }
 }

@@ -8,8 +8,9 @@
  */
 use crate::device::usb;
 
-use crate::device::usb::hcd::dwc::dwc_otg::UpdateDwcOddFrame;
-use crate::device::usb::hcd::dwc::dwc_otgreg::HCINT_FRMOVRUN;
+use crate::device::usb::hcd::dwc::dwc_otg::{DWCSplitControlState, UpdateDwcOddFrame, DWC_CHANNEL_CALLBACK};
+use crate::device::usb::hcd::dwc::dwc_otgreg::{HCINT_FRMOVRUN, HCINT_XACTERR};
+use crate::device::usb::DwcActivateCsplit;
 use crate::device::usb::UsbSendInterruptMessage;
 use usb::dwc_hub;
 use usb::hcd::dwc::dwc_otg::HcdUpdateTransferSize;
@@ -25,7 +26,7 @@ use crate::sync::time::{interval, MissedTicks};
 
 use alloc::boxed::Box;
 
-pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u32, channel: u8) -> bool {
+pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u32, channel: u8, _split_control: DWCSplitControlState) -> bool {
     let device = unsafe { &mut *endpoint.device };
 
     let transfer_size = HcdUpdateTransferSize(device, channel);
@@ -70,7 +71,7 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
     return true;
 }
 
-pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u32, channel: u8) -> bool {
+pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u32, channel: u8, _split_control: DWCSplitControlState) -> bool {
     let device = unsafe { &mut *endpoint.device };
     let transfer_size = HcdUpdateTransferSize(device, channel);
     device.last_transfer = endpoint.buffer_length - transfer_size;
@@ -98,7 +99,7 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
     return true;
 }
 
-pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: u32, channel: u8) -> bool {
+pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: u32, channel: u8, split_control: DWCSplitControlState) -> bool {
     let device = unsafe { &mut *endpoint.device };
     let transfer_size = HcdUpdateTransferSize(device, channel);
     device.last_transfer = endpoint.buffer_length - transfer_size;
@@ -115,6 +116,44 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             channel, hcint
         );
         shutdown();
+    }
+
+    if split_control == DWCSplitControlState::SSPLIT {
+        println!("| Endpoint {}: split_control is SSPLIT", channel);
+        if hcint & HCINT_NAK != 0 {
+            println!("| Endpoint SSPLIT {}: NAK received hcint {:x}", channel, hcint);
+            return false;
+        } else if hcint & HCINT_FRMOVRUN != 0 {
+            println!("| Endpoint SSPLIT{}: Frame overrun hcint {:x}", channel, hcint);
+            UpdateDwcOddFrame(channel);
+            return false;
+        } else if hcint & HCINT_XACTERR != 0 {
+            println!("| Endpoint SSPLIT {}: XACTERR received hcint {:x}", channel, hcint);
+            return false;
+        } else if hcint & HCINT_ACK != 0 {
+            //ACK received
+            unsafe {
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] = DWCSplitControlState::CSPLIT;
+            }
+            DwcActivateCsplit(channel);
+            return false;
+        } else {
+            println!("| Endpoint {}: Unknown interrupt, ending task {:x}.", channel, hcint);
+            return false;
+        }
+    } else if split_control == DWCSplitControlState::CSPLIT {
+        println!("| Endpoint {}: split_control is CSPLIT", channel);
+        if hcint & HCINT_NAK != 0 {
+            println!("| Endpoint CSPLIT {}: NAK received hcint {:x}", channel, hcint);
+            return false;
+        } else if hcint & HCINT_FRMOVRUN != 0 {
+            println!("| Endpoint CSPLIT {}: Frame overrun hcint {:x}", channel, hcint);
+            UpdateDwcOddFrame(channel);
+            return false;
+        } else if hcint & HCINT_XACTERR != 0 {
+            println!("| Endpoint CSPLIT {}: XACTERR received hcint {:x}", channel, hcint);
+            return false;
+        }
     }
 
     let buffer_length = device.last_transfer.clamp(0, 8);
@@ -143,7 +182,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
 
         return false;
     } else {
-        println!("| Endpoint {}: Unknown interrupt, ignoring {}.", channel, hcint);
+        println!("| Endpoint {}: Unknown interrupt, ignoring {} state {:#?}.", channel, hcint, split_control);
         return true;
     }
 
