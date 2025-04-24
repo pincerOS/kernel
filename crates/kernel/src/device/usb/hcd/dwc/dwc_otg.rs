@@ -13,6 +13,8 @@
 *	THIS SOFTWARE IS NOT AFFILIATED WITH NOR ENDORSED BY SYNOPSYS IP.
 ******************************************************************************/
 
+use core::time;
+
 use crate::device::usb::hcd::dwc::dwc_otgreg::*;
 use crate::device::usb::hcd::dwc::roothub::*;
 use crate::device::usb::types::*;
@@ -239,6 +241,7 @@ fn HcdPrepareChannel(
                 dwc_sc.channel[channel as usize].split_control.HubAddress = (*parent).number;
             }
         }
+        dwc_sc.channel[channel as usize].split_control.XactPos = 0b11;
         // println!("| HCD Prepare Channel Port number: {:#?}", device.port_number);
         dwc_sc.channel[channel as usize].split_control.PortAddress = device.port_number + 1;
 
@@ -494,7 +497,7 @@ pub fn HcdChannelSendWaitOne(
                 break;
             }
         }
-        println!("| HCD: Channel interrupt {:#x}", hcint);
+        println!("| HCD: Channel interrupt {:#x} timeout {}", hcint, timeout);
         // println!("| HCD: Channel halt send wait");
 
         let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
@@ -552,6 +555,8 @@ pub fn HcdChannelSendWaitOne(
                             break;
                         }
                     }
+
+                    println!("| HCD split completion timeout {}", timeout);
 
                     if hcint & HCINT_NYET == 0 {
                         break;
@@ -630,10 +635,12 @@ pub fn HcdChannelSendWaitOne(
                     return result;
                 }
             } else if hcint & HCINT_NAK != 0 {
+                println!("| HCD: Outer loop NAK");
                 globalTries = globalTries.wrapping_sub(1);
                 micro_delay(25000);
                 continue;
             } else if hcint & HCINT_XACTERR != 0 {
+                println!("| HCD: Outer loop XACTERR");
                 micro_delay(25000);
                 continue;
             }
