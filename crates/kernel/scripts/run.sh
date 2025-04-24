@@ -28,18 +28,19 @@ if test "$DEBUG_ARGS" = "-s -S" ; then
 fi
 
 # TODO: qemu's pipe handling drops characters, doesn't flush
-UART_PIPE="uart2"
-if test ! -p "$UART_PIPE" ; then
-    mkfifo "$UART_PIPE"
-fi
-SERIAL_ALT="pipe:$UART_PIPE"
+#UART_PIPE="uart2"
+#if test ! -p "$UART_PIPE" ; then
+#    mkfifo "$UART_PIPE"
+#fi
+#SERIAL_ALT="pipe:$UART_PIPE"
 # SERIAL_ALT="tcp:127.0.0.1:5377" # listen with nc -kl 5377
 
 qemu-system-aarch64 \
     ${QEMU_TARGET_HARDWARE} \
     -kernel kernel.bin \
+    -drive file=sdcard.img,if=sd,format=raw \
+    -serial null \
     -serial stdio \
-    -serial "${SERIAL_ALT}" \
     -display "${QEMU_DISPLAY}" \
     "${QEMU_DEBUG_PFX}" "${QEMU_DEBUG}" \
     ${QEMU_DEVICES} \

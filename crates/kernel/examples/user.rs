@@ -85,7 +85,7 @@ async fn main() {
 
     {
         let mut fds = process.file_descriptors.lock();
-        let uart_fd = Arc::new(process::fd::UartFd(device::uart::UART.get())) as Arc<_>;
+        let uart_fd = Arc::new(process::fd::UartFd(device::bcm2835_aux::MINI_UART.get())) as Arc<_>;
         let _ = fds.set(0, Arc::clone(&uart_fd));
         let _ = fds.set(1, Arc::clone(&uart_fd));
         let _ = fds.set(2, uart_fd);
