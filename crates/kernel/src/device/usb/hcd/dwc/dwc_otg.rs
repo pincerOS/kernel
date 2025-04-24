@@ -220,8 +220,8 @@ fn HcdPrepareChannel(
                 dwc_sc.channel[channel as usize].split_control.HubAddress = (*parent).number;
             }
         }
-        // println!("| Port number: {:#?}", device.port_number);
-        dwc_sc.channel[channel as usize].split_control.PortAddress = device.port_number;
+        println!("| HCD Prepare Channel Port number: {:#?}", device.port_number);
+        dwc_sc.channel[channel as usize].split_control.PortAddress = device.port_number + 1;
     }
 
     let hcsplt = convert_host_split_control(dwc_sc.channel[channel as usize].split_control);
@@ -471,7 +471,7 @@ pub fn HcdChannelSendWaitOne(
         println!("| HCD: pipe speed {:#?}", pipe.speed);
         if pipe.speed != UsbSpeed::High {
             println!("| HCD: Split enable {:#?} hcint {:#x}", dwc_sc.channel[channel as usize].split_control.SplitEnable, hcint);
-            printDWCErrors(channel);
+            printDWCErrors(channel as u32);
             if hcint & HCINT_ACK != 0 && dwc_sc.channel[channel as usize].split_control.SplitEnable
             {
                 // Try to complete the split up to 3 times.
