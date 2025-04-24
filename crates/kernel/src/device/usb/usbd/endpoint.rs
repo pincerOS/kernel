@@ -8,7 +8,7 @@
  */
 use crate::device::usb;
 
-use crate::device::usb::hcd::dwc::dwc_otg::{read_volatile, DWCSplitControlState, UpdateDwcOddFrame, DWC_CHANNEL_CALLBACK};
+use crate::device::usb::hcd::dwc::dwc_otg::{read_volatile, DWCSplitControlState, UpdateDwcOddFrame, DWC_CHANNEL_CALLBACK, DwcEnableChannel};
 use crate::device::usb::hcd::dwc::dwc_otgreg::{HCINT_FRMOVRUN, HCINT_XACTERR, HCINT_NYET};
 use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCSPLT;
 use crate::device::usb::DwcActivateCsplit;
@@ -146,19 +146,20 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
         println!("| Endpoint {}: split_control is CSPLIT", channel);
         if hcint & HCINT_NAK != 0 {
             println!("| Endpoint CSPLIT {}: NAK received hcint {:x}", channel, hcint);
-            return false;
         } else if hcint & HCINT_FRMOVRUN != 0 {
             println!("| Endpoint CSPLIT {}: Frame overrun hcint {:x}", channel, hcint);
             UpdateDwcOddFrame(channel);
             return false;
         } else if hcint & HCINT_XACTERR != 0 {
             println!("| Endpoint CSPLIT {}: XACTERR received hcint {:x}", channel, hcint);
+            DwcEnableChannel(channel);
             return false;
         } else if hcint & HCINT_NYET != 0 {
             println!("| Endpoint CSPLIT {}: NYET received hcint {:x}", channel, hcint);
             //get hscplt
             let hscplt = read_volatile(DOTG_HCSPLT(channel as usize));
             println!("| Enpoint CSPLIT {}: HCSPLT {:x}", channel, hscplt);
+            DwcEnableChannel(channel);
             return false;
         }
     }

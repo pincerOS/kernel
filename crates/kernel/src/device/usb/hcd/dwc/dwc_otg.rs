@@ -154,6 +154,13 @@ pub fn DwcActivateCsplit(channel: u8) {
     write_volatile(DOTG_HCCHAR(channel as usize), hcchar);
 }
 
+pub fn DwcEnableChannel(channel: u8) {
+    let mut hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+    hcchar &= !HCCHAR_CHDIS;
+    hcchar |= HCCHAR_CHENA;
+    write_volatile(DOTG_HCCHAR(channel as usize), hcchar);
+}
+
 /**
     \brief Prepares a channel to communicated with a device.
 
