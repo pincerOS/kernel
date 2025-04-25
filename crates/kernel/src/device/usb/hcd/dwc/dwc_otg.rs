@@ -146,26 +146,33 @@ pub fn UpdateDwcOddFrame(channel: u8) {
     write_volatile(DOTG_HCCHAR(channel as usize), hcchar);
 }
 
-pub fn DwcActivateCsplit(channel: u8) {
+pub fn DwcActivateCsplit(channel: u8) -> u32 {
     let mut hcsplt = read_volatile(DOTG_HCSPLT(channel as usize));
     hcsplt |= HCSPLT_COMPSPLT;
     write_volatile(DOTG_HCSPLT(channel as usize), hcsplt);
 
-    let frame = read_volatile(DOTG_HFNUM);
+    let frame = read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
     let mut hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
     hcchar &= !HCCHAR_CHDIS;
     hcchar &= !HCCHAR_ODDFRM;
     hcchar |= (!(frame & 1)) << 29 | HCCHAR_CHENA;
     write_volatile(DOTG_HCCHAR(channel as usize), hcchar);
+
+    return frame;
 }
 
-pub fn DwcEnableChannel(channel: u8) {
-    let frame = read_volatile(DOTG_HFNUM);
+pub fn DwcEnableChannel(channel: u8) -> u32 {
+    let frame = read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
     let mut hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
     hcchar &= !HCCHAR_CHDIS;
     hcchar &= !HCCHAR_ODDFRM;
-    hcchar |= (!(frame & 1)) << 29 | HCCHAR_CHENA;
+    hcchar |= HCCHAR_CHENA;
+
+    hcchar |= (frame & 1) << 29;
+
     write_volatile(DOTG_HCCHAR(channel as usize), hcchar);
+
+    return frame;
 }
 
 /**
@@ -250,9 +257,12 @@ fn HcdPrepareChannel(
         // println!("| HCD Prepare Channel Port number: {:#?}", device.port_number);
         dwc_sc.channel[channel as usize].split_control.PortAddress = device.port_number + 1;
 
-        unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] = DWCSplitControlState::SSPLIT; }
+        unsafe { 
+            DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state = DWCSplitStateMachine::SSPLIT; 
+            DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].ss_hfnum = read_volatile(DOTG_HFNUM);
+        }
     } else {
-        unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] = DWCSplitControlState::NONE; }
+        unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state = DWCSplitStateMachine::NONE; }
     }
 
     let hcsplt = convert_host_split_control(dwc_sc.channel[channel as usize].split_control);
@@ -854,6 +864,10 @@ fn HcdTransmitChannelNoWait(device: &UsbDevice, channel: u8, buffer: *mut u8) {
             );
         }
 
+        let dma_loc = dwc_sc.dma_gpu_addr[channel as usize];
+
+        crate::arch::memory::invalidate_physical_buffer_for_device(dma_loc as *mut (), 128);
+
         dwc_sc.channel[channel as usize].dma_address = buffer;
         write_volatile(DOTG_HCDMA(channel as usize), buffer as u32);
 
@@ -868,6 +882,11 @@ fn HcdTransmitChannelNoWait(device: &UsbDevice, channel: u8, buffer: *mut u8) {
         dwc_sc.channel[channel as usize]
             .characteristics
             .PacketsPerFrame = 1;
+
+        if DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state == DWCSplitStateMachine::SSPLIT {
+            let hfnum = read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+            DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].ss_hfnum = hfnum;
+        } //TODO: temporary
 
         write_volatile(
             DOTG_HCCHAR(channel as usize),
@@ -1091,32 +1110,6 @@ pub unsafe fn HcdSubmitInterruptMessage(
     buffer_length: u32,
     packet_id: PacketId,
 ) -> ResultCode {
-
-    use crate::device::usb::HcdSubmitInterruptMessage2;
-    let buffer = [0; 36];
-    let result = unsafe {HcdSubmitInterruptMessage2(
-        device,
-        channel,
-        pipe,
-        buffer.as_ptr() as *mut u8,
-        8,
-        packet_id,
-    )};
-
-    if result != ResultCode::OK {
-        println!("| USB: Interrupt endpoint failed.");
-        return result;
-    }
-
-    println!("| USB: Interrupt endpoint succeeded.");
-
-    //print out first 8 bytes of buffer
-    for i in 0..8 {
-        print!("{:02x} ", buffer[i]);
-    }
-    println!("");
-
-    return ResultCode::OK;
 
     let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
     device.error = UsbTransferError::Processing;
@@ -1952,8 +1945,28 @@ pub unsafe fn dwc_otg_initialize_controller(base_addr: *mut ()) {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum DWCSplitControlState {
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct DWCSplitControlState {
+    pub state: DWCSplitStateMachine,
+    pub ss_hfnum: u32,
+    pub mr_cs_hfnum: u32, //most recent CSplit HFNUM
+    pub tries: u32,
+}
+
+impl DWCSplitControlState {
+    pub const fn new() -> Self {
+        Self {
+            state: DWCSplitStateMachine::NONE,
+            ss_hfnum: 0,
+            mr_cs_hfnum: 0,
+            tries: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum DWCSplitStateMachine {
+    #[default]
     NONE,
     SSPLIT,
     CSPLIT,
@@ -2009,7 +2022,7 @@ impl DwcChannelCallback {
         Self {
             callback: [None; ChannelCount],
             endpoint_descriptors: [None; ChannelCount],
-            split_control_state: [DWCSplitControlState::NONE; ChannelCount],
+            split_control_state: [DWCSplitControlState::new(); ChannelCount],
         }
     }
 }

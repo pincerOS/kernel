@@ -9,8 +9,8 @@ use crate::device::system_timer::{get_time, micro_delay};
  */
 use crate::device::usb;
 
-use crate::device::usb::hcd::dwc::dwc_otg::{read_volatile, DWCSplitControlState, UpdateDwcOddFrame, DWC_CHANNEL_CALLBACK, DwcEnableChannel};
-use crate::device::usb::hcd::dwc::dwc_otgreg::{HCINT_FRMOVRUN, HCINT_XACTERR, HCINT_NYET};
+use crate::device::usb::hcd::dwc::dwc_otg::{printDWCErrors, read_volatile, DWCSplitControlState, DWCSplitStateMachine, DwcEnableChannel, UpdateDwcOddFrame, DWC_CHANNEL_CALLBACK};
+use crate::device::usb::hcd::dwc::dwc_otgreg::{HCINT_FRMOVRUN, HCINT_NYET, HCINT_XACTERR, HFNUM_FRNUM_MASK, DOTG_HFNUM};
 use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCSPLT;
 use crate::device::usb::DwcActivateCsplit;
 use crate::device::usb::UsbSendInterruptMessage;
@@ -121,51 +121,71 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
         shutdown();
     }
 
-    if split_control == DWCSplitControlState::SSPLIT {
+    let split_control_state = split_control.state;
+    let ss_hfnum = split_control.ss_hfnum;
+
+    if split_control_state == DWCSplitStateMachine::SSPLIT {
         if hcint & HCINT_NAK != 0 {
+            println!("| Endpoint SSPLIT {}: NAK received hcint {:x}", channel, hcint);
             DwcEnableChannel(channel);
             return false;
         } else if hcint & HCINT_FRMOVRUN != 0 {
+            println!("| Endpoint SSPLIT {}: Frame overrun hcint {:x}", channel, hcint);
             UpdateDwcOddFrame(channel);
             return false;
         } else if hcint & HCINT_XACTERR != 0 {
+            println!("| Endpoint SSPLIT {}: XACTERR received hcint {:x}", channel, hcint);
             DwcEnableChannel(channel);
             return false;
         } else if hcint & HCINT_ACK != 0 {
             //ACK received
             unsafe {
-                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] = DWCSplitControlState::CSPLIT;
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state = DWCSplitStateMachine::CSPLIT;
             }
-            DwcActivateCsplit(channel);
+            let frame = DwcActivateCsplit(channel);
+            unsafe {
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].mr_cs_hfnum = frame + 1;
+            }
             return false;
         } else {
             println!("| Endpoint {}: UNKNOWWN HCINT split_control is SSPLIT hcint {:x}", channel, hcint);
             return true;
         }
-    } else if split_control == DWCSplitControlState::CSPLIT {
-        println!("| Endpoint {}: split_control is CSPLIT hcint {:x}", channel, hcint);
+    } else if split_control_state == DWCSplitStateMachine::CSPLIT {
         if hcint & HCINT_NAK != 0 {
             println!("| Endpoint CSPLIT {}: NAK received hcint {:x}", channel, hcint);
         } else if hcint & HCINT_FRMOVRUN != 0 {
-            // println!("| Endpoint CSPLIT {}: Frame overrun hcint {:x}", channel, hcint);
+            println!("| Endpoint CSPLIT {}: Frame overrun hcint {:x}", channel, hcint);
             UpdateDwcOddFrame(channel);
             return false;
         } else if hcint & HCINT_XACTERR != 0 {
             println!("| Endpoint CSPLIT {}: XACTERR received hcint {:x}", channel, hcint);
-            micro_delay(100);
             DwcEnableChannel(channel);
             return false;
         } else if hcint & HCINT_NYET != 0 {
-            println!("| Endpoint CSPLIT {}: NYET received hcint {:x}", channel, hcint);
-            //get hscplt
-            let hscplt = read_volatile(DOTG_HCSPLT(channel as usize));
-            println!("| Enpoint CSPLIT {}: HCSPLT {:x}", channel, hscplt);
-            micro_delay(100);
-            DwcEnableChannel(channel);
+            let mut cur_frame = read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+
+            if cur_frame - ss_hfnum >= 8 {
+                println!("| Endpoint CSPLIT has exceeded 8 frames, cur_frame: {} ss_hfnum: {} giving up", cur_frame, ss_hfnum);
+                return true;
+            }
+
+            let mr_cs_hfnum = unsafe {
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].mr_cs_hfnum
+            };
+
+            while cur_frame == mr_cs_hfnum {
+                cur_frame = read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+            }
+            
+            let frame = DwcEnableChannel(channel);
+            unsafe {
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].mr_cs_hfnum = frame;
+            }
             return false;
         } else {
             unsafe {
-                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] = DWCSplitControlState::NONE;
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state = DWCSplitStateMachine::NONE;
             }
             println!("| Endpoint CSPLIT {}: hcint {:x} last transfer {:x}", channel, hcint, device.last_transfer);
         }
@@ -245,8 +265,6 @@ pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
         )
     };
 
-    
-
     if result != ResultCode::OK {
         print!("| USB: Failed to read interrupt endpoint.\n");
     }
@@ -276,9 +294,16 @@ pub fn register_interrupt_endpoint(
     };
 
     spawn_async_rt(async move {
-        let μs = endpoint_time as u64 * 100000;
+        let μs = endpoint_time as u64 * 1000;
         let mut interval = interval(μs).with_missed_tick_behavior(MissedTicks::Skip);
+        println!("| USB: Starting interrupt endpoint with interval {} μs", μs);
+        let mut prev_time = get_time();
         while interval.tick().await {
+            let cur_time = get_time();
+            if cur_time - prev_time < μs {
+                println!("| USB: INTerrupt time skew: cur {} prev {} diff {}, interval {} μs", cur_time, prev_time, cur_time - prev_time, μs);
+            }
+            prev_time = cur_time;
             interrupt_endpoint_callback(endpoint);
         }
     });
