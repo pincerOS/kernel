@@ -167,6 +167,11 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             micro_delay(100);
             DwcEnableChannel(channel);
             return false;
+        } else {
+            unsafe {
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] = DWCSplitControlState::NONE;
+            }
+            println!("| Endpoint CSPLIT {}: hcint {:x}", channel, hcint);
         }
     }
 
@@ -196,8 +201,8 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
 
         return false;
     } else {
-        println!("| Endpoint {}: Unknown interrupt, ignoring {} state {:#?}.", channel, hcint, split_control);
-        return true;
+        println!("| Endpoint {}: Unknown interrupt, ignoring {} state {:#?}. Letting run for now...", channel, hcint, split_control);
+        // return true;
     }
 
     let mut buffer = unsafe { buffer.assume_init() };
