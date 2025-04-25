@@ -153,8 +153,8 @@ impl bcm2711_gpio_driver {
             val &= !(0b111 << shift); // Clear current function bits
             val |= (function as u32) << shift;
             reg_fsel.write(val);
-            #[cfg(debug_assertions)]
-            print!("| GPIO -- Wrote {:#010b}, to register GPFSEL{index}, function: {:?} for pin {pin}\n", val, function);
+            // #[cfg(debug_assertions)]
+            // print!("| GPIO -- Wrote {:#010b}, to register GPFSEL{index}, function: {:?} for pin {pin}\n", val, function);
         }
     }
 
@@ -167,8 +167,8 @@ impl bcm2711_gpio_driver {
         unsafe {
             reg_set.write(1 << shift);
         }
-        #[cfg(debug_assertions)]
-        println!("| GPIO -- Set HIGH: pin {}", pin);
+        // #[cfg(debug_assertions)]
+        // println!("| GPIO -- Set HIGH: pin {}", pin);
     }
 
     /// Set a GPIO pin LOW
@@ -180,8 +180,8 @@ impl bcm2711_gpio_driver {
         unsafe {
             reg_clr.write(1 << shift);
         }
-        #[cfg(debug_assertions)]
-        println!("| GPIO -- Set LOW: pin {}", pin);
+        // #[cfg(debug_assertions)]
+        // println!("| GPIO -- Set LOW: pin {}", pin);
     }
 
     /// Read a GPIO pin value

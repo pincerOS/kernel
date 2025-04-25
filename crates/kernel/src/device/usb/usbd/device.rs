@@ -97,7 +97,7 @@ impl UsbDevice {
     pub unsafe fn new(bus: *mut UsbBus, num: u32) -> Self {
         Self {
             number: num,
-            speed: UsbSpeed::Low,
+            speed: UsbSpeed::Full,
             status: UsbDeviceStatus::Attached,
             error: UsbTransferError::NoError,
             port_number: 0,

@@ -1,3 +1,6 @@
+use alloc::borrow::ToOwned;
+use alloc::vec;
+
 use crate::event::async_handler::{run_async_handler, HandlerContext};
 use crate::event::context::Context;
 use crate::process::mem::{MappingKind, UserAddrSpace};
@@ -8,11 +11,13 @@ bitflags::bitflags! {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct StringPair {
     len: usize,
     ptr: *const u8,
 }
 
+// using usize to smuggle pointer into async callbacks
 struct ExecArgs {
     fd: usize,
     _flags: ExecFlags,
@@ -22,6 +27,14 @@ struct ExecArgs {
     env_ptr: *const StringPair,
 }
 unsafe impl Send for ExecArgs {}
+
+unsafe fn from_raw_parts_or_empty<'a, T>(data: *const T, len: usize) -> &'a [T] {
+    if len == 0 {
+        &[]
+    } else {
+        unsafe { core::slice::from_raw_parts(data, len) }
+    }
+}
 
 /// syscall execve_fd(
 ///     fd: usize,
@@ -35,8 +48,8 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
     let fd = ctx.regs[0];
     let flags = ctx.regs[1];
 
-    let args_len = ctx.regs[4];
-    let args_ptr = ctx.regs[5] as *const StringPair;
+    let args_len = ctx.regs[2];
+    let args_ptr = ctx.regs[3] as *const StringPair;
 
     let env_len = ctx.regs[4];
     let env_ptr = ctx.regs[5] as *const StringPair;
@@ -52,8 +65,10 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
         args_len,
         args_ptr,
         env_len,
-        env_ptr,
+        env_ptr: env_ptr,
     };
+
+    let mut kernel_args = vec![];
 
     run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
@@ -66,16 +81,18 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
         context.with_user_vmem(|| {
             let arg_data = &arg_data;
             // TODO: soundness, check user args
-            let _args = if arg_data.args_len == 0 {
-                &[]
-            } else {
-                unsafe { core::slice::from_raw_parts(arg_data.args_ptr, arg_data.args_len) }
+
+            let args = unsafe {
+                from_raw_parts_or_empty(arg_data.args_ptr as *const StringPair, arg_data.args_len)
             };
-            let _env = if arg_data.env_len == 0 {
-                &[]
-            } else {
-                unsafe { core::slice::from_raw_parts(arg_data.env_ptr, arg_data.env_len) }
-            };
+
+            for pair in args {
+                let slice = unsafe { from_raw_parts_or_empty(pair.ptr, pair.len) };
+
+                kernel_args.push(slice.to_owned());
+            }
+
+            let _env = unsafe { from_raw_parts_or_empty(arg_data.env_ptr, arg_data.env_len) };
         });
 
         let file_data = match crate::process::fd::read_all(&*file).await {
@@ -122,6 +139,15 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
                     mapping[..data.len()].copy_from_slice(data);
                     // TODO: make sure anonymous pages are zeroed
                     mapping[data.len()..].fill(0);
+
+                    // if phdr.p_flags.execute() {
+                    // TODO: figure out proper cache flush subset; this shouldn't
+                    // be needed (except maybe for the executable parts)
+                    let range = mapping.as_ptr_range();
+                    unsafe {
+                        crate::arch::memory::flush_range(range.start.addr(), range.end.addr())
+                    };
+                    // }
                 }
             }
         };
@@ -129,7 +155,7 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
 
         let stack_size = 0x20_0000;
         let stack_start = 0x100_0000;
-        new_mem
+        let base = new_mem
             .mmap(
                 Some(stack_start - stack_size),
                 stack_size,
@@ -137,23 +163,86 @@ pub unsafe fn sys_execve_fd(ctx: &mut Context) -> *mut Context {
             )
             .unwrap();
 
+        let mut user_sp = stack_start;
+        let mut argc = 0;
+        let mut argv = 0;
+        let setup_stack = async {
+            // println!("In stack callback");
+            let stack_vme = new_mem.get_vme(base).unwrap();
+            new_mem
+                .populate_range(stack_vme, stack_vme.start, stack_vme.size)
+                .await
+                .unwrap();
+
+            // println!("Arg ptr: {args_ptr:#x} arg len: {args_len:#x}");
+            // for i in 0..kernel_args.len() {
+            //     let arg = kernel_args.get(i).unwrap();
+            //     println!("Arg {}: {}", i, arg);
+            // }
+
+            let mut user_args = alloc::vec::Vec::with_capacity(kernel_args.len());
+            for arg in kernel_args.iter().rev() {
+                let arg_str_len = arg.len() + 1;
+                user_sp -= arg_str_len;
+
+                let ptr = user_sp as *mut u8;
+                unsafe { core::ptr::copy_nonoverlapping(arg.as_ptr(), ptr, arg.len()) };
+                unsafe { ptr.byte_add(arg.len()).write_volatile(b'\0') };
+                user_args.push(user_sp);
+            }
+            // align sp
+            user_sp &= !0b111;
+            user_sp -= core::mem::size_of::<usize>();
+            let ptr = (user_sp) as *mut usize;
+            // println!("Writing NULL at addr {}", user_sp);
+            unsafe { ptr.write_volatile(0) };
+            for arg_ptr in user_args.iter() {
+                user_sp -= core::mem::size_of::<usize>();
+                let ptr = (user_sp) as *mut usize;
+                // println!("Writing arg pointer {:p} at addr {:p}", *arg_ptr as *const usize, user_sp as *const usize);
+                unsafe { ptr.write_volatile(*arg_ptr) };
+            }
+            argv = user_sp;
+            user_sp -= core::mem::size_of::<usize>();
+            let ptr = (user_sp) as *mut usize;
+            // println!("Writing argv {} at addr {:p}", argv, user_sp as *const usize);
+            unsafe { ptr.write_volatile(argv as usize) };
+
+            user_sp -= core::mem::size_of::<usize>();
+            let ptr = (user_sp) as *mut usize;
+            // println!("Writing argc {} at addr {:p}", arg_data.args_len, user_sp as *const usize);
+            unsafe { ptr.write_volatile(arg_data.args_len) };
+            // println!("Stack has been set up!");
+            argc = arg_data.args_len;
+        };
+
+        unsafe { crate::memory::with_user_vmem_async(ttbr0, setup_stack).await };
+
         let old = core::mem::replace(&mut *proc.mem.lock(), new_mem);
         drop(old);
 
         let user_entry = elf.elf_header().e_entry();
-        let user_sp = stack_start;
+
+        // println!("Exec returning to new process with ttbr0: {ttbr0:#x}, sp: {user_sp:#x}, entry: {user_entry:#x}");
+        // print!("A");
+        // crate::sync::spin_sleep(500_000);
+        // {
+        //     let mut console = crate::device::CONSOLE.get().lock();
+        //     // console.surface.present();
+        //     core::hint::black_box(&mut *console.surface.buffer);
+        // }
+        // unsafe { core::arch::asm!("isb", "dsb sy", "tlbi vmalle1is", "dsb sy") };
 
         {
             let mut regs = context.regs();
             regs.regs = [0; 31];
+            regs.regs[0] = argc;
+            regs.regs[1] = argv;
             regs.elr = user_entry as usize;
             regs.spsr = 0b0000; // TODO: standardize initial SPSR values
             regs.sp_el0 = user_sp;
             context.user_regs().as_mut().unwrap().ttbr0_el1 = ttbr0;
         }
-
-        // TODO: initial stack setup
-        // (argc, argv, envp, auxv)
 
         context.resume_final()
     })

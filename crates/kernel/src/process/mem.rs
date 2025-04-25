@@ -9,8 +9,9 @@ use crate::arch::memory::vmm::{
     PAGE_SIZE, USER_PG_SZ,
 };
 use crate::event::async_handler::{run_async_handler, HandlerContext};
-use crate::event::context::{deschedule_thread, Context, DescheduleAction};
+use crate::event::context::Context;
 use crate::event::exceptions::DataAbortISS;
+use crate::syscall::proc::exit_user_thread;
 
 use crate::syscall::fb_hack::MemFd;
 
@@ -74,7 +75,7 @@ impl UserAddrSpace {
         unsafe {
             asm!("mrs {0}, TTBR0_EL1", out(reg) active_page_dir);
             if active_page_dir != old_page_dir {
-                asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) old_page_dir);
+                asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) old_page_dir);
             }
         }
 
@@ -111,16 +112,16 @@ impl UserAddrSpace {
                 let buf_ptr: *mut u8 = buffer.as_mut_ptr().cast();
                 unsafe {
                     copy_nonoverlapping(src_data.byte_add(offset), buf_ptr, chunk_size);
-                    asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) new_page_dir);
+                    asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) new_page_dir);
                     copy_nonoverlapping(buf_ptr, dst_data.byte_add(offset), chunk_size);
-                    asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) old_page_dir);
+                    asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) old_page_dir);
                 }
             }
         }
 
         if active_page_dir != old_page_dir {
             unsafe {
-                asm!("msr TTBR0_EL1, {0}", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) active_page_dir);
+                asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) active_page_dir);
             }
         }
 
@@ -366,7 +367,7 @@ pub fn page_fault_handler(ctx: &mut Context, far: usize, _iss: DataAbortISS) -> 
                 println!("{:#?}", &*context.regs());
 
                 let thread = context.detach_thread();
-                unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
+                unsafe { exit_user_thread(thread, -4i32 as u32) }
             }
             Some(vme) => {
                 mem.populate_page(vme, page_addr).await.unwrap(); // TODO: errors?

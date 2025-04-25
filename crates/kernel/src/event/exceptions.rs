@@ -1,8 +1,9 @@
 use core::arch::{asm, global_asm};
 
-use super::context::{deschedule_thread, Context, DescheduleAction, CORES};
+use super::context::Context;
 use crate::arch::halt;
 use crate::sync::HandlerTableInner;
+use crate::syscall::proc::exit_current_user_thread;
 use crate::uart;
 
 global_asm!(
@@ -263,6 +264,8 @@ unsafe extern "C" fn exception_handler_example(
         println!("{:#?}", ctx);
     }
 
+    // crate::device::LED_OUT.get().put(exception_class as u8);
+
     match exception_class {
         _ => halt(),
     }
@@ -276,6 +279,7 @@ unsafe extern "C" fn exception_handler_unhandled(
     _esr: u64,
     _arg: u64,
 ) -> *mut Context {
+    // crate::device::LED_OUT.get().put(0b11100111);
     halt();
 }
 
@@ -311,10 +315,7 @@ unsafe extern "C" fn exception_handler_user(
                 }
                 println!("Unknown syscall number {arg:#x}; stopping user thread");
 
-                let thread = CORES.with_current(|core| core.thread.take());
-                let mut thread = thread.expect("usermode syscall without active thread");
-                unsafe { thread.save_context(ctx.into(), false) };
-                unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
+                unsafe { exit_current_user_thread(ctx, (-1i32) as u32) }
             }
         }
         0x24 => {
@@ -328,9 +329,8 @@ unsafe extern "C" fn exception_handler_user(
                 println!("ttbr0={ttbr0:#010x}");
                 println!("{:#?}", ctx);
             }
-            let thread = CORES.with_current(|core| core.thread.take());
-            let thread = thread.expect("usermode exception without active thread");
-            unsafe { crate::syscall::proc::exit_exception(thread, ctx, u32::MAX) }
+
+            unsafe { exit_current_user_thread(ctx, (-2i32) as u32) }
         }
     }
 }

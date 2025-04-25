@@ -18,7 +18,7 @@
 /// parameters, and so are best implemented with a structure. As per usual,
 /// since this structure is arbitrary, we shall match Linux in the hopes of
 /// achieving some compatibility.
-#[repr(C, packed)]
+#[repr(C, align(8))]
 #[derive(Debug, Clone, Copy)]
 pub struct UsbDeviceRequest {
     pub request_type: u8, // +0x0

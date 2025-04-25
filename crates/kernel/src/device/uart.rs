@@ -105,6 +105,10 @@ impl UARTInner {
         (unsafe { self.reg(Self::UART_FR).read() } & (1 << 4) > 0)
     }
     pub fn writec(&mut self, c: u8) {
+        // if super::LED_OUT.is_initialized() {
+        //     super::LED_OUT.get().put(c);
+        //     // crate::sync::spin_sleep(33 * 1000);
+        // }
         unsafe {
             while self.transmit_fifo_full() {}
             self.reg(Self::UART_DR).write(c as u32);
@@ -124,6 +128,21 @@ impl UARTInner {
                 Some(self.reg(Self::UART_DR).read() as u8)
             }
         }
+    }
+
+    pub fn write_bytes(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.writec(*b);
+        }
+        // if super::CONSOLE.is_initialized() {
+        //     let mut console = super::CONSOLE.get().lock();
+        //     console.input(bytes);
+        //     if bytes.contains(&b'\n') {
+        //         console.render();
+        //     }
+        //     drop(console);
+        //     spin_sleep(3000);
+        // }
     }
 }
 

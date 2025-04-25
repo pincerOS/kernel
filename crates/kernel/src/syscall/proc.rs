@@ -2,25 +2,43 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 
 use crate::event::async_handler::{run_async_handler, run_event_handler, HandlerContext};
-use crate::event::context::{deschedule_thread, Context, DescheduleAction};
+use crate::event::context::{deschedule_thread, Context, DescheduleAction, CORES};
 use crate::event::thread::Thread;
 use crate::process::fd::{self, FileDescriptor};
 use crate::process::ExitStatus;
 use crate::sync::once_cell::BlockingOnceCell;
 use crate::{event, shutdown};
 
+const SHUTDOWN_ENABLED: bool = false;
+
 pub unsafe fn sys_shutdown(ctx: &mut Context) -> *mut Context {
-    run_event_handler(ctx, move |_context: HandlerContext<'_>| {
-        shutdown();
+    run_event_handler(ctx, move |context: HandlerContext<'_>| {
+        if SHUTDOWN_ENABLED {
+            shutdown();
+        } else {
+            println!("Not shutting down...");
+            let thread = context.detach_thread();
+            let exit_code = &thread.process.as_ref().unwrap().exit_code;
+            exit_code.set(crate::process::ExitStatus { status: 0 as u32 });
+            unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
+        }
     })
 }
 
-pub unsafe fn exit_exception(mut thread: Box<Thread>, ctx: &mut Context, status: u32) -> ! {
-    let exit_code = &thread.process.as_ref().unwrap().exit_code;
-    exit_code.set(crate::process::ExitStatus {
-        status: status as u32,
-    });
+pub unsafe fn exit_current_user_thread(ctx: &mut Context, status: u32) -> ! {
+    let thread = CORES.with_current(|core| core.thread.take());
+    let mut thread = thread.expect("usermode syscall without active thread");
+
+    thread.last_context = core::ptr::NonNull::from(&mut *ctx);
+    unsafe { thread.save_user_regs() };
     unsafe { thread.save_context(ctx.into(), false) };
+
+    unsafe { crate::sync::enable_interrupts() };
+    unsafe { exit_user_thread(thread, status) }
+}
+
+pub unsafe fn exit_user_thread(mut thread: Box<Thread>, status: u32) -> ! {
+    thread.set_exited(status);
     unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
 }
 
@@ -68,7 +86,7 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
         }
 
         println!(
-            "Creating new process with page dir {:#010x}",
+            "Creating new process with page dir {:#010x}, initial sp {user_sp:#x}, entry {user_entry:#x}",
             process.get_ttbr0()
         );
         let mut user_thread = unsafe { Thread::new_user(process, user_sp, user_entry) };

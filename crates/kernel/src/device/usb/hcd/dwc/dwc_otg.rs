@@ -78,7 +78,7 @@ fn schedule_next_transfer(channel: u8) {
     }
 }
 
-pub fn dwc_otg_interrupt_handler(_ctx: &mut Context) {
+pub fn dwc_otg_interrupt_handler(_ctx: &mut Context, _irq: usize) {
     let mut hcint_channels = [0u32; ChannelCount];
     {
         //read interrupt status
@@ -108,8 +108,9 @@ pub fn dwc_otg_interrupt_handler(_ctx: &mut Context) {
                     if let Some(callback) = unsafe { DWC_CHANNEL_CALLBACK.callback[i] } {
                         let hcint = hcint_channels[i];
                         schedule_rt(move || {
-                            callback(endpoint_descriptor, hcint, i as u8);
-                            schedule_next_transfer(i as u8);
+                            if callback(endpoint_descriptor, hcint, i as u8) {
+                                schedule_next_transfer(i as u8);
+                            }
                         });
                     } else {
                         println!("| DWC: No callback for channel {}.\n", i);
@@ -122,6 +123,19 @@ pub fn dwc_otg_interrupt_handler(_ctx: &mut Context) {
             }
         }
     }
+}
+
+pub fn DwcUpdateHostFrameInterval() {
+    let hfir = read_volatile(DOTG_HFIR);
+    println!("| DWC: HFIR: {:#x}", hfir);
+}
+
+pub fn UpdateDwcOddFrame(channel: u8) {
+    let frame = read_volatile(DOTG_HFNUM);
+    let mut hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+    hcchar &= !HCCHAR_ODDFRM;
+    hcchar |= (!(frame & 1)) << 29 | HCCHAR_CHENA;
+    write_volatile(DOTG_HCCHAR(channel as usize), hcchar);
 }
 
 /**
@@ -175,6 +189,12 @@ fn HcdPrepareChannel(
     dwc_sc.channel[channel as usize].characteristics.Enable = false;
     dwc_sc.channel[channel as usize].characteristics.Disable = false;
     dwc_sc.channel[channel as usize].characteristics.OddFrame = false;
+    if pipe.transfer_type == UsbTransfer::Interrupt {
+        //TODO: handling for isochronous
+        let frame = read_volatile(DOTG_HFNUM);
+        dwc_sc.channel[channel as usize].characteristics.OddFrame = frame & 1 == 0;
+    }
+
     dwc_sc.channel[channel as usize]
         .characteristics
         .PacketsPerFrame = 1;
@@ -188,8 +208,14 @@ fn HcdPrepareChannel(
     dwc_sc.channel[channel as usize].split_control.XactPos = 0;
     dwc_sc.channel[channel as usize].split_control.CompleteSplit = false;
     dwc_sc.channel[channel as usize].split_control.SplitEnable = false;
-    // if pipe.speed != UsbSpeed::High && device.parent.is_some() && unsafe { (*device.parent.unwrap()).speed == UsbSpeed::High  && (*device.parent.unwrap()).parent.is_some() }{
-    if pipe.speed != UsbSpeed::High {
+    if pipe.speed != UsbSpeed::High
+        && device.parent.is_some()
+        && unsafe {
+            (*device.parent.unwrap()).speed == UsbSpeed::High
+                && (*device.parent.unwrap()).parent.is_some()
+        }
+    {
+        // if pipe.speed != UsbSpeed::High {
         dwc_sc.channel[channel as usize].split_control.SplitEnable = true;
         if let Some(parent) = device.parent {
             unsafe {
@@ -251,10 +277,14 @@ pub unsafe fn HcdTransmitChannel(device: &UsbDevice, channel: u8, buffer: *mut u
             );
         }
 
-        let dma_address = 0x2FF0000 + 0x1000 * channel as usize;
+        let dma_base_phys = 0x2FF0000;
+        let dma_base_gpu = dma_base_phys | 0xC0000000;
+        let dma_address = dma_base_gpu + 0x1000 * channel as usize;
         let dma_loc = dwc_sc.dma_loc + 0x1000 * channel as usize;
         //copy from buffer to dma_loc for 32 bytes
         memory_copy(dma_loc as *mut u8, buffer, 100);
+
+        crate::arch::memory::invalidate_physical_buffer_for_device(dma_loc as *mut (), 128);
 
         //print out the first 8 bytes stored in buffer
         // unsafe {
@@ -406,6 +436,7 @@ pub fn HcdChannelSendWaitOne(
         loop {
             if timeout == RequestTimeout {
                 println!("| HCD: Request to device has timed out.");
+                printDWCErrors(channel as u32);
                 device.error = UsbTransferError::ConnectionError;
                 return ResultCode::ErrorTimeout;
             }
@@ -430,7 +461,7 @@ pub fn HcdChannelSendWaitOne(
             if hcint & HCINT_ACK != 0 && dwc_sc.channel[channel as usize].split_control.SplitEnable
             {
                 // Try to complete the split up to 3 times.
-                println!("| HCD: Completing split to device with ACK\n");
+                // println!("| HCD: Completing split to device with ACK");
                 for tries_i in 0..3 {
                     tries = tries_i;
                     write_volatile(DOTG_HCINT(channel as usize), 0x3fff);
@@ -459,7 +490,7 @@ pub fn HcdChannelSendWaitOne(
                     timeout = 0;
                     loop {
                         if timeout == RequestTimeout {
-                            println!("| HCD: Request split completion to ss has timed out.\n");
+                            println!("| HCD: Request split completion to ss has timed out.");
                             device.error = UsbTransferError::ConnectionError;
                             return ResultCode::ErrorTimeout;
                         }
@@ -475,16 +506,22 @@ pub fn HcdChannelSendWaitOne(
                     if hcint & HCINT_NYET == 0 {
                         break;
                     }
+                    // println!("| HCD: Request split completion failed, retrying.");
                 }
+
+                // println!("| HCD: Request split completion made progress; hcint: {:#x}", hcint);
 
                 if tries == 3 {
                     micro_delay(25000);
                     continue;
                 } else if hcint & HCINT_NAK != 0 {
+                    // println!("| HCD: Request split completion NAK");
                     globalTries = globalTries.wrapping_sub(1);
                     micro_delay(25000);
                     continue;
                 } else if hcint & HCINT_XACTERR != 0 {
+                    // println!("| HCD: Request split completion XACTERR");
+                    printDWCErrors(channel as u32);
                     micro_delay(25000);
                     continue;
                 }
@@ -513,18 +550,6 @@ pub fn HcdChannelSendWaitOne(
 
                 result = HcdChannelInterruptToError(device, hcint, false);
                 if result != ResultCode::OK {
-                    // LOG_DEBUGF(
-                    //     "HCD: Control message to %#x: %02x%02x%02x%02x %02x%02x%02x%02x.\n",
-                    //     *(pipe as *const u32),
-                    //     *((request as *const u8).offset(0)),
-                    //     *((request as *const u8).offset(1)),
-                    //     *((request as *const u8).offset(2)),
-                    //     *((request as *const u8).offset(3)),
-                    //     *((request as *const u8).offset(4)),
-                    //     *((request as *const u8).offset(5)),
-                    //     *((request as *const u8).offset(6)),
-                    //     *((request as *const u8).offset(7)),
-                    // );
                     println!("| HCD: Request split completion to failed.\n");
                     return result;
                 }
@@ -543,20 +568,7 @@ pub fn HcdChannelSendWaitOne(
                 !dwc_sc.channel[channel as usize].split_control.SplitEnable,
             );
             if result != ResultCode::OK {
-                // LOG_DEBUGF(
-                //     "HCD: Control message to %#x: %02x%02x%02x%02x %02x%02x%02x%02x.\n",
-                //     *(pipe as *const u32),
-                //     *((request as *const u8).offset(0)),
-                //     *((request as *const u8).offset(1)),
-                //     *((request as *const u8).offset(2)),
-                //     *((request as *const u8).offset(3)),
-                //     *((request as *const u8).offset(4)),
-                //     *((request as *const u8).offset(5)),
-                //     *((request as *const u8).offset(6)),
-                //     *((request as *const u8).offset(7)),
-                // );
                 println!("HCD: Request to failed.\n");
-                // shutdown();
                 return ResultCode::ErrorRetry;
             }
         }
@@ -572,18 +584,6 @@ pub fn HcdChannelSendWaitOne(
             !dwc_sc.channel[channel as usize].split_control.SplitEnable,
         );
         if result != ResultCode::OK {
-            // LOG_DEBUGF(
-            //     "HCD: Control message to %#x: %02x%02x%02x%02x %02x%02x%02x%02x.\n",
-            //     *(pipe as *const u32),
-            //     *((request as *const u8).offset(0)),
-            //     *((request as *const u8).offset(1)),
-            //     *((request as *const u8).offset(2)),
-            //     *((request as *const u8).offset(3)),
-            //     *((request as *const u8).offset(4)),
-            //     *((request as *const u8).offset(5)),
-            //     *((request as *const u8).offset(6)),
-            //     *((request as *const u8).offset(7)),
-            // );
             println!("| HCD: Request to failed.\n");
             return result;
         }
@@ -663,6 +663,8 @@ fn HcdChannelSendWait(
 
             transfer = buffer_length - dwc_sc.channel[channel as usize].transfer_size.TransferSize;
             // println!("| HCD: Transfer to packet progress: {}/{} with packets {} from {}\n", transfer, buffer_length, dwc_sc.channel[channel as usize].transfer_size.PacketCount, packets);
+            // printDWCErrors(channel as u32);
+
             // If the packet count hasn’t changed, break out of the loop.
             if packets == dwc_sc.channel[channel as usize].transfer_size.PacketCount {
                 // println!("| HCD: Transfer to packet got stuck.");
@@ -689,7 +691,7 @@ fn HcdChannelSendWait(
             } else {
                 device.error = UsbTransferError::ConnectionError;
             }
-
+            // println!("| HCD: Transfer to packet got stuck.");
             return ResultCode::ErrorDevice;
         }
 
@@ -876,7 +878,7 @@ pub unsafe fn HcdSubmitBulkMessage(
         device,
         &mut tempPipe,
         channel,
-        dwc_sc.dma_phys[channel as usize] as *mut u8,
+        dwc_sc.dma_gpu_addr[channel as usize] as *mut u8,
         buffer_length,
         packet_id,
     );
@@ -910,7 +912,7 @@ pub unsafe fn HcdSubmitInterruptMessage(
         _reserved: 0,
     };
 
-    let data_buffer = dwc_sc.dma_phys[channel as usize] as *mut u8;
+    let data_buffer = dwc_sc.dma_gpu_addr[channel as usize] as *mut u8;
     let result = HcdChannelSend(
         device,
         &mut tempPipe,
@@ -928,6 +930,23 @@ pub unsafe fn HcdSubmitInterruptMessage(
     return ResultCode::OK;
 }
 
+pub fn printDWCErrors(channel: u32) {
+    let hprt = read_volatile(DOTG_HPRT);
+    let gintsts = read_volatile(DOTG_GINTSTS);
+    let haint = read_volatile(DOTG_HAINT);
+    let hcint = read_volatile(DOTG_HCINT(channel as usize));
+    let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+    let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
+
+    println!("| HCD hprt: {:#x}", hprt);
+    println!("| HCD gintsts: {:#x}", gintsts);
+    println!("| HCD haint: {:#x}", haint);
+    println!("| HCD hcint: {:#x}", hcint);
+    println!("| HCD hcchar: {:#x}", hcchar);
+    println!("| HCD hctsiz: {:#x}", hctsiz);
+    println!("| HCD channel: {:#x}\n", channel);
+}
+
 pub unsafe fn HcdSubmitControlMessage(
     device: &mut UsbDevice,
     pipe: UsbPipeAddress,
@@ -935,6 +954,7 @@ pub unsafe fn HcdSubmitControlMessage(
     buffer_length: u32,
     request: &mut UsbDeviceRequest,
 ) -> ResultCode {
+    // println!("| HcdSubmitControlMessage for device {}", pipe.device);
     let roothub_device_number = unsafe { (*device.bus).roothub_device_number };
     if pipe.device == roothub_device_number as u8 {
         return unsafe { HcdProcessRootHubMessage(device, pipe, buffer, buffer_length, request) };
@@ -957,6 +977,7 @@ pub unsafe fn HcdSubmitControlMessage(
     let request_buffer = request as *mut UsbDeviceRequest as *mut u8;
 
     // dwc_sc.channel[0].characteristics.MaximumPacketSize = 8;
+
     let mut result;
     result = HcdChannelSendWait(
         device,
@@ -972,6 +993,8 @@ pub unsafe fn HcdSubmitControlMessage(
         println!("| HCD: Failed to send control message to device.\n");
         return result;
     }
+
+    let mut is_data1 = true;
 
     if !buffer.is_null() {
         if pipe.direction == UsbDirection::Out {
@@ -991,7 +1014,12 @@ pub unsafe fn HcdSubmitControlMessage(
         tempPipe.direction = pipe.direction;
 
         let data_buffer = dwc_sc.databuffer.as_mut_ptr();
-
+        let pid = if is_data1 {
+            PacketId::Data1
+        } else {
+            PacketId::Data0
+        };
+        is_data1 = !is_data1;
         result = HcdChannelSendWait(
             device,
             &mut tempPipe,
@@ -999,10 +1027,13 @@ pub unsafe fn HcdSubmitControlMessage(
             data_buffer,
             buffer_length,
             request,
-            PacketId::Data1,
+            pid,
         );
         if result != ResultCode::OK {
             println!("| HCD: Coult not send data to device\n");
+
+            printDWCErrors(0);
+
             return result;
         }
 
@@ -1045,6 +1076,12 @@ pub unsafe fn HcdSubmitControlMessage(
         tempPipe.direction = UsbDirection::Out;
     }
 
+    let pid = if is_data1 {
+        PacketId::Data1
+    } else {
+        PacketId::Data0
+    };
+
     // tempPipe.direction = UsbDirection::In;
     //TODO: This is necessary in Real hardware I think but QEMU doesn't fully handle it
     //https://elixir.bootlin.com/qemu/v9.0.2/source/hw/usb/hcd-dwc2.c#L346
@@ -1055,7 +1092,7 @@ pub unsafe fn HcdSubmitControlMessage(
         dwc_sc.databuffer.as_mut_ptr(),
         0,
         request,
-        PacketId::Data1,
+        pid,
     );
     if result != ResultCode::OK {
         // println!("| HCD: Could not send STATUS to device.");
@@ -1120,7 +1157,8 @@ pub fn HcdReset() -> ResultCode {
         grstcl = read_volatile(DOTG_GRSTCTL);
     }
 
-    grstcl |= GRSTCTL_CSFTRST;
+    // grstcl |= GRSTCTL_CSFTRST;
+    grstcl = GRSTCTL_CSFTRST;
     write_volatile(DOTG_GRSTCTL, grstcl);
     count = 0;
 
@@ -1185,31 +1223,186 @@ fn HcdReceiveFifoFlush() -> ResultCode {
     return ResultCode::OK;
 }
 
-pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
+pub fn ms_to_micro(ms: u32) -> u32 {
+    return ms * 1000;
+}
+
+pub fn init_fifo() -> ResultCode {
+    let cfg3 = read_volatile(DOTG_GHWCFG3);
+    let mut fifo_size = 4 * (cfg3 >> 16);
+
+    let fifo_regs = 4 * 16;
+    if fifo_size < fifo_regs {
+        panic!("| HCD ERROR: FIFO size is too small");
+    }
+
+    fifo_size -= fifo_regs;
+    fifo_size /= 2;
+    fifo_size &= !3;
+
+    write_volatile(DOTG_GRXFSIZ, fifo_size);
+    let mut tx_start = fifo_size;
+    fifo_size /= 2;
+
+    write_volatile(DOTG_GNPTXFSIZ, ((fifo_size / 4) << 16) | (tx_start / 4));
+    tx_start += fifo_size;
+
+    write_volatile(DOTG_HPTXFSIZ, ((fifo_size / 4) << 16) | (tx_start / 4));
+
+    write_volatile(DOTG_GINTMSK, GINTMSK_HCHINTMSK);
+
+    if HcdTransmitFifoFlush(CoreFifoFlush::FlushAll) != ResultCode::OK {
+        return ResultCode::ErrorDevice;
+    }
+
+    if HcdReceiveFifoFlush() != ResultCode::OK {
+        return ResultCode::ErrorDevice;
+    }
+
+    ResultCode::OK
+}
+
+pub fn DwcInit(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
+    unsafe {
+        dwc_otg_driver = DWC_OTG::init(base_addr);
+    }
+
+    if mbox_set_power_on() != ResultCode::OK {
+        return ResultCode::ErrorDevice;
+    }
+
     let dwc_sc: &mut dwc_hub = &mut *bus.dwc_sc;
 
     unsafe {
-        let dma_address = 0x2FF0000;
-        use crate::memory::map_physical_noncacheable;
-        let dma_loc =
-            map_physical_noncacheable(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
+        let dma_address_phys = 0x2FF0000;
+        let dma_address_gpu = dma_address_phys | 0xC0000000;
+        use crate::memory::map_device_block;
+        let dma_loc = map_device_block(dma_address_phys, 0x1000 * ChannelCount).as_ptr() as usize;
+        // map_device_block(dma_address, 0x1000 * ChannelCount).as_ptr() as usize;
         dwc_sc.dma_loc = dma_loc; //TODO: Temporay, move to somwhere elses
         println!(
             "| HCD: DMA address {:#x} mapped from {:#x} to {:#x}",
-            dma_address,
+            dma_address_gpu,
             dma_loc,
             dma_loc + 0x1000 * ChannelCount
         );
         for i in 0..ChannelCount {
             dwc_sc.dma_addr[i as usize] = dma_loc + (i * 0x1000);
-            dwc_sc.dma_phys[i as usize] = dma_address + (i * 0x1000);
+            dwc_sc.dma_gpu_addr[i as usize] = dma_address_gpu + (i * 0x1000);
         }
     }
 
-    // println!("| HCD: Starting");
+    dwc_otg_register_interrupt_handler();
+
+    let vendor_id = read_volatile(DOTG_GSNPSID);
+    let user_id = read_volatile(DOTG_GUID);
+
+    println!("| HCD: Vendor ID: {:#x} User ID: {:#x}", vendor_id, user_id);
+
+    let version = read_volatile(DOTG_GSNPSID);
+    println!("| HCD: Version: {:#x}", version);
+
+    //disconnect
+    write_volatile(DOTG_DCTL, DCTL_SFTDISCON);
+
+    //wait for disconnect
+    micro_delay(ms_to_micro(32));
+
+    write_volatile(DOTG_GRSTCTL, GRSTCTL_CSFTRST);
+
+    //wait for reset
+    micro_delay(ms_to_micro(10));
+
+    write_volatile(DOTG_GUSBCFG, GUSBCFG_FORCEHOSTMODE);
+    write_volatile(DOTG_GOTGCTL, 0);
+
+    //clear global NAK
+    write_volatile(DOTG_DCTL, DCTL_CGOUTNAK | DCTL_CGNPINNAK);
+
+    //disable usb port
+    write_volatile(DOTG_PCGCCTL, 0xFFFFFFFF);
+
+    micro_delay(ms_to_micro(10));
+
+    //enable usb port
+    write_volatile(DOTG_PCGCCTL, 0);
+    micro_delay(ms_to_micro(10));
+
+    if init_fifo() != ResultCode::OK {
+        println!("| HCD ERROR: Failed to init FIFO");
+        return ResultCode::ErrorDevice;
+    }
+
+    //setup clock
+    let mut hcfg = read_volatile(DOTG_HCFG);
+    hcfg &= !(HCFG_FSLSSUPP | HCFG_FSLSPCLKSEL_MASK);
+    hcfg |= (1 << HCFG_FSLSPCLKSEL_SHIFT) | HCFG_FSLSSUPP;
+    //Host clock: 30-60Mhz
+    write_volatile(DOTG_HCFG, hcfg);
+
+    let hfir = 0xBB80;
+    write_volatile(DOTG_HFIR, hfir);
+
+    write_volatile(DOTG_GAHBCFG, GAHBCFG_GLBLINTRMSK);
+
+    let mut hport = read_volatile(DOTG_HPRT);
+    if (hport & HPRT_PRTPWR) == 0 {
+        println!("| HCD Powering on port");
+        hport |= HPRT_PRTPWR;
+        write_volatile(DOTG_HPRT, hport);
+        micro_delay(10000);
+    }
+
+    //Enable DMA
+    let mut gahbcfg = read_volatile(DOTG_GAHBCFG);
+    gahbcfg |= GAHBCFG_DMAEN | GAHBCFG_GLBLINTRMSK;
+    gahbcfg &= !(1 << 23);
+    write_volatile(DOTG_GAHBCFG, gahbcfg);
+
+    let hcfg = read_volatile(DOTG_HCFG);
+    let h_dmaen = hcfg & (1 << 23);
+    let cfg4 = read_volatile(DOTG_GHWCFG4);
+    let c_dmad = cfg4 & (1 << 31);
+    let c_dmaen = cfg4 & (1 << 30);
+    let gahbcfg = read_volatile(DOTG_GAHBCFG);
+    let g_dmaen = gahbcfg & GAHBCFG_DMAEN;
+    let gsnpsid = read_volatile(DOTG_GSNPSID);
+
+    println!(
+        "| HCD: DMA enabled: {}, DMA description: {}, dma en {}, gdmaen {}, GSNPSID: {:#x}",
+        h_dmaen,
+        c_dmad,
+        c_dmaen,
+        g_dmaen,
+        gsnpsid & 0xfff
+    );
+
+    ResultCode::OK
+}
+
+pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
+    let dwc_sc: &mut dwc_hub = &mut *bus.dwc_sc;
+
+    unsafe {
+        let dma_address_phys = 0x2FF0000;
+        let dma_address_gpu = dma_address_phys | 0xC0000000;
+        use crate::memory::map_device_block;
+        let dma_loc = map_device_block(dma_address_phys, 0x1000 * ChannelCount).as_ptr() as usize;
+        dwc_sc.dma_loc = dma_loc; //TODO: Temporay, move to somwhere elses
+        println!(
+            "| HCD: DMA address {:#x} mapped from {:#x} to {:#x}",
+            dma_address_gpu,
+            dma_loc,
+            dma_loc + 0x1000 * ChannelCount
+        );
+        for i in 0..ChannelCount {
+            dwc_sc.dma_addr[i as usize] = dma_loc + (i * 0x1000);
+            dwc_sc.dma_gpu_addr[i as usize] = dma_address_gpu + (i * 0x1000);
+        }
+    }
 
     write_volatile(DOTG_DCTL, 1 << 1);
-    micro_delay(1000);
+    micro_delay(32000);
 
     let mut gusbcfg = read_volatile(DOTG_GUSBCFG);
     gusbcfg &= !(GUSBCFG_ULPIEXTVBUSDRV | GUSBCFG_TERMSELDLPULSE);
@@ -1228,6 +1421,7 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
         gusbcfg &= !GUSBCFG_PHYIF;
         write_volatile(DOTG_GUSBCFG, gusbcfg);
         HcdReset();
+        println!("| HCD: Reset PHY");
     }
 
     gusbcfg = read_volatile(DOTG_GUSBCFG);
@@ -1268,18 +1462,25 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
     }
     write_volatile(DOTG_GUSBCFG, gusbcfg);
 
+    write_volatile(DOTG_PCGCCTL, 0xFFFFFFFF);
+
+    micro_delay(30000);
+
     write_volatile(DOTG_PCGCCTL, 0);
+
+    micro_delay(30000);
 
     let mut hcfg = read_volatile(DOTG_HCFG);
     //FSPhyType = Dedicated full-speed interface 2'b01
     //HSPhyType = UTMI+ 2'b01
-    hcfg &= !HCFG_FSLSPCLKSEL_MASK;
+    hcfg &= !(HCFG_FSLSSUPP | HCFG_FSLSPCLKSEL_MASK);
+    hcfg |= (1 << HCFG_FSLSPCLKSEL_SHIFT) | HCFG_FSLSSUPP;
     //Host clock: 30-60Mhz
     write_volatile(DOTG_HCFG, hcfg);
 
-    hcfg = read_volatile(DOTG_HCFG);
-    hcfg |= HCFG_FSLSSUPP; //Sets speed for FS/LS devices, no HS devices
-    write_volatile(DOTG_HCFG, hcfg);
+    // hcfg = read_volatile(DOTG_HCFG);
+    // hcfg |= HCFG_FSLSSUPP; //Sets speed for FS/LS devices, no HS devices
+    // write_volatile(DOTG_HCFG, hcfg);
 
     let h_dmaen = hcfg & (1 << 23);
     let cfg4 = read_volatile(DOTG_GHWCFG4);
@@ -1328,6 +1529,7 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
             (read_volatile(DOTG_GHWCFG2) & GHWCFG2_NUMHSTCHNL_MASK) >> GHWCFG2_NUMHSTCHNL_SHIFT;
 
         for channel in 0..num_hst_chans {
+            write_volatile(DOTG_HCINT(channel as usize), 0xFFFFFFFF);
             let mut chan = read_volatile(DOTG_HCCHAR(channel as usize));
             chan |= HCCHAR_EPDIR_IN | HCCHAR_CHDIS;
             chan &= !HCCHAR_CHENA;
@@ -1341,37 +1543,59 @@ pub fn HcdStart(bus: &mut UsbBus) -> ResultCode {
             write_volatile(DOTG_HCCHAR(channel as usize), chan);
 
             let mut timeout = 0;
-            chan = read_volatile(DOTG_HCCHAR(channel as usize));
-            while (chan & HCCHAR_CHENA) != 0 {
+            // chan = read_volatile(DOTG_HCCHAR(channel as usize));
+            let mut chan_int = read_volatile(DOTG_HCINT(channel as usize));
+            while (chan_int & HCINT_CHHLTD) == 0 {
                 timeout += 1;
                 if timeout > 0x100000 {
                     println!("| HCD Start ERROR: Channel {} failed to halt", channel);
                 }
-                chan = read_volatile(DOTG_HCCHAR(channel as usize));
+                chan_int = read_volatile(DOTG_HCINT(channel as usize));
             }
+            // while (chan & HCCHAR_CHENA) != 0 {
+            //     timeout += 1;
+            //     if timeout > 0x100000 {
+            //         println!("| HCD Start ERROR: Channel {} failed to halt", channel);
+            //     }
+            //     chan = read_volatile(DOTG_HCCHAR(channel as usize));
+            // }
         }
     }
 
     let mut hport = read_volatile(DOTG_HPRT);
-    if (hport & HPRT_PRTCONNSTS) == 0 {
+    if (hport & HPRT_PRTPWR) == 0 {
         println!("| HCD Powering on port");
         hport |= HPRT_PRTPWR;
         write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x1000));
+        micro_delay(10000);
+    }
+
+    // Wait for device connection (optional debounce)
+    for _ in 0..100 {
+        let h = read_volatile(DOTG_HPRT);
+        if (h & HPRT_PRTCONNSTS) != 0 {
+            break;
+        }
+        micro_delay(1000); // wait 1ms
     }
 
     write_volatile(DOTG_GINTSTS, 0xFFFFFFFF);
-    dwc_otg_register_interrupt_handler();
+
+    micro_delay(10000);
     write_volatile(DOTG_GINTMSK, GINTMSK_HCHINTMSK);
 
     write_volatile(DOTG_GINTSTS, 1);
     write_volatile(DOTG_GAHBCFG, GAHBCFG_GLBLINTRMSK);
+
     // hport = read_volatile(DOTG_HPRT);
     // hport |= HPRT_PRTRST;
-    // write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x100));
+    // write_volatile(DOTG_HPRT, hport);
 
     // micro_delay(50000);
     // hport &= !HPRT_PRTRST;
-    // write_volatile(DOTG_HPRT, hport & (0x1f140 | 0x100));
+    // write_volatile(DOTG_HPRT, hport);
+    // micro_delay(50000);
+
     return ResultCode::OK;
 }
 
@@ -1433,10 +1657,13 @@ pub fn HcdInitialize(_bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
 }
 
 pub fn read_volatile(reg: usize) -> u32 {
-    unsafe { core::ptr::read_volatile((dwc_otg_driver.base_addr + reg) as *mut u32) }
+    let ptr = unsafe { (dwc_otg_driver.base_addr + reg) as *mut u32 };
+    let val = unsafe { core::ptr::read_volatile(ptr) };
+    val
 }
 pub fn write_volatile(reg: usize, val: u32) {
-    unsafe { core::ptr::write_volatile((dwc_otg_driver.base_addr + reg) as *mut u32, val) }
+    let ptr = unsafe { (dwc_otg_driver.base_addr + reg) as *mut u32 };
+    unsafe { core::ptr::write_volatile(ptr, val) };
 }
 
 pub fn get_dwc_ptr(offset: usize) -> *mut u32 {
@@ -1489,7 +1716,7 @@ pub fn dwc_otg_free_channel(channel: u32) {
 }
 
 pub struct DwcChannelCallback {
-    pub callback: [Option<fn(endpoint_descriptor, u32, u8)>; ChannelCount],
+    pub callback: [Option<fn(endpoint_descriptor, u32, u8) -> bool>; ChannelCount],
     pub endpoint_descriptors: [Option<endpoint_descriptor>; ChannelCount],
 }
 
@@ -1526,7 +1753,7 @@ pub struct dwc_hub {
     pub databuffer: [u8; 1024],
     pub phy_initialised: bool,
     pub dma_loc: usize,
-    pub dma_phys: [usize; ChannelCount],
+    pub dma_gpu_addr: [usize; ChannelCount],
     pub dma_addr: [usize; ChannelCount],
     pub channel: [host_channel; ChannelCount],
 }
@@ -1641,7 +1868,7 @@ impl dwc_hub {
             databuffer: [0; 1024],
             phy_initialised: false,
             dma_loc: 0,
-            dma_phys: [0; ChannelCount],
+            dma_gpu_addr: [0; ChannelCount],
             dma_addr: [0; ChannelCount],
             channel: [host_channel::default(); ChannelCount],
         }

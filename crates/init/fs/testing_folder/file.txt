@@ -1,0 +1,12 @@
+hello
+
+- Microkernel Architecture
+- Multi-core Support
+- Memory Management
+- Process Scheduling
+- File System with Journaling Support
+- Inter-process Communication (IPC)
+- Device Drivers
+- Networking
+- Security
+
