@@ -121,7 +121,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
     }
 
     if split_control == DWCSplitControlState::SSPLIT {
-        println!("| Endpoint {}: split_control is SSPLIT", channel);
+        println!("| Endpoint {}: split_control is SSPLIT hcint {:x}", channel, hcint);
         if hcint & HCINT_NAK != 0 {
             println!("| Endpoint SSPLIT {}: NAK received hcint {:x}", channel, hcint);
             DwcEnableChannel(channel);
@@ -147,7 +147,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             return true;
         }
     } else if split_control == DWCSplitControlState::CSPLIT {
-        println!("| Endpoint {}: split_control is CSPLIT", channel);
+        println!("| Endpoint {}: split_control is CSPLIT hcint {:x}", channel, hcint);
         if hcint & HCINT_NAK != 0 {
             println!("| Endpoint CSPLIT {}: NAK received hcint {:x}", channel, hcint);
         } else if hcint & HCINT_FRMOVRUN != 0 {
@@ -171,7 +171,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             unsafe {
                 DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] = DWCSplitControlState::NONE;
             }
-            println!("| Endpoint CSPLIT {}: hcint {:x}", channel, hcint);
+            println!("| Endpoint CSPLIT {}: hcint {:x} last transfer {:x}", channel, hcint, device.last_transfer);
         }
     }
 
