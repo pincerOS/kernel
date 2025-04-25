@@ -1,11 +1,11 @@
+use crate::device::usb::device::net::get_interface_mut;
 use crate::networking::iface::udp;
 use crate::networking::socket::bindings::NEXT_SOCKETFD;
 use crate::networking::socket::tagged::TaggedSocket;
 use crate::networking::socket::SocketAddr;
 use crate::networking::utils::ring::Ring;
 use crate::networking::{Error, Result};
-
-use crate::device::usb::device::net::interface;
+use crate::networking::iface::Interface;
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -29,9 +29,10 @@ pub struct UdpSocket {
 
 impl UdpSocket {
     pub fn new() -> u16 {
+        let interface = get_interface_mut();
         let socket = UdpSocket {
             binding: SocketAddr {
-                addr: *interface().ipv4_addr,
+                addr: *interface.ipv4_addr,
                 port: 0,
             },
             is_bound: false,
@@ -40,9 +41,8 @@ impl UdpSocket {
         };
 
         let socketfd = NEXT_SOCKETFD.fetch_add(1, Ordering::SeqCst);
-        interface()
-            .sockets
-            .insert(socketfd, TaggedSocket::Udp(socket));
+        let mut sockets = interface.sockets.lock();
+        sockets.insert(socketfd, TaggedSocket::Udp(socket));
 
         socketfd
     }
@@ -55,10 +55,10 @@ impl UdpSocket {
         self.is_bound
     }
 
-    pub fn bind(&mut self, port: u16) {
+    pub fn bind(&mut self, interface: &mut Interface, port: u16) {
         self.is_bound = true;
         let bind_addr = SocketAddr {
-            addr: *interface().ipv4_addr,
+            addr: *interface.ipv4_addr,
             port,
         };
 
@@ -73,7 +73,7 @@ impl UdpSocket {
         })
     }
 
-    pub fn send(&mut self) -> Result<()> {
+    pub fn send(&mut self, interface: &mut Interface) -> Result<()> {
         loop {
             match self.send_buffer.dequeue_with(|entry| {
                 let (payload, addr) = entry;
@@ -81,7 +81,7 @@ impl UdpSocket {
             }) {
                 Ok((payload, dest)) => {
                     let _ = udp::send_udp_packet(
-                        interface(),
+                        interface,
                         dest.addr,
                         payload,
                         self.binding.port,

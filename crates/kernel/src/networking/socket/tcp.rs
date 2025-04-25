@@ -1,5 +1,5 @@
-use crate::device::usb::device::net::interface;
-use crate::networking::iface::tcp;
+use crate::device::usb::device::net::get_interface_mut;
+use crate::networking::iface::{Interface, tcp};
 use crate::networking::socket::bindings::{NEXT_EPHEMERAL, NEXT_SOCKETFD};
 use crate::networking::socket::tagged::TaggedSocket;
 use crate::networking::socket::SocketAddr;
@@ -60,9 +60,10 @@ pub struct TcpSocket {
 
 impl TcpSocket {
     pub fn new() -> u16 {
+        let interface = get_interface_mut();
         let socket = TcpSocket {
             binding: SocketAddr {
-                addr: *interface().ipv4_addr,
+                addr: *interface.ipv4_addr,
                 port: 0,
             },
             is_bound: false,
@@ -81,9 +82,8 @@ impl TcpSocket {
         };
 
         let socketfd = NEXT_SOCKETFD.fetch_add(1, Ordering::SeqCst);
-        interface()
-            .sockets
-            .insert(socketfd, TaggedSocket::Tcp(socket));
+        let mut sockets = interface.sockets.lock();
+        sockets.insert(socketfd, TaggedSocket::Tcp(socket));
         socketfd
     }
 
@@ -95,20 +95,20 @@ impl TcpSocket {
         self.is_bound
     }
 
-    pub fn bind(&mut self, port: u16) {
+    pub fn bind(&mut self, interface: &mut Interface,port: u16) {
         self.is_bound = true;
         let bind_addr = SocketAddr {
-            addr: *interface().ipv4_addr,
+            addr: *interface.ipv4_addr,
             port,
         };
         self.binding = bind_addr;
     }
 
-    pub fn listen(&mut self, num_max_requests: usize) -> Result<()> {
+    pub fn listen(&mut self, interface: &mut Interface, num_max_requests: usize) -> Result<()> {
         if !self.is_bound {
             // bind to ephemeral if not bound
             let ephemeral_port = NEXT_EPHEMERAL.fetch_add(1, Ordering::SeqCst);
-            self.bind(ephemeral_port as u16);
+            self.bind(interface, ephemeral_port as u16);
         }
 
         self.is_listener = true;
@@ -132,7 +132,7 @@ impl TcpSocket {
         }
     }
 
-    pub fn connect(&mut self, saddr: SocketAddr) -> Result<()> {
+    pub fn connect(&mut self, interface: &mut Interface, saddr: SocketAddr) -> Result<()> {
         // make sure we're not already connected
         // match self.state {
         //     TcpState::Closed => {},
@@ -142,7 +142,7 @@ impl TcpSocket {
         // if not already bound, bind to an ephemeral port
         if !self.is_bound {
             let ephemeral_port = NEXT_EPHEMERAL.fetch_add(1, Ordering::SeqCst);
-            self.bind(ephemeral_port as u16);
+            self.bind(interface, ephemeral_port as u16);
         }
         self.is_bound = true;
 
@@ -150,7 +150,7 @@ impl TcpSocket {
 
         let flags = TCP_FLAG_SYN;
         tcp::send_tcp_packet(
-            interface(),
+            interface,
             self.binding.port,
             saddr.port,
             self.seq_number,
@@ -189,7 +189,7 @@ impl TcpSocket {
         })
     }
 
-    pub fn send(&mut self) -> Result<()> {
+    pub fn send(&mut self, interface: &mut Interface) -> Result<()> {
         if self.state != TcpState::Established {
             return Err(Error::NotConnected);
         }
@@ -205,7 +205,7 @@ impl TcpSocket {
                         Ok((payload, dest)) => {
                             // Send with appropriate TCP flags
                             tcp::send_tcp_packet(
-                                interface(),
+                                interface,
                                 self.binding.port,
                                 dest.port,
                                 self.seq_number,
@@ -240,6 +240,7 @@ impl TcpSocket {
     // Enqueues a packet for receiving and handles TCP state machine
     pub fn recv_enqueue(
         &mut self,
+        interface: &mut Interface,
         seq_number: u32,
         ack_number: u32,
         flags: u8,
@@ -258,7 +259,7 @@ impl TcpSocket {
 
                         // Send ACK to complete three-way handshake
                         tcp::send_tcp_packet(
-                            interface(),
+                            interface,
                             self.binding.port,
                             sender.port,
                             self.seq_number + 1, // SYN consumes one sequence number
@@ -287,7 +288,7 @@ impl TcpSocket {
         }
 
         // Process state transitions based on TCP flags
-        self.process_tcp_state_transitions(flags, seq_number, ack_number, sender)?;
+        self.process_tcp_state_transitions(interface, flags, seq_number, ack_number, sender)?;
 
         // Now that we've handled any state transitions, enqueue actual data for user
         // Only enqueue if we're in established state and there's actual data
@@ -305,7 +306,7 @@ impl TcpSocket {
             // Send ACK for received data
             if let Some(remote) = self.remote_addr {
                 tcp::send_tcp_packet(
-                    interface(),
+                    interface,
                     self.binding.port,
                     remote.port,
                     self.seq_number,
@@ -324,6 +325,7 @@ impl TcpSocket {
     // Helper function to process TCP state transitions based on packet flags
     fn process_tcp_state_transitions(
         &mut self,
+        interface: &mut Interface,
         flags: u8,
         seq_number: u32,
         _ack_number: u32,
@@ -338,7 +340,7 @@ impl TcpSocket {
                     // Send ACK for FIN
                     if let Some(remote) = self.remote_addr {
                         tcp::send_tcp_packet(
-                            interface(),
+                            interface,
                             self.binding.port,
                             remote.port,
                             self.seq_number,
@@ -371,7 +373,7 @@ impl TcpSocket {
                         // Send ACK for their FIN
                         if let Some(remote) = self.remote_addr {
                             tcp::send_tcp_packet(
-                                interface(),
+                                interface,
                                 self.binding.port,
                                 remote.port,
                                 self.seq_number,
@@ -398,7 +400,7 @@ impl TcpSocket {
                     // Send ACK for their FIN
                     if let Some(remote) = self.remote_addr {
                         tcp::send_tcp_packet(
-                            interface(),
+                            interface,
                             self.binding.port,
                             remote.port,
                             self.seq_number,
@@ -442,13 +444,13 @@ impl TcpSocket {
     }
 
     // Close the connection gracefully
-    pub fn close(&mut self) -> Result<()> {
+    pub fn close(&mut self, interface: &mut Interface) -> Result<()> {
         match self.state {
             TcpState::Established => {
                 // Send FIN packet
                 if let Some(remote) = self.remote_addr {
                     tcp::send_tcp_packet(
-                        interface(),
+                        interface,
                         self.binding.port,
                         remote.port,
                         self.seq_number,
@@ -467,7 +469,7 @@ impl TcpSocket {
             TcpState::CloseWait => {
                 if let Some(remote) = self.remote_addr {
                     tcp::send_tcp_packet(
-                        interface(),
+                        interface,
                         self.binding.port,
                         remote.port,
                         self.seq_number,

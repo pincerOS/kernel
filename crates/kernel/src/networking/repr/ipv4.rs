@@ -21,6 +21,10 @@ impl Address {
         Address(addr)
     }
 
+    pub fn empty() -> Address {
+        Address([0, 0, 0, 0])
+    }
+
     pub fn from_bytes(addr: &[u8]) -> Result<Address> {
         if addr.len() != 4 {
             return Err(Error::Malformed);
@@ -114,6 +118,13 @@ impl AddressCidr {
             address,
             subnet_len,
         })
+    }
+
+    pub fn empty() -> AddressCidr {
+        AddressCidr {
+            address: Address::empty(),
+            subnet_len: 0,
+        }
     }
 
     pub fn from_mask(address: Address, subnet_mask: Address) -> Result<AddressCidr> {

@@ -2,7 +2,7 @@
 
 set -ex
 
-EXAMPLE=${1-"main"}
+EXAMPLE=${1-"net"}
 TARGET=aarch64-unknown-none-softfloat
 PROFILE=${PROFILE-"release"}
 
