@@ -4,9 +4,10 @@ use core::sync::atomic::{AtomicU16, Ordering};
 
 use alloc::vec::Vec;
 
-use crate::device::usb::device::net::interface;
 use crate::networking::repr::Ipv4Address;
 use crate::networking::{Error, Result};
+
+use crate::device::usb::device::net::get_interface_mut;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SocketAddr {
@@ -34,7 +35,8 @@ pub static NEXT_EPHEMERAL: AtomicU16 = AtomicU16::new(32768);
 pub static NEXT_SOCKETFD: AtomicU16 = AtomicU16::new(1);
 
 pub fn send_to(socketfd: u16, payload: Vec<u8>, saddr: SocketAddr) -> Result<()> {
-    let sockets = &mut interface().sockets;
+    let interface = get_interface_mut();
+    let mut sockets = interface.sockets.lock();
 
     // 1. check if socket fd is valid if not return error
     let tagged_socket = sockets
@@ -54,7 +56,8 @@ pub fn send_to(socketfd: u16, payload: Vec<u8>, saddr: SocketAddr) -> Result<()>
 
 // TODO: this needs to be blocking
 pub fn recv_from(socketfd: u16) -> Result<(Vec<u8>, SocketAddr)> {
-    let sockets = &mut interface().sockets;
+    let interface = get_interface_mut();
+    let mut sockets = interface.sockets.lock();
 
     // 1. check if a socketfd is valid if not return error
     let tagged_socket = sockets
@@ -71,7 +74,8 @@ pub fn recv_from(socketfd: u16) -> Result<(Vec<u8>, SocketAddr)> {
 }
 
 pub fn connect(socketfd: u16, saddr: SocketAddr) -> Result<()> {
-    let sockets = &mut interface().sockets;
+    let interface = get_interface_mut();
+    let mut sockets = interface.sockets.lock();
 
     // 1. check if a socketfd is valid if not return error
     let tagged_socket = sockets
@@ -82,8 +86,9 @@ pub fn connect(socketfd: u16, saddr: SocketAddr) -> Result<()> {
 }
 
 pub fn listen(socketfd: u16, num_requests: usize) -> Result<()> {
+    let interface = get_interface_mut();
     // 1.check if binded, if not error
-    let sockets = &mut interface().sockets;
+    let mut sockets = interface.sockets.lock();
 
     let tagged_socket = sockets
         .get_mut(&socketfd)
@@ -98,8 +103,9 @@ pub fn listen(socketfd: u16, num_requests: usize) -> Result<()> {
 }
 
 pub fn accept(socketfd: u16) -> Result<SocketAddr> {
+    let interface = get_interface_mut();
     // 1. if listener not started, error
-    let sockets = &mut interface().sockets;
+    let mut sockets = interface.sockets.lock();
 
     let tagged_socket = sockets
         .get_mut(&socketfd)
@@ -109,19 +115,20 @@ pub fn accept(socketfd: u16) -> Result<SocketAddr> {
     tagged_socket.accept()
 }
 
-pub fn bind(socketfd: u16, port: u16) -> Result<()> {
+pub fn bind( socketfd: u16, port: u16) -> Result<()> {
+    let interface = get_interface_mut();
     // 1. check if binding is already in use by another socket
     let bind_addr = SocketAddr {
-        addr: *interface().ipv4_addr,
+        addr: *interface.ipv4_addr,
         port,
     };
-    for (_, socket) in &mut interface().sockets {
+    let mut sockets = interface.sockets.lock();
+    for (_, socket) in sockets.iter_mut() {
         if socket.binding_equals(bind_addr) {
             return Err(Error::BindingInUse(bind_addr));
         }
     }
 
-    let sockets = &mut interface().sockets;
     // 2. check if this is a valid socketfd
     let tagged_socket = sockets
         .get_mut(&socketfd)

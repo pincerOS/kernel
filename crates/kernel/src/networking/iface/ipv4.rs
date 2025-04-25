@@ -1,35 +1,43 @@
-use crate::device::usb::device::net::interface;
-use crate::event::thread;
 use crate::networking::iface::{arp, ethernet, icmp, tcp, udp, Interface};
-use crate::networking::repr::*;
+use crate::networking::repr::{
+    EthernetType,
+    EthernetFrame,
+    Ipv4Address,
+    Ipv4Protocol,
+    Ipv4Packet,
+};
 use crate::networking::{Error, Result};
+
+use crate::event::thread;
+use crate::device::usb::device::net::{get_interface_mut, get_dhcpd_mut};
 
 use alloc::vec::Vec;
 
 pub fn send_ipv4_packet(
-    iface: &mut Interface,
+    interface: &mut Interface,
     payload: Vec<u8>,
     protocol: Ipv4Protocol,
     dst_addr: Ipv4Address,
 ) -> Result<()> {
-    let next_hop = ipv4_addr_route(iface, dst_addr);
-    match arp::eth_addr_for_ip(iface, next_hop) {
+    let next_hop = ipv4_addr_route(interface, dst_addr); 
+    match arp::eth_addr_for_ip(interface, next_hop) {
         Ok(dst_mac) => {
-            println!("resolved mac, sending ip");
-            let ipv4_packet = Ipv4Packet::new(*iface.ipv4_addr, dst_addr, protocol, payload);
+            println!("ip resolved: sending ip packet");
+
+            let ipv4_packet = Ipv4Packet::new(*interface.ipv4_addr, dst_addr, protocol, payload);
+
             ethernet::send_ethernet_frame(
-                iface,
+                interface,
                 ipv4_packet.serialize(),
                 dst_mac,
                 EthernetType::IPV4,
             )
         }
         Err(e) => {
-            println!("couldnt resolve mac, queuing another send");
-            // WARN: wait for mac address resolution, this is bad because it will loop infintiely
-            // if it doesnt resolve, need to add TTL and decrease
+            println!("failed to resolve ip, queuing another send, waiting for ARP");
             thread::thread(move || {
-                let _ = send_ipv4_packet(interface(), payload, protocol, dst_addr);
+                let interface = get_interface_mut();
+                let _ = send_ipv4_packet(interface, payload, protocol, dst_addr);
             });
             Err(e)
         }
@@ -37,26 +45,28 @@ pub fn send_ipv4_packet(
 }
 
 pub fn recv_ip_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Result<()> {
-    println!("\t[+] Received IP packet");
+    println!("[!] received IP packet");
     let ipv4_packet = Ipv4Packet::deserialize(eth_frame.payload.as_slice())?;
     if !ipv4_packet.is_valid_checksum() {
         return Err(Error::Checksum);
     }
 
-    // TODO: broadcast
+    let dhcpd = get_dhcpd_mut();
+    if dhcpd.is_transacting() {
+        return Err(Error::Ignored);
+    }
+
     if ipv4_packet.dst_addr != *interface.ipv4_addr
         && !interface.ipv4_addr.is_member(ipv4_packet.dst_addr)
         && !interface.ipv4_addr.is_broadcast(ipv4_packet.dst_addr)
-        && !interface.dhcp.is_transacting()
     {
         return Err(Error::Ignored);
     }
 
     // update arp cache for immediate ICMP echo replies, errors, etc.
     if eth_frame.src.is_unicast() {
-        interface
-            .arp_cache
-            .set_eth_addr_for_ip(ipv4_packet.src_addr, eth_frame.src);
+        let mut arp_cache = interface.arp_cache.lock();
+        arp_cache.set_eth_addr_for_ip(ipv4_packet.src_addr, eth_frame.src);
     }
 
     match ipv4_packet.protocol {
@@ -70,10 +80,10 @@ pub fn recv_ip_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Re
 // get next hop for a packet destined to a specified address.
 pub fn ipv4_addr_route(interface: &mut Interface, address: Ipv4Address) -> Ipv4Address {
     if interface.ipv4_addr.is_member(address) || interface.ipv4_addr.is_broadcast(address) {
-        println!("{} will be routed through link.", address);
+        println!("{} will be routed through link", address);
         address
     } else {
-        println!("{} will be routed through default gateway.", address);
+        println!("{} will be routed through default gateway", address);
         interface.default_gateway
     }
 }

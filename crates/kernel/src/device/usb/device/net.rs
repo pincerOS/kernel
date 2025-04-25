@@ -8,22 +8,17 @@ use super::super::usbd::device::*;
  */
 use core::slice;
 
-use crate::device::system_timer;
-
-use crate::networking::iface::cdcecm::CDCECM;
 use crate::networking::iface::*;
 use crate::networking::repr::*;
-use crate::networking::utils::arp_cache::ArpCache;
 
 use crate::device::usb::types::*;
 use crate::device::usb::usbd::endpoint::register_interrupt_endpoint;
 use crate::device::usb::usbd::endpoint::*;
 use crate::device::usb::usbd::request::*;
 use crate::shutdown;
+
 use alloc::boxed::Box;
-use alloc::collections::btree_map::BTreeMap;
 use alloc::vec;
-use alloc::vec::Vec;
 
 use super::rndis::*;
 
@@ -34,15 +29,25 @@ pub static mut NET_DEVICE: NetDevice = NetDevice {
 
 pub static mut INTERFACE: Option<Interface> = None;
 
-pub fn interface() -> &'static mut Interface {
+#[allow(static_mut_refs)]
+pub fn get_interface_mut() -> &'static mut Interface {
     unsafe {
-        match INTERFACE {
-            Some(ref mut iface) => iface,
-            None => panic!("meow"),
-        }
+        INTERFACE
+            .as_mut()
+            .expect("INTERFACE not initialized")
     }
 }
 
+pub static mut DHCPD: Option<dhcp::Dhcpd> = None;
+
+#[allow(static_mut_refs)]
+pub fn get_dhcpd_mut() -> &'static mut dhcp::Dhcpd {
+    unsafe {
+        DHCPD
+            .as_mut()
+            .expect("DHCPD not initialized")
+    }
+}
 pub fn NetLoad(bus: &mut UsbBus) {
     bus.interface_class_attach[InterfaceClass::InterfaceClassCommunications as usize] =
         Some(NetAttach);
@@ -135,62 +140,51 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     println!("| Net: MAC Address: {:x?}", mac_addr);
     let DEFAULT_MAC = EthernetAddress::from_bytes(mac_addr).unwrap();
 
-    let dev = CDCECM::new(1500);
-    let DEFAULT_IPV4 = Ipv4Address::new([0, 0, 0, 0]); // tell aaron about cidr conventions
-    let DEFAULT_IPV4CIDR = Ipv4Cidr::new(DEFAULT_IPV4, 0).unwrap();
-    let DEFAULT_GATEWAY = Ipv4Address::new([0, 0, 0, 0]); // change ts bruh
-
-    let default_interface = Interface {
-        dev: Box::new(dev),
-        arp_cache: ArpCache::new(60, system_timer::get_time()),
-        ethernet_addr: DEFAULT_MAC,
-        ipv4_addr: DEFAULT_IPV4CIDR,
-        default_gateway: DEFAULT_GATEWAY,
-        dns: Vec::new(),
-        sockets: BTreeMap::new(),
-        dhcp: dhcp::DhcpClient::new(),
-    };
-
+    // initalize the interface
     unsafe {
-        INTERFACE = Some(default_interface);
+        INTERFACE = Some(Interface::new());
     }
 
-    // TODO: discuss with aaron about typing for receive function, maybe would be better to return
-    // an Option or Result<> to handle errors
-    // register ethernet receieve
-    // RegisterNetReceiveCallback(recv_ethernet);
+    // set the mac address
+    let interface = get_interface_mut();
+    interface.ethernet_addr = DEFAULT_MAC;
 
-    println!("[+] sending test packet");
-
+    // register receiving ethernet function
     RegisterNetReceiveCallback(recv);
 
     unsafe {
         NET_DEVICE.device = Some(device);
     }
 
-    // start dhcp
-    let _ = interface().dhcp.start();
+    // begin socket send loop, this iterates through all existing sockets, and attempts to send as
+    // many packets as possible from each socket
+    socket::socket_send_loop();
 
-    // begin receieve series
+    // begin receieve series, this queues a receive to be ran which will eventually propogate back
+    // to us through the rgistered `recv` function which then queues another receive
     let buf = vec![0u8; 1500];
     unsafe {
-        rndis_receive_packet(device, buf.into_boxed_slice(), 1500);
+        rndis_receive_packet(device, buf.into_boxed_slice(), 1500); // TODO: ask aaron if I need to use another function?
     }
 
-    // begin send series for sockets
-    // WARN: this is bad
-    socket::socket_send_loop();
+    // start dhcp
+    unsafe {
+        DHCPD = Some(dhcp::Dhcpd::new());
+    }
+    let dhcpd = get_dhcpd_mut();
+    let _ = dhcpd.start(interface);
 
     return ResultCode::OK;
 }
 
 pub unsafe fn recv(buf: *mut u8, buf_len: u32) {
+    // cast our buffer into a Vec<u8>
     let slice: &[u8] = unsafe {
-        // Ensure ptr is not null and valid for `len` bytes
         slice::from_raw_parts(buf, buf_len as usize)
     };
 
-    let _ = ethernet::recv_ethernet_frame(interface(), slice, buf_len);
+    let interface = get_interface_mut();
+    let _ = ethernet::recv_ethernet_frame(interface, slice, buf_len);
 }
 
 pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
