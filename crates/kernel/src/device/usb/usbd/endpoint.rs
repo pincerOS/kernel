@@ -1,4 +1,4 @@
-use crate::device::system_timer::micro_delay;
+use crate::device::system_timer::{get_time, micro_delay};
 /**
  *
  * usbd/endpoint.rs
@@ -276,11 +276,18 @@ pub fn register_interrupt_endpoint(
         // buffer: core::ptr::null_mut(),
         timeout: timeout,
     };
-
+    use crate::device::system_timer::read_cntfrq;
+    let freq = unsafe { read_cntfrq() };
+    println!("| ENDPOINT: ENDPOINT endpoint time {} us freq {}", endpoint_time, freq);
     spawn_async_rt(async move {
         let μs = endpoint_time as u64 * 1000;
         let mut interval = interval(μs).with_missed_tick_behavior(MissedTicks::Skip);
         while interval.tick().await {
+            let cur_time = get_time();
+            use crate::device::system_timer::read_cntpct;
+            let cur_time2 = unsafe { read_cntpct() };
+
+            println!("| Endpoint loop: cur_time: {} cur_time2: {}", cur_time, cur_time2);
             interrupt_endpoint_callback(endpoint);
         }
     });
