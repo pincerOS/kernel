@@ -1034,18 +1034,48 @@ pub unsafe fn HcdSubmitInterruptMessage2(
         direction: UsbDirection::In,
         _reserved: 0,
     };
-    let available_channel = dwc_otg_get_active_channel();
     let result = HcdChannelSendWait(
         device,
         &mut tempPipe,
-        available_channel,
+        channel,
         buffer,
         buffer_length,
         &mut UsbDeviceRequest { request_type: 0, request: crate::device::usb::usbd::request::UsbDeviceRequestRequest::ClearFeature, value: 0, index: 0, length: 0 },
         packet_id,
     );
 
-    dwc_otg_free_channel(available_channel as u32);
+    if pipe.direction == UsbDirection::In {
+        // Read the data from the device.
+        let hctsiz = read_volatile(DOTG_HCTSIZ(0));
+        // dwc_sc.channel[0].transfer_size.TransferSize = hctsiz & 0x7ffff;
+        convert_into_host_transfer_size(hctsiz, &mut dwc_sc.channel[0].transfer_size);
+        if dwc_sc.channel[0].transfer_size.TransferSize <= buffer_length {
+            device.last_transfer = buffer_length - dwc_sc.channel[0].transfer_size.TransferSize;
+        } else {
+            println!("| HCD: Weird transfer size\n");
+            device.last_transfer = buffer_length;
+        }
+        use crate::device::usb::usbd::endpoint::UsbEndpointDevice;
+        let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
+        endpoint_device.endpoint_pid[0] += 1;
+        endpoint_device.endpoint_pid[1] += 1;
+        endpoint_device.endpoint_pid[2] += 1;
+        endpoint_device.endpoint_pid[3] += 1;
+        endpoint_device.endpoint_pid[4] += 1;
+        
+        unsafe {
+            memory_copy(
+                buffer,
+                dwc_sc.dma_addr[channel as usize] as *const u8,
+                device.last_transfer as usize,
+            );
+        }
+
+    }
+
+    //transfer data cout
+
+    dwc_otg_free_channel(channel as u32);
     if result != ResultCode::OK {
         println!("| HCD: Failed to send interrupt message to device.\n");
         return result;
@@ -1061,6 +1091,33 @@ pub unsafe fn HcdSubmitInterruptMessage(
     buffer_length: u32,
     packet_id: PacketId,
 ) -> ResultCode {
+
+    use crate::device::usb::HcdSubmitInterruptMessage2;
+    let buffer = [0; 36];
+    let result = unsafe {HcdSubmitInterruptMessage2(
+        device,
+        channel,
+        pipe,
+        buffer.as_ptr() as *mut u8,
+        8,
+        packet_id,
+    )};
+
+    if result != ResultCode::OK {
+        println!("| USB: Interrupt endpoint failed.");
+        return result;
+    }
+
+    println!("| USB: Interrupt endpoint succeeded.");
+
+    //print out first 8 bytes of buffer
+    for i in 0..8 {
+        print!("{:02x} ", buffer[i]);
+    }
+    println!("");
+
+    return ResultCode::OK;
+
     let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
     device.error = UsbTransferError::Processing;
     device.last_transfer = 0;

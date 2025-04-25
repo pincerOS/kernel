@@ -232,44 +232,24 @@ pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
     } else {
         PacketId::Data1
     };
+    
+    let result = unsafe {
+        UsbSendInterruptMessage(
+            device,
+            pipe,
+            8,
+            pid,
+            endpoint.timeout,
+            finish_interrupt_endpoint_callback,
+            endpoint,
+        )
+    };
 
-    // let result = unsafe {
-    //     UsbSendInterruptMessage(
-    //         device,
-    //         pipe,
-    //         8,
-    //         pid,
-    //         endpoint.timeout,
-    //         finish_interrupt_endpoint_callback,
-    //         endpoint,
-    //     )
-    // };
-    use crate::device::usb::UsbControlMessage;
-    use crate::device::usb::usbd::request::UsbDeviceRequest;
-    use crate::device::usb::usbd::request::UsbDeviceRequestRequest;
-    use crate::device::usb::HcdSubmitInterruptMessage2;
-    let buffer = [0; 36];
-    let result = unsafe {HcdSubmitInterruptMessage2(
-        device,
-        4,
-        pipe,
-        buffer.as_ptr() as *mut u8,
-        8,
-        pid,
-    )};
+    
 
     if result != ResultCode::OK {
         print!("| USB: Failed to read interrupt endpoint.\n");
     }
-
-    println!("| USB: Interrupt endpoint succeeded.");
-
-    //print out first 8 bytes of buffer
-    for i in 0..8 {
-        print!("{:02x} ", buffer[i]);
-    }
-    println!("");
-    println!("| USB: Interrupt endpoint buffer: {:x?}", buffer);
 }
 
 pub fn register_interrupt_endpoint(
