@@ -49,7 +49,8 @@ pub fn finish_bulk_endpoint_callback_in(
             channel, hcint, device.last_transfer
         );
 
-        if device.last_transfer > 0 && (hcint & HCINT_CHHLTD == 0) && (hcint & HCINT_XFERCOMPL == 0) {
+        if device.last_transfer > 0 && (hcint & HCINT_CHHLTD == 0) && (hcint & HCINT_XFERCOMPL == 0)
+        {
             DwcActivateChannel(channel);
 
             return false;

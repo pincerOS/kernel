@@ -1,11 +1,5 @@
 use crate::networking::iface::{ipv4, Interface};
-use crate::networking::repr::{
-    Ipv4Address,
-    Ipv4Protocol,
-    Ipv4Packet,
-    IcmpMessage,
-    IcmpPacket,
-};
+use crate::networking::repr::{IcmpMessage, IcmpPacket, Ipv4Address, Ipv4Packet, Ipv4Protocol};
 use crate::networking::{Error, Result};
 
 pub fn send_icmp_packet(

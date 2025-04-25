@@ -1,14 +1,6 @@
-use crate::networking::iface::{
-    arp, 
-    ipv4, 
-    Interface,
-};
+use crate::networking::iface::{arp, ipv4, Interface};
+use crate::networking::repr::{EthernetAddress, EthernetFrame, EthernetType};
 use crate::networking::{Error, Result};
-use crate::networking::repr::{
-    EthernetAddress,
-    EthernetFrame,
-    EthernetType,
-};
 
 use crate::device::usb::device::net::NET_DEVICE;
 use crate::device::usb::device::rndis::rndis_receive_packet;
@@ -45,7 +37,7 @@ pub fn recv_ethernet_frame(interface: &mut Interface, eth_buffer: &[u8], _len: u
     println!("\t{:x?}", eth_buffer);
 
     // we will truncate the first 44 bytes from the RNDIS protocol
-    let eth_frame = EthernetFrame::deserialize(&eth_buffer[44..])?; 
+    let eth_frame = EthernetFrame::deserialize(&eth_buffer[44..])?;
 
     // if this frame is not broadcast/multicast or to us, ignore it
     if eth_frame.dst != interface.ethernet_addr

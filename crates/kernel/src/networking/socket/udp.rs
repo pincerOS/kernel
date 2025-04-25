@@ -1,11 +1,11 @@
 use crate::device::usb::device::net::get_interface_mut;
 use crate::networking::iface::udp;
+use crate::networking::iface::Interface;
 use crate::networking::socket::bindings::NEXT_SOCKETFD;
 use crate::networking::socket::tagged::TaggedSocket;
 use crate::networking::socket::SocketAddr;
 use crate::networking::utils::ring::Ring;
 use crate::networking::{Error, Result};
-use crate::networking::iface::Interface;
 
 use alloc::vec;
 use alloc::vec::Vec;

@@ -115,7 +115,7 @@ pub fn accept(socketfd: u16) -> Result<SocketAddr> {
     tagged_socket.accept()
 }
 
-pub fn bind( socketfd: u16, port: u16) -> Result<()> {
+pub fn bind(socketfd: u16, port: u16) -> Result<()> {
     let interface = get_interface_mut();
     // 1. check if binding is already in use by another socket
     let bind_addr = SocketAddr {

@@ -13,9 +13,9 @@ pub fn socket_send_loop() {
         let mut sockets = interface.sockets.lock();
         sockets
             .iter_mut()
-            .map(|(_, socket)| socket as *mut TaggedSocket) 
+            .map(|(_, socket)| socket as *mut TaggedSocket)
             .collect()
-    }; 
+    };
 
     for &socket_ptr in &to_send {
         let socket: &mut TaggedSocket = unsafe { &mut *socket_ptr };
