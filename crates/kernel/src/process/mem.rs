@@ -34,13 +34,12 @@ pub struct MemoryRangeNode {
     pub start: usize,
     pub size: usize,
     pub kind: MappingKind,
-    pub offset: usize,
 }
 
 #[derive(Clone)]
 pub enum MappingKind {
     Anon,
-    File(ArcFd),
+    File { fd: ArcFd, offset: usize },
 }
 
 impl UserAddrSpace {
@@ -81,7 +80,7 @@ impl UserAddrSpace {
 
         for (range_start, node) in &self.memory_range_map {
             let start = new_mem
-                .insert_vme_at(node.start, node.size, node.kind.clone(), node.offset)
+                .insert_vme_at(node.start, node.size, node.kind.clone())
                 .unwrap();
             assert!(start == *range_start);
 
@@ -97,7 +96,11 @@ impl UserAddrSpace {
                     .unwrap();
 
                 //Don't want to copy data in shared mem
-                if let MappingKind::File(arc) = &node.kind {
+                if let MappingKind::File {
+                    fd: arc,
+                    offset: _off,
+                } = &node.kind
+                {
                     if let Some(_s) = arc.as_any().downcast_ref::<MemFd>() {
                         continue;
                     }
@@ -129,7 +132,6 @@ impl UserAddrSpace {
         start: usize,
         size: usize,
         kind: MappingKind,
-        offset: usize,
     ) -> Result<usize, MmapError> {
         let start_addr = (start / PAGE_SIZE) * PAGE_SIZE;
         let size_pages = (size + (start - start_addr)).next_multiple_of(PAGE_SIZE);
@@ -145,12 +147,7 @@ impl UserAddrSpace {
             }
         }
 
-        let node = MemoryRangeNode {
-            start,
-            size,
-            kind,
-            offset,
-        };
+        let node = MemoryRangeNode { start, size, kind };
         self.memory_range_map.insert(start, node);
         Ok(start_addr)
     }
@@ -179,13 +176,12 @@ impl UserAddrSpace {
         start_addr: Option<usize>,
         size: usize,
         kind: MappingKind,
-        offset: usize,
     ) -> Result<usize, MmapError> {
         let start_addr = match start_addr {
             Some(s) => s,
             None => self.find_vme_space(size)?,
         };
-        let base_addr = self.insert_vme_at(start_addr, size, kind, offset)?;
+        let base_addr = self.insert_vme_at(start_addr, size, kind)?;
         Ok(base_addr)
     }
 
@@ -232,7 +228,10 @@ impl UserAddrSpace {
                     MappingKind::Anon => {
                         // TODO: free
                     }
-                    MappingKind::File(_arc) => {
+                    MappingKind::File {
+                        fd: _arc,
+                        offset: _off,
+                    } => {
                         // TODO: notify file that it's unused?
                         // (for ref counts, page cache?)
                     }
@@ -281,10 +280,13 @@ impl UserAddrSpace {
 
                 desc
             }
-            MappingKind::File(fd) => {
+            MappingKind::File {
+                fd: arc_fd,
+                offset: file_offset,
+            } => {
                 let offset = vaddr - vme.start;
-                let page = match fd
-                    .mmap_page(offset as u64 + (vme.offset as u64))
+                let page = match arc_fd
+                    .mmap_page(offset as u64 + (*file_offset as u64))
                     .await
                     .map(|r| r.as_result())
                 {

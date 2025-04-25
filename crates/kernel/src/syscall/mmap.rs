@@ -48,18 +48,15 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
                 context.regs().regs[0] = i64::from(-1) as usize;
                 return context.resume_final();
             };
-            MappingKind::File(file)
+            MappingKind::File { fd: file, offset }
         };
 
         let res;
         if flags.contains(MmapFlags::MAP_FIXED) {
-            res = proc
-                .mem
-                .lock()
-                .mmap(Some(request_addr), request_size, kind, offset);
+            res = proc.mem.lock().mmap(Some(request_addr), request_size, kind);
         } else {
             // TODO: try to respect hint?
-            res = proc.mem.lock().mmap(None, request_size, kind, offset);
+            res = proc.mem.lock().mmap(None, request_size, kind);
         }
 
         match res {
