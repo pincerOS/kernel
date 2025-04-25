@@ -1,6 +1,6 @@
 use crate::networking::repr::dev::Device;
 
-use crate::device::usb::device::net::{NetSendPacket, NetReceive};
+use crate::device::usb::device::net::{NetReceive, NetSendPacket};
 
 pub struct CDCECM {
     max_transmission_unit: usize,

@@ -1,15 +1,9 @@
 use crate::networking::iface::{arp, ethernet, icmp, tcp, udp, Interface};
-use crate::networking::repr::{
-    EthernetType,
-    EthernetFrame,
-    Ipv4Address,
-    Ipv4Protocol,
-    Ipv4Packet,
-};
+use crate::networking::repr::{EthernetFrame, EthernetType, Ipv4Address, Ipv4Packet, Ipv4Protocol};
 use crate::networking::{Error, Result};
 
+use crate::device::usb::device::net::{get_dhcpd_mut, get_interface_mut};
 use crate::event::thread;
-use crate::device::usb::device::net::{get_interface_mut, get_dhcpd_mut};
 
 use alloc::vec::Vec;
 
@@ -19,7 +13,7 @@ pub fn send_ipv4_packet(
     protocol: Ipv4Protocol,
     dst_addr: Ipv4Address,
 ) -> Result<()> {
-    let next_hop = ipv4_addr_route(interface, dst_addr); 
+    let next_hop = ipv4_addr_route(interface, dst_addr);
     match arp::eth_addr_for_ip(interface, next_hop) {
         Ok(dst_mac) => {
             println!("ip resolved: sending ip packet");

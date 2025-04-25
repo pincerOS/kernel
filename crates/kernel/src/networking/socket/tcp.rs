@@ -1,5 +1,5 @@
 use crate::device::usb::device::net::get_interface_mut;
-use crate::networking::iface::{Interface, tcp};
+use crate::networking::iface::{tcp, Interface};
 use crate::networking::socket::bindings::{NEXT_EPHEMERAL, NEXT_SOCKETFD};
 use crate::networking::socket::tagged::TaggedSocket;
 use crate::networking::socket::SocketAddr;
@@ -95,7 +95,7 @@ impl TcpSocket {
         self.is_bound
     }
 
-    pub fn bind(&mut self, interface: &mut Interface,port: u16) {
+    pub fn bind(&mut self, interface: &mut Interface, port: u16) {
         self.is_bound = true;
         let bind_addr = SocketAddr {
             addr: *interface.ipv4_addr,

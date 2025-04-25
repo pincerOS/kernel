@@ -1,16 +1,11 @@
 use crate::device::system_timer;
 
-use crate::networking::{Error, Result};
-use crate::networking::socket::{SocketAddr, UdpSocket, bind, send_to};
-use crate::networking::repr::{
-    Ipv4Address, 
-    Ipv4Cidr, 
-    DhcpPacket, 
-    DhcpParam, 
-    DhcpOption, 
-    DhcpMessageType, 
-};
 use crate::networking::iface::Interface;
+use crate::networking::repr::{
+    DhcpMessageType, DhcpOption, DhcpPacket, DhcpParam, Ipv4Address, Ipv4Cidr,
+};
+use crate::networking::socket::{bind, send_to, SocketAddr, UdpSocket};
+use crate::networking::{Error, Result};
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -78,12 +73,11 @@ impl Dhcpd {
 
     pub fn start(&mut self, interface: &mut Interface) -> Result<()> {
         if self.state != DhcpState::Idle && self.state != DhcpState::Released {
-            return Ok(()); 
+            return Ok(());
         }
 
         self.udp_socket = UdpSocket::new();
-        let _ = bind(self.udp_socket,DHCP_CLIENT_PORT);
-
+        let _ = bind(self.udp_socket, DHCP_CLIENT_PORT);
 
         let time = system_timer::get_time();
         self.xid = time as u32 ^ 0xDEADBEEF;
@@ -103,7 +97,8 @@ impl Dhcpd {
         }
 
         if let (Some(server_id), Some(offered_ip)) = (self.server_identifier, self.offered_ip) {
-            let result = send_dhcp_release(interface, self.xid, offered_ip, server_id, self.udp_socket);
+            let result =
+                send_dhcp_release(interface, self.xid, offered_ip, server_id, self.udp_socket);
             self.state = DhcpState::Released;
             result
         } else {

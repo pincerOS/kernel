@@ -1,11 +1,6 @@
 use crate::networking::iface::{ethernet, Interface};
 use crate::networking::repr::{
-    EthernetFrame,
-    EthernetAddress,
-    EthernetType,
-    ArpPacket,
-    ArpOperation,
-    Ipv4Address
+    ArpOperation, ArpPacket, EthernetAddress, EthernetFrame, EthernetType, Ipv4Address,
 };
 use crate::networking::{Error, Result};
 
@@ -24,12 +19,7 @@ pub fn send_arp_packet(
         target_proto_addr,
     };
 
-    ethernet::send_ethernet_frame(
-        interface, 
-        arp_repr.serialize(), 
-        dst_addr, 
-        EthernetType::ARP
-    )
+    ethernet::send_ethernet_frame(interface, arp_repr.serialize(), dst_addr, EthernetType::ARP)
 }
 
 pub fn recv_arp_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Result<()> {
@@ -53,15 +43,13 @@ pub fn recv_arp_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> R
     drop(arp_cache);
 
     match arp_repr.op {
-        ArpOperation::Request => {
-            send_arp_packet(
-                interface, 
-                ArpOperation::Reply, 
-                arp_repr.source_hw_addr, 
-                arp_repr.source_hw_addr, 
-                arp_repr.source_proto_addr, 
-            )
-        }
+        ArpOperation::Request => send_arp_packet(
+            interface,
+            ArpOperation::Reply,
+            arp_repr.source_hw_addr,
+            arp_repr.source_hw_addr,
+            arp_repr.source_proto_addr,
+        ),
         _ => Ok(()),
     }
 }
@@ -86,11 +74,11 @@ pub fn eth_addr_for_ip(
         None => {
             println!("address not found, sending ARP request for {}", ipv4_addr);
             send_arp_packet(
-                interface, 
+                interface,
                 ArpOperation::Request,
                 EthernetAddress::BROADCAST,
                 EthernetAddress::BROADCAST,
-                ipv4_addr
+                ipv4_addr,
             )?;
             Err(Error::MacResolution(ipv4_addr))
         }

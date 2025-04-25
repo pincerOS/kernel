@@ -31,22 +31,14 @@ pub static mut INTERFACE: Option<Interface> = None;
 
 #[allow(static_mut_refs)]
 pub fn get_interface_mut() -> &'static mut Interface {
-    unsafe {
-        INTERFACE
-            .as_mut()
-            .expect("INTERFACE not initialized")
-    }
+    unsafe { INTERFACE.as_mut().expect("INTERFACE not initialized") }
 }
 
 pub static mut DHCPD: Option<dhcp::Dhcpd> = None;
 
 #[allow(static_mut_refs)]
 pub fn get_dhcpd_mut() -> &'static mut dhcp::Dhcpd {
-    unsafe {
-        DHCPD
-            .as_mut()
-            .expect("DHCPD not initialized")
-    }
+    unsafe { DHCPD.as_mut().expect("DHCPD not initialized") }
 }
 pub fn NetLoad(bus: &mut UsbBus) {
     bus.interface_class_attach[InterfaceClass::InterfaceClassCommunications as usize] =
@@ -179,9 +171,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 
 pub unsafe fn recv(buf: *mut u8, buf_len: u32) {
     // cast our buffer into a Vec<u8>
-    let slice: &[u8] = unsafe {
-        slice::from_raw_parts(buf, buf_len as usize)
-    };
+    let slice: &[u8] = unsafe { slice::from_raw_parts(buf, buf_len as usize) };
 
     let interface = get_interface_mut();
     let _ = ethernet::recv_ethernet_frame(interface, slice, buf_len);

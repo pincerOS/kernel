@@ -1,6 +1,6 @@
+use crate::networking::iface::Interface;
 use crate::networking::socket::{SocketAddr, TcpSocket, UdpSocket};
 use crate::networking::{Error, Result};
-use crate::networking::iface::Interface;
 
 use crate::device::usb::device::net::get_interface_mut;
 
