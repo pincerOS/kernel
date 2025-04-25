@@ -300,6 +300,12 @@ pub fn wait(fd: FileDesc) -> Result<usize, usize> {
     int_to_error(res)
 }
 
+pub const MAP_PRIVATE: u32 = 0;
+pub const MAP_FILE: u32 = 0; //linux mmap ignores this but can have it for readabilty?
+pub const MAP_FIXED: u32 = 1 << 0;
+pub const MAP_ANONYMOUS: u32 = 1 << 1;
+pub const MAP_SHARED: u32 = 1 << 2;
+
 pub unsafe fn mmap(
     addr: usize,
     size: usize,
