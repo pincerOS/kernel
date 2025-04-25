@@ -8,10 +8,10 @@ PROFILE=${PROFILE-"release"}
 
 mkdir -p fs
 
-./shell.rs
-cp shell.elf fs/
-./ls.rs
-cp ls.elf fs/
+# ./shell.rs
+# cp shell.elf fs/
+# ./ls.rs
+# cp ls.elf fs/
 ./sharedMemTest.rs
 cp sharedMemTest.elf fs/
 
