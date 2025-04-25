@@ -138,6 +138,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             DwcActivateCsplit(channel);
             return false;
         } else {
+            println!("| Endpoint {}: UNKNOWWN HCINT split_control is SSPLIT hcint {:x}", channel, hcint);
             return true;
         }
     } else if split_control == DWCSplitControlState::CSPLIT {
@@ -145,7 +146,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
         if hcint & HCINT_NAK != 0 {
             println!("| Endpoint CSPLIT {}: NAK received hcint {:x}", channel, hcint);
         } else if hcint & HCINT_FRMOVRUN != 0 {
-            println!("| Endpoint CSPLIT {}: Frame overrun hcint {:x}", channel, hcint);
+            // println!("| Endpoint CSPLIT {}: Frame overrun hcint {:x}", channel, hcint);
             UpdateDwcOddFrame(channel);
             return false;
         } else if hcint & HCINT_XACTERR != 0 {
