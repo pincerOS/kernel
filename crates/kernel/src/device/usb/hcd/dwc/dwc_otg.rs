@@ -516,7 +516,7 @@ pub fn HcdChannelSendWaitOne(
         if pipe.speed != UsbSpeed::High {
             println!("| HCD: Split enable {:#?} hcint {:#x}", dwc_sc.channel[channel as usize].split_control.SplitEnable, hcint);
             printDWCErrors(channel as u32);
-            if hcint & HCINT_ACK != 0 && dwc_sc.channel[channel as usize].split_control.SplitEnable
+            if hcint & HCINT_ACK != 0  && dwc_sc.channel[channel as usize].split_control.SplitEnable
             {
                 // Try to complete the split up to 3 times.
                 println!("| HCD: Completing split to device with ACK");
@@ -756,6 +756,14 @@ fn HcdChannelSendWait(
                 request,
             );
             if result != ResultCode::OK {
+                let hcint = read_volatile(DOTG_HCINT(channel as usize));
+
+                if hcint & HCINT_NAK != 0 {
+                    println!("| HCD: NAK on channel {}\n", device.last_transfer);
+                    
+                    return ResultCode::OK;
+                }
+
                 if result == ResultCode::ErrorRetry {
                     // Restart the entire process on ErrorRetry.
                     println!("| HCD: Retrying to packet.\n");
@@ -1086,20 +1094,20 @@ pub unsafe fn HcdSubmitInterruptMessage(
 }
 
 pub fn printDWCErrors(channel: u32) {
-    let hprt = read_volatile(DOTG_HPRT);
-    let gintsts = read_volatile(DOTG_GINTSTS);
-    let haint = read_volatile(DOTG_HAINT);
-    let hcint = read_volatile(DOTG_HCINT(channel as usize));
-    let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
-    let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
+    // let hprt = read_volatile(DOTG_HPRT);
+    // let gintsts = read_volatile(DOTG_GINTSTS);
+    // let haint = read_volatile(DOTG_HAINT);
+    // let hcint = read_volatile(DOTG_HCINT(channel as usize));
+    // let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+    // let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
 
-    println!("| HCD hprt: {:#x}", hprt);
-    println!("| HCD gintsts: {:#x}", gintsts);
-    println!("| HCD haint: {:#x}", haint);
-    println!("| HCD hcint: {:#x}", hcint);
-    println!("| HCD hcchar: {:#x}", hcchar);
-    println!("| HCD hctsiz: {:#x}", hctsiz);
-    println!("| HCD channel: {:#x}", channel);
+    // println!("| HCD hprt: {:#x}", hprt);
+    // println!("| HCD gintsts: {:#x}", gintsts);
+    // println!("| HCD haint: {:#x}", haint);
+    // println!("| HCD hcint: {:#x}", hcint);
+    // println!("| HCD hcchar: {:#x}", hcchar);
+    // println!("| HCD hctsiz: {:#x}", hctsiz);
+    // println!("| HCD channel: {:#x}", channel);
 }
 
 pub unsafe fn HcdSubmitControlMessage(

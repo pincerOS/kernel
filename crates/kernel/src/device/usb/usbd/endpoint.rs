@@ -296,11 +296,9 @@ pub fn register_interrupt_endpoint(
     };
 
     spawn_async_rt(async move {
-        let μs = endpoint_time as u64 * 1000;
+        let μs = endpoint_time as u64 * 100000;
         let mut interval = interval(μs).with_missed_tick_behavior(MissedTicks::Skip);
-        let lockgaurd = SpinLockInner::new();
         while interval.tick().await {
-            let l = lockgaurd.lock();
             interrupt_endpoint_callback(endpoint);
         }
     });
