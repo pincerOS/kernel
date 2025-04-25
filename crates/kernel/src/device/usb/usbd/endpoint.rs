@@ -121,17 +121,13 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
     }
 
     if split_control == DWCSplitControlState::SSPLIT {
-        println!("| Endpoint {}: split_control is SSPLIT hcint {:x}", channel, hcint);
         if hcint & HCINT_NAK != 0 {
-            println!("| Endpoint SSPLIT {}: NAK received hcint {:x}", channel, hcint);
             DwcEnableChannel(channel);
             return false;
         } else if hcint & HCINT_FRMOVRUN != 0 {
-            println!("| Endpoint SSPLIT{}: Frame overrun hcint {:x}", channel, hcint);
             UpdateDwcOddFrame(channel);
             return false;
         } else if hcint & HCINT_XACTERR != 0 {
-            println!("| Endpoint SSPLIT {}: XACTERR received hcint {:x}", channel, hcint);
             DwcEnableChannel(channel);
             return false;
         } else if hcint & HCINT_ACK != 0 {
@@ -139,11 +135,9 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             unsafe {
                 DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] = DWCSplitControlState::CSPLIT;
             }
-            micro_delay(100);
             DwcActivateCsplit(channel);
             return false;
         } else {
-            println!("| Endpoint {}: Unknown interrupt, ending task {:x}.", channel, hcint);
             return true;
         }
     } else if split_control == DWCSplitControlState::CSPLIT {
@@ -276,18 +270,11 @@ pub fn register_interrupt_endpoint(
         // buffer: core::ptr::null_mut(),
         timeout: timeout,
     };
-    use crate::device::system_timer::read_cntfrq;
-    let freq = unsafe { read_cntfrq() };
-    println!("| ENDPOINT: ENDPOINT endpoint time {} us freq {}", endpoint_time, freq);
+
     spawn_async_rt(async move {
         let μs = endpoint_time as u64 * 1000;
         let mut interval = interval(μs).with_missed_tick_behavior(MissedTicks::Skip);
         while interval.tick().await {
-            let cur_time = get_time();
-            use crate::device::system_timer::read_cntpct;
-            let cur_time2 = unsafe { read_cntpct() };
-
-            println!("| Endpoint loop: cur_time: {} cur_time2: {}", cur_time, cur_time2);
             interrupt_endpoint_callback(endpoint);
         }
     });
