@@ -1005,6 +1005,47 @@ pub unsafe fn HcdSubmitBulkMessage(
     return ResultCode::OK;
 }
 
+pub unsafe fn HcdSubmitInterruptMessage2(
+    device: &mut UsbDevice,
+    channel: u8,
+    pipe: UsbPipeAddress,
+    buffer: *mut u8,
+    buffer_length: u32,
+    packet_id: PacketId,
+) -> ResultCode {
+    let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
+    device.error = UsbTransferError::Processing;
+    device.last_transfer = 0;
+
+    let mut tempPipe = UsbPipeAddress {
+        max_size: pipe.max_size,
+        speed: pipe.speed,
+        end_point: pipe.end_point,
+        device: pipe.device,
+        transfer_type: UsbTransfer::Interrupt,
+        direction: UsbDirection::In,
+        _reserved: 0,
+    };
+    let available_channel = dwc_otg_get_active_channel();
+    let result = HcdChannelSendWait(
+        device,
+        &mut tempPipe,
+        available_channel,
+        buffer,
+        buffer_length,
+        &mut UsbDeviceRequest { request_type: 0, request: crate::device::usb::usbd::request::UsbDeviceRequestRequest::ClearFeature, value: 0, index: 0, length: 0 },
+        packet_id,
+    );
+
+    dwc_otg_free_channel(available_channel as u32);
+    if result != ResultCode::OK {
+        println!("| HCD: Failed to send interrupt message to device.\n");
+        return result;
+    }
+
+    return ResultCode::OK;
+}
+
 pub unsafe fn HcdSubmitInterruptMessage(
     device: &mut UsbDevice,
     channel: u8,

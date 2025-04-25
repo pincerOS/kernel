@@ -14,6 +14,7 @@ use crate::device::usb::hcd::dwc::dwc_otgreg::{HCINT_FRMOVRUN, HCINT_XACTERR, HC
 use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCSPLT;
 use crate::device::usb::DwcActivateCsplit;
 use crate::device::usb::UsbSendInterruptMessage;
+use crate::sync::{LockGuard, SpinLockInner};
 use usb::dwc_hub;
 use usb::hcd::dwc::dwc_otg::HcdUpdateTransferSize;
 use usb::hcd::dwc::dwc_otgreg::{HCINT_CHHLTD, HCINT_NAK, HCINT_XFERCOMPL, HCINT_ACK};
@@ -232,21 +233,43 @@ pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
         PacketId::Data1
     };
 
-    let result = unsafe {
-        UsbSendInterruptMessage(
-            device,
-            pipe,
-            8,
-            pid,
-            endpoint.timeout,
-            finish_interrupt_endpoint_callback,
-            endpoint,
-        )
-    };
+    // let result = unsafe {
+    //     UsbSendInterruptMessage(
+    //         device,
+    //         pipe,
+    //         8,
+    //         pid,
+    //         endpoint.timeout,
+    //         finish_interrupt_endpoint_callback,
+    //         endpoint,
+    //     )
+    // };
+    use crate::device::usb::UsbControlMessage;
+    use crate::device::usb::usbd::request::UsbDeviceRequest;
+    use crate::device::usb::usbd::request::UsbDeviceRequestRequest;
+    use crate::device::usb::HcdSubmitInterruptMessage2;
+    let buffer = [0; 36];
+    let result = unsafe {HcdSubmitInterruptMessage2(
+        device,
+        4,
+        pipe,
+        buffer.as_ptr() as *mut u8,
+        8,
+        pid,
+    )};
 
     if result != ResultCode::OK {
         print!("| USB: Failed to read interrupt endpoint.\n");
     }
+
+    println!("| USB: Interrupt endpoint succeeded.");
+
+    //print out first 8 bytes of buffer
+    for i in 0..8 {
+        print!("{:02x} ", buffer[i]);
+    }
+    println!("");
+    println!("| USB: Interrupt endpoint buffer: {:x?}", buffer);
 }
 
 pub fn register_interrupt_endpoint(
@@ -275,7 +298,9 @@ pub fn register_interrupt_endpoint(
     spawn_async_rt(async move {
         let μs = endpoint_time as u64 * 1000;
         let mut interval = interval(μs).with_missed_tick_behavior(MissedTicks::Skip);
+        let lockgaurd = SpinLockInner::new();
         while interval.tick().await {
+            let l = lockgaurd.lock();
             interrupt_endpoint_callback(endpoint);
         }
     });
