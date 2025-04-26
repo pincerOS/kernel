@@ -864,7 +864,7 @@ fn HcdTransmitChannelNoWait(device: &UsbDevice, channel: u8, buffer: *mut u8) {
             );
         }
 
-        let dma_loc = dwc_sc.dma_gpu_addr[channel as usize];
+        let dma_loc = dwc_sc.dma_addr[channel as usize];
 
         crate::arch::memory::invalidate_physical_buffer_for_device(dma_loc as *mut (), 128);
 

@@ -12,6 +12,7 @@ use crate::device::usb;
 use crate::device::usb::hcd::dwc::dwc_otg::{printDWCErrors, read_volatile, DWCSplitControlState, DWCSplitStateMachine, DwcEnableChannel, UpdateDwcOddFrame, DWC_CHANNEL_CALLBACK};
 use crate::device::usb::hcd::dwc::dwc_otgreg::{HCINT_FRMOVRUN, HCINT_NYET, HCINT_XACTERR, HFNUM_FRNUM_MASK, DOTG_HFNUM};
 use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCSPLT;
+use crate::device::usb::hcd::dwc::dwc_otg;
 use crate::device::usb::DwcActivateCsplit;
 use crate::device::usb::UsbSendInterruptMessage;
 use crate::sync::{LockGuard, SpinLockInner};
@@ -163,7 +164,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             DwcEnableChannel(channel);
             return false;
         } else if hcint & HCINT_NYET != 0 {
-            let mut cur_frame = read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+            let mut cur_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
 
             if cur_frame - ss_hfnum >= 8 {
                 println!("| Endpoint CSPLIT has exceeded 8 frames, cur_frame: {} ss_hfnum: {} giving up", cur_frame, ss_hfnum);
@@ -175,7 +176,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             };
 
             while cur_frame == mr_cs_hfnum {
-                cur_frame = read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+                cur_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
             }
             
             let frame = DwcEnableChannel(channel);
