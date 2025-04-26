@@ -480,6 +480,7 @@ pub fn HcdChannelSendWaitOne(
             &mut dwc_sc.channel[channel as usize].split_control,
         );
 
+        printDWCErrors(channel as u32);
         // Transmit data.
         // unsafe { HcdTransmitChannel(device, channel, buffer.wrapping_add(bufferOffset as usize)) };
         unsafe { HcdTransmitChannel(device, channel, buffer, bufferOffset as usize, pipe.direction) };
@@ -523,9 +524,10 @@ pub fn HcdChannelSendWaitOne(
         hcint = read_volatile(DOTG_HCINT(channel as usize));
 
         println!("| HCD: pipe speed {:#?}", pipe.speed);
-        if pipe.speed != UsbSpeed::High {
+
+        printDWCErrors(channel as u32);
+        if pipe.speed != UsbSpeed::High && dwc_sc.channel[channel as usize].split_control.SplitEnable {
             println!("| HCD: Split enable {:#?} hcint {:#x}", dwc_sc.channel[channel as usize].split_control.SplitEnable, hcint);
-            printDWCErrors(channel as u32);
             if hcint & HCINT_ACK != 0  && dwc_sc.channel[channel as usize].split_control.SplitEnable
             {
                 // Try to complete the split up to 3 times.
@@ -660,12 +662,15 @@ pub fn HcdChannelSendWaitOne(
                 continue;
             }
         } else {
-            result = HcdChannelInterruptToError(
-                device,
-                hcint,
-                !dwc_sc.channel[channel as usize].split_control.SplitEnable,
-            );
-            if result != ResultCode::OK {
+            
+            if hcint & HCINT_XFERCOMPL == 0 {
+                    _ = HcdChannelInterruptToError(
+                    device,
+                    hcint,
+                    !dwc_sc.channel[channel as usize].split_control.SplitEnable,
+                );
+
+                printDWCErrors(channel as u32);
                 // LOG_DEBUGF(
                 //     "HCD: Control message to %#x: %02x%02x%02x%02x %02x%02x%02x%02x.\n",
                 //     *(pipe as *const u32),
@@ -1144,20 +1149,20 @@ pub unsafe fn HcdSubmitInterruptMessage(
 }
 
 pub fn printDWCErrors(channel: u32) {
-    let hprt = read_volatile(DOTG_HPRT);
-    let gintsts = read_volatile(DOTG_GINTSTS);
-    let haint = read_volatile(DOTG_HAINT);
-    let hcint = read_volatile(DOTG_HCINT(channel as usize));
-    let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
-    let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
+    // let hprt = read_volatile(DOTG_HPRT);
+    // let gintsts = read_volatile(DOTG_GINTSTS);
+    // let haint = read_volatile(DOTG_HAINT);
+    // let hcint = read_volatile(DOTG_HCINT(channel as usize));
+    // let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+    // let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
 
-    println!("| HCD hprt: {:#x}", hprt);
-    println!("| HCD gintsts: {:#x}", gintsts);
-    println!("| HCD haint: {:#x}", haint);
-    println!("| HCD hcint: {:#x}", hcint);
-    println!("| HCD hcchar: {:#x}", hcchar);
-    println!("| HCD hctsiz: {:#x}", hctsiz);
-    println!("| HCD channel: {:#x}", channel);
+    // println!("| HCD hprt: {:#x}", hprt);
+    // println!("| HCD gintsts: {:#x}", gintsts);
+    // println!("| HCD haint: {:#x}", haint);
+    // println!("| HCD hcint: {:#x}", hcint);
+    // println!("| HCD hcchar: {:#x}", hcchar);
+    // println!("| HCD hctsiz: {:#x}", hctsiz);
+    // println!("| HCD channel: {:#x}", channel);
 }
 
 pub unsafe fn HcdSubmitControlMessage(
