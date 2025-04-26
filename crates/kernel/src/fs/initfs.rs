@@ -3,6 +3,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use initfs::{Archive, ArchiveError};
 
+use crate::arch::memory::palloc::{Size4KiB, PAGE_ALLOCATOR};
 use crate::process::fd::{
     boxed_future, ArcFd, DirEntry, FileDescResult, FileDescriptor, FileKind, SmallFuture,
 };
@@ -252,8 +253,27 @@ impl FileDescriptor for InitFsFile {
             boxed_future(async move { Err(()) })
         }
     }
-    fn mmap_page(&self, _offset: u64) -> SmallFuture<Option<FileDescResult>> {
-        boxed_future(async move { None })
+    fn mmap_page(&self, offset: u64) -> SmallFuture<Option<FileDescResult>> {
+        if self.header.is_dir() {
+            return boxed_future(async move { None });
+        }
+
+        //File case, need to call read
+        boxed_future(async move {
+            let page = PAGE_ALLOCATOR.get().alloc_mapped_frame::<Size4KiB>();
+            let page_paddr = page.paddr;
+            let page_virt = PAGE_ALLOCATOR.get().get_mapped_frame::<Size4KiB>(page);
+            let buf_ref = unsafe { core::slice::from_raw_parts_mut(page_virt as *mut u8, 4096) };
+            match self.read(offset, buf_ref).await.as_result() {
+                Ok(_val) => {
+                    return Some(FileDescResult::ok(page_paddr as u64));
+                }
+                Err(_val) => {
+                    println!("Read failed");
+                    return None;
+                }
+            }
+        })
     }
     fn as_any(&self) -> &dyn core::any::Any {
         self

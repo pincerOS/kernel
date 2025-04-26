@@ -13,6 +13,8 @@ use crate::event::context::Context;
 use crate::event::exceptions::DataAbortISS;
 use crate::syscall::proc::exit_user_thread;
 
+use crate::syscall::fb_hack::MemFd;
+
 use super::fd::ArcFd;
 
 #[derive(Debug)]
@@ -38,7 +40,7 @@ pub struct MemoryRangeNode {
 #[derive(Clone)]
 pub enum MappingKind {
     Anon,
-    File(ArcFd),
+    File { fd: ArcFd, offset: usize },
 }
 
 impl UserAddrSpace {
@@ -93,6 +95,13 @@ impl UserAddrSpace {
                 self.populate_range(node, node.start + offset, chunk_size)
                     .await
                     .unwrap();
+
+                //Don't want to copy data in shared mem
+                if let MappingKind::File { fd, .. } = &node.kind {
+                    if let Some(_s) = fd.as_any().downcast_ref::<MemFd>() {
+                        continue;
+                    }
+                }
 
                 let src_data = node.start as *const u8;
                 let dst_data = node.start as *mut u8;
@@ -194,18 +203,29 @@ impl UserAddrSpace {
             };
 
             let leaf = unsafe { desc.leaf };
+
             if leaf.is_valid() {
                 let new_desc = TranslationDescriptor::unset();
                 unsafe {
                     set_translation_descriptor(self.table, virt_addr, 3, 0, new_desc, false)
                         .unwrap()
                 }
+                //Need this invalidation here or it still accesses old page
+                unsafe {
+                    core::arch::asm! {
+                        "dsb ISH",
+                        "tlbi vaae1, {0}",
+                        in(reg) (virt_addr >> 12)
+                        //options(readonly, nostack, preserves_flags)
+                    }
+                }
+
                 // TODO: free it
                 match &vme.kind {
                     MappingKind::Anon => {
                         // TODO: free
                     }
-                    MappingKind::File(_arc) => {
+                    MappingKind::File { .. } => {
                         // TODO: notify file that it's unused?
                         // (for ref counts, page cache?)
                     }
@@ -254,12 +274,23 @@ impl UserAddrSpace {
 
                 desc
             }
-            MappingKind::File(fd) => {
+            MappingKind::File {
+                fd: arc_fd,
+                offset: file_offset,
+            } => {
                 let offset = vaddr - vme.start;
-                let page = match fd.mmap_page(offset as u64).await.map(|r| r.as_result()) {
+                let page = match arc_fd
+                    .mmap_page(offset as u64 + (*file_offset as u64))
+                    .await
+                    .map(|r| r.as_result())
+                {
                     Some(Ok(page)) => page,
-                    Some(Err(_e)) => return Err(MmapError::FileError),
-                    None => return Err(MmapError::FileError),
+                    Some(Err(_e)) => {
+                        return Err(MmapError::FileError);
+                    }
+                    None => {
+                        return Err(MmapError::FileError);
+                    }
                 };
                 let desc = LeafDescriptor::new(page as usize)
                     .union(LeafDescriptor::UNPRIVILEGED_ACCESS)
@@ -310,7 +341,6 @@ unsafe impl Sync for UserAddrSpace {}
 pub fn page_fault_handler(ctx: &mut Context, far: usize, _iss: DataAbortISS) -> *mut Context {
     run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
-
         // TODO: make sure misaligned loads don't loop here?
         let page_addr = (far / PAGE_SIZE) * PAGE_SIZE;
 

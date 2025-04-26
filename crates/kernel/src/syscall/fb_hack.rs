@@ -99,7 +99,7 @@ pub unsafe fn sys_memfd_create(ctx: &mut Context) -> *mut Context {
     })
 }
 
-struct MemFd {
+pub struct MemFd {
     pages: SpinLock<BTreeMap<usize, PhysicalPage<Size4KiB>>>,
 }
 

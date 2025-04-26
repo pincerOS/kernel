@@ -7,7 +7,8 @@ bitflags::bitflags! {
     }
     struct MmapFlags: u32 {
         const MAP_FIXED = 1 << 0;
-        const MAP_ANONYMOUS = 1 << 1;
+        const MAP_ANONYMOUS = 1 << 1; //if not set this indicates file
+        const MAP_SHARED = 1 << 2; //if not set indicates private mapping
     }
 }
 
@@ -32,11 +33,12 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
     };
 
     let fd = ctx.regs[4];
-    // TODO: File offset
-    let _offset = ctx.regs[5];
+    let offset = ctx.regs[5];
 
     run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
+
+        let _is_shared: bool = flags.contains(MmapFlags::MAP_SHARED);
 
         let kind = if flags.contains(MmapFlags::MAP_ANONYMOUS) {
             MappingKind::Anon
@@ -46,7 +48,7 @@ pub unsafe fn sys_mmap(ctx: &mut Context) -> *mut Context {
                 context.regs().regs[0] = i64::from(-1) as usize;
                 return context.resume_final();
             };
-            MappingKind::File(file)
+            MappingKind::File { fd: file, offset }
         };
 
         let res;

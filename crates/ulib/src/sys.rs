@@ -84,6 +84,7 @@ syscall!(21 => pub fn sys_get_time_ms() -> usize);
 syscall!(22 => pub fn sys_sleep_ms(time: usize));
 
 // syscall!(23 => pub fn sys_acquire_fb(width: usize, height: usize) -> (usize, usize, usize, usize, usize));
+
 #[repr(C)]
 pub struct RawFB {
     pub fd: usize,
@@ -121,6 +122,46 @@ syscall!(25 => pub fn sys_poll_key_event() -> isize);
 syscall!(26 => pub fn sys_sem_create(value: usize) -> isize);
 syscall!(27 => pub fn sys_sem_up(fd: usize) -> isize);
 syscall!(28 => pub fn sys_sem_down(fd: usize) -> isize);
+
+core::arch::global_asm!(
+    ".global {name}; {name}:",
+    "mov x0, lr", //Read link register value into x0
+    "svc #{num}",
+    "ret",
+    name = sym sys_fork_helper,
+    num = const 5,
+);
+unsafe extern "C" {
+    fn sys_fork_helper(pc: usize, sp: usize, x0: usize, flags: usize) -> isize;
+}
+
+//saves and restores callee saved registers
+core::arch::global_asm!(
+    ".global {name}; {name}:",
+    "sub sp, sp, #0x60",
+    "stp x19, x20, [sp, #0x50]",
+    "stp x21, x22, [sp, #0x40]",
+    "stp x23, x24, [sp, #0x30]",
+    "stp x25, x26, [sp, #0x20]",
+    "stp x27, x28, [sp, #0x10]",
+    "stp x29, x30, [sp]",
+    "mov x1, sp",
+    "mov x2, 0", //child should get 0
+    "mov x3, 0",
+    "bl sys_fork_helper",
+    "ldp x29, x30, [sp]",
+    "ldp x27, x28, [sp, #0x10]",
+    "ldp x25, x26, [sp, #0x20]",
+    "ldp x23, x24, [sp, #0x30]",
+    "ldp x21, x22, [sp, #0x40]",
+    "ldp x19, x20, [sp, #0x50]",
+    "add sp, sp, #0x60",
+    "ret",
+    name = sym sys_fork,
+);
+unsafe extern "C" {
+    pub fn sys_fork() -> isize;
+}
 
 /* * * * * * * * * * * * * * * * * * * */
 /* Syscall wrappers                    */
@@ -258,6 +299,12 @@ pub fn wait(fd: FileDesc) -> Result<usize, usize> {
     let res = unsafe { sys_wait(fd as usize) };
     int_to_error(res)
 }
+
+pub const MAP_PRIVATE: u32 = 0;
+pub const MAP_FILE: u32 = 0; //linux mmap ignores this but can have it for readabilty?
+pub const MAP_FIXED: u32 = 1 << 0;
+pub const MAP_ANONYMOUS: u32 = 1 << 1;
+pub const MAP_SHARED: u32 = 1 << 2;
 
 pub unsafe fn mmap(
     addr: usize,

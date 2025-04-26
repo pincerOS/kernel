@@ -12,6 +12,9 @@ mkdir -p fs
 # cp shell.elf fs/
 # ./ls.rs
 # cp ls.elf fs/
+./sharedMemTest.rs
+cp sharedMemTest.elf fs/
+
 
 cargo run -q -p initfs --bin util \
     -- create --compress --out fs.arc --root fs fs --verbose
