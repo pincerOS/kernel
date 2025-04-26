@@ -37,9 +37,3 @@ pub fn usb_check_for_change(_bus: &mut UsbBus) {
 pub fn usb_register_net_callback(callback: fn(*mut u8, u32)) {
     RegisterNetReceiveCallback(callback);
 }
-
-pub unsafe fn usb_send_packet(buffer: *mut u8, buffer_length: u32) {
-    unsafe {
-        NetSendPacket(buffer, buffer_length);
-    }
-}
