@@ -125,6 +125,7 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
 
 	axge_reset(device);
 
+    println!("| AXGE: Initializing device");
     axge_write_mem(device, AXGE_ACCESS_MAC, ETHER_ADDR_LEN as u16, AXGE_NIDR as u16,
 	    MAC_ADDRESS.as_mut_ptr(), ETHER_ADDR_LEN as u32);
 
@@ -141,10 +142,12 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
 	 * there is no framework for USB ethernet suspend/wakeup.
 	 * Disable all wakeup functions.
 	 */
+    println!("| AXGE: Disabling wakeup functions");
 	axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_MMSR as u16, 0);
 	axge_read_cmd_1(device, AXGE_ACCESS_MAC, AXGE_MMSR as u16);
 
 	/* Configure default medium type. */
+    println!("| AXGE: Configuring default medium type");
 	axge_write_cmd_2(device, AXGE_ACCESS_MAC, 2, AXGE_MSR, MSR_GM | MSR_FD |
 	    MSR_RFC | MSR_TFC | MSR_RE);
 
@@ -157,6 +160,7 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
     //This is my attempt at htis from gpt code -> no clue if it works
 
     //issue phy reset
+    println!("| AXGE: Resetting PHY");
     axge_write_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR, BMCR_RESET);
     
     let mut val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
@@ -164,7 +168,7 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
         micro_delay(ms_to_micro(10));
         val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
     }
-
+    println!("| AXGE: PHY reset complete");
     return ResultCode::OK;
 }
 
@@ -179,11 +183,13 @@ pub fn axge_miibus_writereg(device: &mut UsbDevice, phy: u16, reg: u16, val: u16
 
 pub fn axge_csum_cfg(device: &mut UsbDevice) {
     // Enable checksum offload
+    println!("| AXGE: Enabling checksum offload");
     axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_CRCR as u16, 0);
     axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_CTCR as u16, 0);
 }
 
 pub fn axge_rxfilter(debice: &mut UsbDevice) {
+    println!("| AXGE: Setting RX filter");
     let mut rxmode = RCR_DROP_CRCERR | RCR_START | RCR_ACPT_BCAST | RCR_ACPT_ALL_MCAST;
 
     axge_write_cmd_2(debice, AXGE_ACCESS_MAC, 2, AXGE_RCR as u16, rxmode);
@@ -205,12 +211,13 @@ pub fn axge_chip_init(device: &mut UsbDevice) {
 
 pub fn axge_reset(device: &mut UsbDevice) {
     //ignore the usbd_req_set_config for now
-
+    println!("| AXGE: Resetting device");
     micro_delay(ms_to_micro(10));
     axge_chip_init(device);
 }
 
 pub fn axge_stop(device: &mut UsbDevice) {
+    println!("| AXGE: Stopping device");
     let mut val = axge_read_cmd_2(device, AXGE_ACCESS_MAC as u8, 2, AXGE_MSR as u16);
     val &= !MSR_RE;
     axge_write_cmd_2(device, AXGE_ACCESS_MAC, 2, AXGE_MSR as u16, val);
