@@ -1298,12 +1298,12 @@ pub unsafe fn HcdSubmitControlMessage(
         tempPipe.direction = UsbDirection::Out;
     }
 
-    let pid = if is_data1 {
-        PacketId::Data1
-    } else {
-        PacketId::Data0
-    };
-
+    // let pid = if is_data1 {
+    //     PacketId::Data1
+    // } else {
+    //     PacketId::Data0
+    // };
+    let pid = PacketId::Data1; //according to spec, the last packet is always Data1
     // tempPipe.direction = UsbDirection::In;
     //TODO: This is necessary in Real hardware I think but QEMU doesn't fully handle it
     //https://elixir.bootlin.com/qemu/v9.0.2/source/hw/usb/hcd-dwc2.c#L346
