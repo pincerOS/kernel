@@ -81,6 +81,9 @@ dependencies = [
 [[package]]
 name = "filesystem"
 version = "0.1.0"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "init"

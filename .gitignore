@@ -4,9 +4,11 @@ kernel.elf
 .gdb_history
 .vscode
 .idea
+.vs
 .DS_Store
 *.tmp.*
-net0.pcap
 *.img
+net0.pcap
 *.dd
 .llvmbox
+/test/generated_tests
