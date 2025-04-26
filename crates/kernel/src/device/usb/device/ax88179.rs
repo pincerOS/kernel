@@ -57,7 +57,7 @@ pub unsafe fn axge_send_packet(
                 end_point: 3, //TODO: check this
                 device: device.number as u8,
                 direction: UsbDirection::Out,
-                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
+                max_size: size_from_number(512 as u32),
                 _reserved: 0,
             },
             buf.into_boxed_slice(),
@@ -99,7 +99,7 @@ pub unsafe fn axge_receive_packet(
                 end_point: 2,
                 device: device.number as u8,
                 direction: UsbDirection::In,
-                max_size: size_from_number(64),
+                max_size: size_from_number(512),
                 _reserved: 0,
             },
             buffer,
