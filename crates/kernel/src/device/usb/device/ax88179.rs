@@ -169,7 +169,8 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
     //     val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
     // }
 
-        // axge_write_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR, BMCR_RESET);
+    // axge_write_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR, BMCR_RESET);
+
     
     // let mut val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
     // while val & BMCR_RESET != 0 {
@@ -177,25 +178,24 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
     //     val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
     // }
 
-    // let mut reg = BMCR_RESET;
+    let mut reg = BMCR_RESET;
 
-    // axge_miibus_writereg(device, 0, MII_BMCR, reg);
+    axge_miibus_writereg(device, 3, MII_BMCR, reg);
 
-    // //wait 100 ms for it t ocomplete 
-    // for _ in 0..100 {
-    //     reg = axge_miibus_readreg(device, 0, MII_BMCR);
-    //     if reg & BMCR_RESET == 0 {
-    //         break;
-    //     }
-    //     micro_delay(1000);
-    // }
+    //wait 100 ms for it t ocomplete 
+    for _ in 0..100 {
+        reg = axge_miibus_readreg(device, 3, MII_BMCR);
+        if reg & BMCR_RESET == 0 {
+            break;
+        }
+        micro_delay(1000);
+    }
 
-    // reg &= !(BMCR_PDOWN | BMCR_ISO);
-    // if axge_miibus_readreg(device, 0, MII_BMCR) != reg {
-    //     axge_miibus_writereg(device, 0, MII_BMCR, reg);
-    // }
-    // micro_delay(ms_to_micro(100));
-
+    reg &= !(BMCR_PDOWN | BMCR_ISO);
+    if axge_miibus_readreg(device, 3, MII_BMCR) != reg {
+        axge_miibus_writereg(device, 3, MII_BMCR, reg);
+    }
+    micro_delay(ms_to_micro(1000));
     println!("| AXGE: PHY reset complete");
     return ResultCode::OK;
 }
