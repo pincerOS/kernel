@@ -512,7 +512,7 @@ pub fn HcdChannelSendWaitOne(
                 break;
             }
         }
-        println!("| HCD: Channel interrupt {:#x} timeout {}", hcint, timeout);
+        // println!("| HCD: Channel interrupt {:#x} timeout {}", hcint, timeout);
         // println!("| HCD: Channel halt send wait");
 
         let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
@@ -522,7 +522,7 @@ pub fn HcdChannelSendWaitOne(
         );
         hcint = read_volatile(DOTG_HCINT(channel as usize));
 
-        println!("| HCD: pipe speed {:#?}", pipe.speed);
+        // println!("| HCD: pipe speed {:#?}", pipe.speed);
 
         printDWCErrors(channel as u32);
         if pipe.speed != UsbSpeed::High && dwc_sc.channel[channel as usize].split_control.SplitEnable {
@@ -797,7 +797,7 @@ fn HcdChannelSendWait(
             );
 
             transfer = buffer_length - dwc_sc.channel[channel as usize].transfer_size.TransferSize;
-            println!("| HCD: Transfer to packet progress: {}/{} with packets {} from {}\n", transfer, buffer_length, dwc_sc.channel[channel as usize].transfer_size.PacketCount, packets);
+            // println!("| HCD: Transfer to packet progress: {}/{} with packets {} from {}\n", transfer, buffer_length, dwc_sc.channel[channel as usize].transfer_size.PacketCount, packets);
             
             printDWCErrors(channel as u32);
             
@@ -808,7 +808,7 @@ fn HcdChannelSendWait(
             }
             // Continue looping if there are still packets in progress.
             if dwc_sc.channel[channel as usize].transfer_size.PacketCount == 0 {
-                println!("| HCD: Transfer to packet completed.");
+                // println!("| HCD: Transfer to packet completed.");
                 break;
             }
         }
@@ -1009,14 +1009,26 @@ pub unsafe fn HcdSubmitBulkMessage(
     };
 
     if pipe.direction == UsbDirection::Out {
+        //print the first 32 bytes of the buffer
+        let buf = buffer.as_ref().unwrap();
+        unsafe {
+            for i in 0..32 {
+                print!(
+                    "{:#x} ",
+                    buf[i] as u8
+                );
+            }
+            println!();
+        }
         let data_buffer = dwc_sc.dma_addr[channel as usize] as *mut u8;
         unsafe {
             memory_copy(
                 data_buffer,
-                buffer.unwrap().as_ptr(),
+                buffer.unwrap().as_mut_ptr(),
                 buffer_length as usize,
             );
         }
+
     }
 
     let result = HcdChannelSend(
@@ -1211,7 +1223,7 @@ pub unsafe fn HcdSubmitControlMessage(
         return result;
     }
 
-    println!("| HCD: Control message sent to device.\n");
+    // println!("| HCD: Control message sent to device.\n");
     printDWCErrors(0);
 
     let mut is_data1 = true;
@@ -1239,6 +1251,31 @@ pub unsafe fn HcdSubmitControlMessage(
         } else {
             PacketId::Data0
         };
+
+        //print out the request in terms of bytes and print out the first 16 bytes of the data buffer
+        unsafe {
+            println!(
+                "| HCD: Control message to device {}: {:#x} {:#x} {:#x} {:#x} {:#x} {:#x} {:#x} {:#x}",
+                pipe.device,
+                *((request_buffer as *const u8).offset(0)),
+                *((request_buffer as *const u8).offset(1)),
+                *((request_buffer as *const u8).offset(2)),
+                *((request_buffer as *const u8).offset(3)),
+                *((request_buffer as *const u8).offset(4)),
+                *((request_buffer as *const u8).offset(5)),
+                *((request_buffer as *const u8).offset(6)),
+                *((request_buffer as *const u8).offset(7))
+            );
+            //print the first 16 bytes of the data buffer
+            for i in 0..buffer_length {
+                print!(
+                    "{:#x} ",
+                    *((data_buffer as *const u8).offset(i as isize))
+                );
+            }
+            println!()
+        }
+
         is_data1 = !is_data1;
         result = HcdChannelSendWait(
             device,

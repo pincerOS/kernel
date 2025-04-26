@@ -208,6 +208,15 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
     // micro_delay(ms_to_micro(1000));
     ax88179_reset(device);
     println!("| AXGE: PHY reset complete");
+    ax88179_link_reset(device);
+    println!("| AXGE: Link reset complete");
+
+    let mut rxctl = (AX_RX_CTL_START | AX_RX_CTL_AB | AX_RX_CTL_IPE) | AX_RX_CTL_PRO;
+    ax88179_write_cmd(device, AX_ACCESS_MAC, AX_RX_CTL,
+        2, 2, &mut rxctl as *mut u16 as *mut u8);
+
+    println!("| AXGE: multicast mode set");
+
     return ResultCode::OK;
 }
 
@@ -258,14 +267,14 @@ pub fn axge_miibus_writereg(device: &mut UsbDevice, phy: u16, reg: u16, val: u16
 pub fn axge_csum_cfg(device: &mut UsbDevice) {
     // Enable checksum offload
     println!("| AXGE: Enabling checksum offload");
-    axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_CRCR as u16, 0);
-    axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_CTCR as u16, 0);
+    axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_CRCR as u16, CRCR_IP | CRCR_TCP | CRCR_UDP);
+    axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_CTCR as u16, CRCR_IP | CRCR_TCP | CRCR_UDP);
 }
 
 pub fn axge_rxfilter(debice: &mut UsbDevice) {
     println!("| AXGE: Setting RX filter");
     // let mut rxmode = RCR_DROP_CRCERR | RCR_START | RCR_ACPT_BCAST | RCR_ACPT_ALL_MCAST;
-    let rxmode = RCR_STOP;
+    let rxmode = RCR_START | RCR_ACPT_BCAST | RCR_ACPT_ALL_MCAST;
     axge_write_cmd_2(debice, AXGE_ACCESS_MAC, 2, AXGE_RCR as u16, rxmode);
 }
 
@@ -440,6 +449,8 @@ pub fn ax88179_reset(dev: &mut UsbDevice) {
         /* Read MAC address from DTB or asix chip */
         // ax88179_get_mac_addr(dev);
         // memcpy(dev->net->perm_addr, dev->net->dev_addr, ETH_ALEN);
+        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_NODE_ID as u16, 6, 6,
+            MAC_ADDRESS.as_mut_ptr());
 
         /* RX bulk configuration */
         // memcpy(tmp, &AX88179_BULKIN_SIZE[0], 5);
@@ -479,8 +490,71 @@ pub fn ax88179_reset(dev: &mut UsbDevice) {
         ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_MEDIUM_STATUS_MODE as u16, 2, 2, tmp16 as *mut u8);
     }
 
+    ax88179_disable_eee(dev);
+    ax88179_ethtool(dev);
     mii_nway_restart(dev);
 
+}
+
+
+pub fn ax88179_link_reset(dev: &mut UsbDevice) {
+    println!("| AX88179: Resetting link");
+    let mut tmp32: u32 = 0x40000000;
+
+    use crate::sync::get_time;
+    let timeout = get_time() / 1000 + 100;
+    let mut mode: u16 = 0;
+    while tmp32 & 0x40000000 != 0{
+		ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_RX_CTL, 2, 2, &mut mode as *mut u16 as *mut u8);
+
+        let mut temporary: u16 = AX_RX_CTL_DROPCRCERR | AX_RX_CTL_IPE | AX_RX_CTL_START |
+        AX_RX_CTL_AP | AX_RX_CTL_AMALL | AX_RX_CTL_AB;
+		ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_RX_CTL, 2, 2, &mut temporary as *mut u16 as *mut u8);
+
+        /* link up, check the usb device control TX FIFO full or empty*/
+
+		/*link up, check the usb device control TX FIFO full or empty*/
+		ax88179_read_cmd(dev, 0x81, 0x8c, 0, 4, &mut tmp32 as *mut u32 as *mut u8);
+
+        if get_time() / 1000 > timeout {
+            println!("| AX88179: Link reset timeout");
+            break;
+        }
+    }
+
+    let mut link_sts: u8 = 0;
+    let mut tmp16: u16 = 0;
+
+    mode = AX_MEDIUM_RECEIVE_EN | AX_MEDIUM_TXFLOW_CTRLEN |
+	       AX_MEDIUM_RXFLOW_CTRLEN;
+
+	ax88179_read_cmd(dev, AX_ACCESS_MAC, PHYSICAL_LINK_STATUS as u16,
+			 1, 1, &mut link_sts as *mut u8);
+
+	ax88179_read_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
+			 GMII_PHY_PHYSR, 2, &mut tmp16 as *mut u16 as *mut u8);
+
+    if (tmp16 & GMII_PHY_PHYSR_FULL) != 0 {
+        mode |= AX_MEDIUM_FULL_DUPLEX;
+    }
+    ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_MEDIUM_STATUS_MODE as u16,
+            2, 2, &mut mode as *mut u16 as *mut u8);
+}
+
+pub fn ax88179_disable_eee(dev: &mut UsbDevice) {
+    let mut tmp16 = GMII_PHY_PGSEL_PAGE3;
+    unsafe { 
+        ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID as u16,
+            GMII_PHY_PAGE_SELECT, 2, &mut tmp16 as *mut u16 as *mut u8);
+    
+        tmp16 = 0x3246;
+        ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
+                MII_PHYADDR, 2, &mut tmp16 as *mut u16 as *mut u8);
+    
+        tmp16 = GMII_PHY_PGSEL_PAGE0;
+        ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
+                GMII_PHY_PAGE_SELECT, 2, &mut tmp16 as *mut u16 as *mut u8);
+    }
 }
 
 pub fn mii_nway_restart(dev: &mut UsbDevice) {
@@ -490,6 +564,73 @@ pub fn mii_nway_restart(dev: &mut UsbDevice) {
         bmcr |= 0x0200;
         ax88179_mdio_write(dev, MII_BMCR, bmcr);
     }
+}
+
+pub fn ax88179_ethtool(dev: &mut UsbDevice) {
+    let val = ax88179_phy_read_mmd_indirect(dev, MDIO_AN_EEE_ADV,
+        MDIO_MMD_AN);
+
+    let mut adv = 0;
+    if val & MDIO_EEE_100TX != 0 {
+        adv |= MDIO_EEE_100TX;//1 << ETHTOOL_LINK_MODE_100baseT_Full_BIT;
+    }
+
+    if val & MDIO_EEE_1000T != 0 {
+        adv |= MDIO_EEE_1000T;//1 << ETHTOOL_LINK_MODE_1000baseT_Full_BIT;
+    }
+
+    if val &  MDIO_EEE_10GT != 0 {
+        adv |= MDIO_EEE_10GT;//1 << ETHTOOL_LINK_MODE_10000baseT_Full_BIT;
+    }
+
+    if val & MDIO_EEE_1000KX != 0 {
+        adv |= MDIO_EEE_1000KX;//1 << ETHTOOL_LINK_MODE_1000baseKX_Full_BIT;
+    }
+
+    if val & MDIO_EEE_10GKX4 != 0 {
+        adv |= MDIO_EEE_10GKX4;//1 << ETHTOOL_LINK_MODE_10000baseKX4_Full_BIT;
+    }
+
+    if val & MDIO_EEE_10GKR != 0 {
+        adv |= MDIO_EEE_10GKR;//1 << ETHTOOL_LINK_MODE_10000baseKR_Full_BIT;
+    }
+
+    ax88179_phy_write_mmd_indirect(dev, MDIO_AN_EEE_ADV,
+        MDIO_MMD_AN, adv);
+
+}
+
+pub fn ax88179_phy_write_mmd_indirect(dev: &mut UsbDevice, prtad: u16, devad: u16, data: u16)
+{
+    ax88179_phy_mmd_indirect(dev, prtad, devad);
+    let mut tmp16 = data;
+    ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
+    MII_MMD_DATA, 2, &mut tmp16 as *mut u16 as *mut u8);
+}
+
+
+pub fn ax88179_phy_read_mmd_indirect(dev: &mut UsbDevice, prtad: u16, devad: u16) -> u16 {
+    ax88179_phy_mmd_indirect(dev, prtad, devad);
+    let mut tmp16: u16 = 0;
+    ax88179_read_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
+        MII_MMD_DATA, 2, &mut tmp16 as *mut u16 as *mut u8);
+
+    return tmp16;
+}
+
+pub fn ax88179_phy_mmd_indirect(dev: &mut UsbDevice, prtad: u16, devad: u16) {
+    let mut tmp16 = devad;
+
+    ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
+        MII_MMD_CTRL, 2, &mut tmp16 as *mut u16 as *mut u8);
+
+    tmp16 = prtad;
+	ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
+				MII_MMD_DATA, 2, &mut tmp16 as *mut u16 as *mut u8);
+
+	tmp16 = devad | MII_MMD_CTRL_NOINCR;
+	ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
+				MII_MMD_CTRL, 2, &mut tmp16 as *mut u16 as *mut u8);
 }
 
 pub fn ax88179_mdio_read(dev: &mut UsbDevice, loc: u16) -> u16 {
@@ -607,14 +748,169 @@ pub fn __ax88179_write_cmd(device: &mut UsbDevice, cmd: u8, value: u16, index: u
 }
 
 
-// Basic mode control register (rw)
-pub const MII_BMCR: u16 = 0x00;
+// MDIO Manageable Devices (MMDs)
+pub const MDIO_MMD_PMAPMD: u16 = 1;      // Physical Medium Attachment / Physical Medium Dependent
+pub const MDIO_MMD_WIS: u16 = 2;          // WAN Interface Sublayer
+pub const MDIO_MMD_PCS: u16 = 3;          // Physical Coding Sublayer
+pub const MDIO_MMD_PHYXS: u16 = 4;        // PHY Extender Sublayer
+pub const MDIO_MMD_DTEXS: u16 = 5;        // DTE Extender Sublayer
+pub const MDIO_MMD_TC: u16 = 6;           // Transmission Convergence
+pub const MDIO_MMD_AN: u16 = 7;           // Auto-Negotiation
+pub const MDIO_MMD_POWER_UNIT: u16 = 13;  // PHY Power Unit
+pub const MDIO_MMD_C22EXT: u16 = 29;      // Clause 22 extension
+pub const MDIO_MMD_VEND1: u16 = 30;       // Vendor specific 1
+pub const MDIO_MMD_VEND2: u16 = 31;       // Vendor specific 2
 
-pub const BMCR_RESET: u16 = 0x8000;
+// Generic MII register addresses
+pub const MII_BMCR: u16 = 0x00;         // Basic mode control register
+pub const MII_BMSR: u16 = 0x01;         // Basic mode status register
+pub const MII_PHYSID1: u16 = 0x02;      // PHYS ID 1
+pub const MII_PHYSID2: u16 = 0x03;      // PHYS ID 2
+pub const MII_ADVERTISE: u16 = 0x04;    // Advertisement control register
+pub const MII_LPA: u16 = 0x05;          // Link partner ability register
+pub const MII_EXPANSION: u16 = 0x06;    // Expansion register
+pub const MII_CTRL1000: u16 = 0x09;     // 1000BASE-T control
+pub const MII_STAT1000: u16 = 0x0a;     // 1000BASE-T status
+pub const MII_MMD_CTRL: u16 = 0x0d;     // MMD Access Control Register
+pub const MII_MMD_DATA: u16 = 0x0e;     // MMD Access Data Register
+pub const MII_ESTATUS: u16 = 0x0f;      // Extended Status
+pub const MII_DCOUNTER: u16 = 0x12;     // Disconnect counter
+pub const MII_FCSCOUNTER: u16 = 0x13;   // False carrier counter
+pub const MII_NWAYTEST: u16 = 0x14;     // N-way auto-negotiation test register
+pub const MII_RERRCOUNTER: u16 = 0x15;  // Receive error counter
+pub const MII_SREVISION: u16 = 0x16;    // Silicon revision
+pub const MII_RESV1: u16 = 0x17;        // Reserved
+pub const MII_LBRERROR: u16 = 0x18;     // Loopback, receive, bypass error
+pub const MII_PHYADDR: u16 = 0x19;      // PHY address
+pub const MII_RESV2: u16 = 0x1a;        // Reserved
+pub const MII_TPISTATUS: u16 = 0x1b;    // TPI status for 10 Mbps
+pub const MII_NCONFIG: u16 = 0x1c;      // Network interface config
+
+// Basic Mode Control Register (BMCR) bitfields
+pub const BMCR_RESV: u16 = 0x003f;         // Unused
+pub const BMCR_SPEED1000: u16 = 0x0040;     // MSB of speed (1000 Mbps)
+pub const BMCR_CTST: u16 = 0x0080;          // Collision test
+pub const BMCR_FULLDPLX: u16 = 0x0100;      // Full duplex
+pub const BMCR_ANRESTART: u16 = 0x0200;     // Auto-negotiation restart
+pub const BMCR_ISOLATE: u16 = 0x0400;       // Isolate data paths from MII
+pub const BMCR_PDOWN: u16 = 0x0800;         // Power down
+pub const BMCR_ANENABLE: u16 = 0x1000;      // Enable auto-negotiation
+pub const BMCR_SPEED100: u16 = 0x2000;      // Select 100 Mbps
+pub const BMCR_LOOPBACK: u16 = 0x4000;      // TXD loopback
+pub const BMCR_RESET: u16 = 0x8000;         // Reset to default
+pub const BMCR_SPEED10: u16 = 0x0000;       // Select 10 Mbps
+
+// MMD Access Control register fields
+pub const MII_MMD_CTRL_DEVAD_MASK: u16 = 0x001f;   // Mask MMD DEVAD
+pub const MII_MMD_CTRL_ADDR: u16 = 0x0000;          // Address
+pub const MII_MMD_CTRL_NOINCR: u16 = 0x4000;        // No post increment
+pub const MII_MMD_CTRL_INCR_RDWT: u16 = 0x8000;     // Post increment on reads & writes
+pub const MII_MMD_CTRL_INCR_ON_WT: u16 = 0xC000;    // Post increment on writes only
+
+// Generic MDIO register mappings (all as u16)
+pub const MDIO_CTRL1: u16 = MII_BMCR as u16;         // Basic Mode Control Register
+pub const MDIO_STAT1: u16 = MII_BMSR as u16;         // Basic Mode Status Register
+pub const MDIO_DEVID1: u16 = MII_PHYSID1 as u16;     // Device Identifier 1
+pub const MDIO_DEVID2: u16 = MII_PHYSID2 as u16;     // Device Identifier 2
+
+pub const MDIO_SPEED: u16 = 4;                      // Speed ability
+pub const MDIO_DEVS1: u16 = 5;                      // Devices in package
+pub const MDIO_DEVS2: u16 = 6;
+pub const MDIO_CTRL2: u16 = 7;                      // 10G control 2
+pub const MDIO_STAT2: u16 = 8;                      // 10G status 2
+pub const MDIO_PMA_TXDIS: u16 = 9;                  // 10G PMA/PMD transmit disable
+pub const MDIO_PMA_RXDET: u16 = 10;                 // 10G PMA/PMD receive signal detect
+pub const MDIO_PMA_EXTABLE: u16 = 11;               // 10G PMA/PMD extended ability
+pub const MDIO_PKGID1: u16 = 14;                    // Package identifier 1
+pub const MDIO_PKGID2: u16 = 15;                    // Package identifier 2
+
+// Auto-Negotiation (AN) related
+pub const MDIO_AN_ADVERTISE: u16 = 16;              // Auto-Negotiation advertisement (base page)
+pub const MDIO_AN_LPA: u16 = 19;                    // Auto-Negotiation link partner ability (base page)
+pub const MDIO_PCS_EEE_ABLE: u16 = 20;              // EEE Capability register
+pub const MDIO_PCS_EEE_ABLE2: u16 = 21;             // EEE Capability register 2
+pub const MDIO_PMA_NG_EXTABLE: u16 = 21;            // 2.5G/5G PMA/PMD extended ability
+pub const MDIO_PCS_EEE_WK_ERR: u16 = 22;            // EEE wake error counter
+pub const MDIO_PHYXS_LNSTAT: u16 = 24;              // PHY XGXS lane state
+
+pub const MDIO_AN_EEE_ADV: u16 = 60;                // EEE advertisement
+pub const MDIO_AN_EEE_LPABLE: u16 = 61;             // EEE link partner ability
+pub const MDIO_AN_EEE_ADV2: u16 = 62;               // EEE advertisement 2
+pub const MDIO_AN_EEE_LPABLE2: u16 = 63;            // EEE link partner ability 2
+
+pub const MDIO_AN_CTRL2: u16 = 64;                  // Auto-Negotiation THP bypass request control
+
+// EEE Supported / Advertisement / Link Partner Advertisement registers
+// (same bit masks used across multiple registers)
+
+// Old (user-visible) names
+pub const MDIO_AN_EEE_ADV_100TX: u16 = 0x0002;    // Advertise 100TX EEE cap
+pub const MDIO_AN_EEE_ADV_1000T: u16 = 0x0004;    // Advertise 1000T EEE cap
+
+// New generic names (aliasing old names)
+pub const MDIO_EEE_100TX: u16 = MDIO_AN_EEE_ADV_100TX;    // 100TX EEE cap
+pub const MDIO_EEE_1000T: u16 = MDIO_AN_EEE_ADV_1000T;    // 1000T EEE cap
+
+// Other EEE capabilities
+pub const MDIO_EEE_10GT: u16 = 0x0008;    // 10GBASE-T EEE cap
+pub const MDIO_EEE_1000KX: u16 = 0x0010;  // 1000BASE-KX EEE cap
+pub const MDIO_EEE_10GKX4: u16 = 0x0020;  // 10GBASE-KX4 EEE cap
+pub const MDIO_EEE_10GKR: u16 = 0x0040;   // 10GBASE-KR EEE cap
+pub const MDIO_EEE_40GR_FW: u16 = 0x0100; // 40GBASE-R fast wake
+pub const MDIO_EEE_40GR_DS: u16 = 0x0200; // 40GBASE-R deep sleep
+pub const MDIO_EEE_100GR_FW: u16 = 0x1000; // 100GBASE-R fast wake
+pub const MDIO_EEE_100GR_DS: u16 = 0x2000; // 100GBASE-R deep sleep
+
+// Ethtool Link Mode Bit Positions
+pub const ETHTOOL_LINK_MODE_10baseT_Half_BIT: u32 = 0;
+pub const ETHTOOL_LINK_MODE_10baseT_Full_BIT: u32 = 1;
+pub const ETHTOOL_LINK_MODE_100baseT_Half_BIT: u32 = 2;
+pub const ETHTOOL_LINK_MODE_100baseT_Full_BIT: u32 = 3;
+pub const ETHTOOL_LINK_MODE_1000baseT_Half_BIT: u32 = 4;
+pub const ETHTOOL_LINK_MODE_1000baseT_Full_BIT: u32 = 5;
+pub const ETHTOOL_LINK_MODE_Autoneg_BIT: u32 = 6;
+pub const ETHTOOL_LINK_MODE_TP_BIT: u32 = 7;
+pub const ETHTOOL_LINK_MODE_AUI_BIT: u32 = 8;
+pub const ETHTOOL_LINK_MODE_MII_BIT: u32 = 9;
+pub const ETHTOOL_LINK_MODE_FIBRE_BIT: u32 = 10;
+pub const ETHTOOL_LINK_MODE_BNC_BIT: u32 = 11;
+pub const ETHTOOL_LINK_MODE_10000baseT_Full_BIT: u32 = 12;
+pub const ETHTOOL_LINK_MODE_Pause_BIT: u32 = 13;
+pub const ETHTOOL_LINK_MODE_Asym_Pause_BIT: u32 = 14;
+pub const ETHTOOL_LINK_MODE_2500baseX_Full_BIT: u32 = 15;
+pub const ETHTOOL_LINK_MODE_Backplane_BIT: u32 = 16;
+pub const ETHTOOL_LINK_MODE_1000baseKX_Full_BIT: u32 = 17;
+pub const ETHTOOL_LINK_MODE_10000baseKX4_Full_BIT: u32 = 18;
+pub const ETHTOOL_LINK_MODE_10000baseKR_Full_BIT: u32 = 19;
+pub const ETHTOOL_LINK_MODE_10000baseR_FEC_BIT: u32 = 20;
+pub const ETHTOOL_LINK_MODE_20000baseMLD2_Full_BIT: u32 = 21;
+pub const ETHTOOL_LINK_MODE_20000baseKR2_Full_BIT: u32 = 22;
+pub const ETHTOOL_LINK_MODE_40000baseKR4_Full_BIT: u32 = 23;
+pub const ETHTOOL_LINK_MODE_40000baseCR4_Full_BIT: u32 = 24;
+pub const ETHTOOL_LINK_MODE_40000baseSR4_Full_BIT: u32 = 25;
+pub const ETHTOOL_LINK_MODE_40000baseLR4_Full_BIT: u32 = 26;
+pub const ETHTOOL_LINK_MODE_56000baseKR4_Full_BIT: u32 = 27;
+pub const ETHTOOL_LINK_MODE_56000baseCR4_Full_BIT: u32 = 28;
+pub const ETHTOOL_LINK_MODE_56000baseSR4_Full_BIT: u32 = 29;
+pub const ETHTOOL_LINK_MODE_56000baseLR4_Full_BIT: u32 = 30;
+pub const ETHTOOL_LINK_MODE_25000baseCR_Full_BIT: u32 = 31;
+
+
+// GMII PHY Specific Status Register (PHYSR)
+pub const GMII_PHY_PHYSR: u16 = 0x11;
+
+pub const GMII_PHY_PHYSR_SMASK: u16 = 0xc000;   // Speed mask
+pub const GMII_PHY_PHYSR_GIGA: u16 = 0x8000;     // 1000 Mbps
+pub const GMII_PHY_PHYSR_100: u16 = 0x4000;      // 100 Mbps
+pub const GMII_PHY_PHYSR_FULL: u16 = 0x2000;     // Full duplex
+pub const GMII_PHY_PHYSR_LINK: u16 = 0x0400;     // Link up
+
+
+// pub const BMCR_RESET: u16 = 0x8000;
 pub const BMCR_LOOP: u16 = 0x4000;
 pub const BMCR_SPEED0: u16 = 0x2000;
 pub const BMCR_AUTOEN: u16 = 0x1000;
-pub const BMCR_PDOWN: u16 = 0x0800;
+// pub const BMCR_PDOWN: u16 = 0x0800;
 pub const BMCR_ISO: u16 = 0x0400;
 pub const BMCR_STARTNEG: u16 = 0x0200;
 pub const BMCR_FDX: u16 = 0x0100;
@@ -817,8 +1113,8 @@ pub const LED_VALID: u16 = 1 << 15;
 pub const LED2_USB3_MASK: u16 = 0x7c00;
 
 // PHY Page select
-pub const GMII_PHYPAGE: u8 = 0x1e;
-pub const GMII_PHY_PAGE_SELECT: u8 = 0x1f;
+pub const GMII_PHYPAGE: u16 = 0x1e;
+pub const GMII_PHY_PAGE_SELECT: u16 = 0x1f;
 
 pub const GMII_PHY_PGSEL_EXT: u16 = 0x0007;
 pub const GMII_PHY_PGSEL_PAGE0: u16 = 0x0000;
@@ -829,7 +1125,7 @@ pub const GMII_PHY_PGSEL_PAGE5: u16 = 0x0005;
 
 
 // PHY ID and EEPROM
-pub const AX88179_PHY_ID: u8 = 0x03;
+pub const AX88179_PHY_ID: u16 = 0x03;
 pub const AX_EEPROM_LEN: u16 = 0x100;
 pub const AX88179_EEPROM_MAGIC: u32 = 0x1790_0b95;
 
@@ -878,7 +1174,7 @@ pub const AX_SROM_DATA_LOW: u8 = 0x08;
 pub const AX_SROM_DATA_HIGH: u8 = 0x09;
 
 // RX Control
-pub const AX_RX_CTL: u8 = 0x0b;
+pub const AX_RX_CTL: u16 = 0x0b;
 pub const AX_RX_CTL_DROPCRCERR: u16 = 0x0100;
 pub const AX_RX_CTL_IPE: u16 = 0x0200;
 pub const AX_RX_CTL_START: u16 = 0x0080;
