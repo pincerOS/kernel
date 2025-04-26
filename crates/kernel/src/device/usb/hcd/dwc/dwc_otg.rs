@@ -1144,20 +1144,20 @@ pub unsafe fn HcdSubmitInterruptMessage(
 }
 
 pub fn printDWCErrors(channel: u32) {
-    // let hprt = read_volatile(DOTG_HPRT);
-    // let gintsts = read_volatile(DOTG_GINTSTS);
-    // let haint = read_volatile(DOTG_HAINT);
-    // let hcint = read_volatile(DOTG_HCINT(channel as usize));
-    // let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
-    // let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
+    let hprt = read_volatile(DOTG_HPRT);
+    let gintsts = read_volatile(DOTG_GINTSTS);
+    let haint = read_volatile(DOTG_HAINT);
+    let hcint = read_volatile(DOTG_HCINT(channel as usize));
+    let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+    let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
 
-    // println!("| HCD hprt: {:#x}", hprt);
-    // println!("| HCD gintsts: {:#x}", gintsts);
-    // println!("| HCD haint: {:#x}", haint);
-    // println!("| HCD hcint: {:#x}", hcint);
-    // println!("| HCD hcchar: {:#x}", hcchar);
-    // println!("| HCD hctsiz: {:#x}", hctsiz);
-    // println!("| HCD channel: {:#x}", channel);
+    println!("| HCD hprt: {:#x}", hprt);
+    println!("| HCD gintsts: {:#x}", gintsts);
+    println!("| HCD haint: {:#x}", haint);
+    println!("| HCD hcint: {:#x}", hcint);
+    println!("| HCD hcchar: {:#x}", hcchar);
+    println!("| HCD hctsiz: {:#x}", hctsiz);
+    println!("| HCD channel: {:#x}", channel);
 }
 
 pub unsafe fn HcdSubmitControlMessage(
