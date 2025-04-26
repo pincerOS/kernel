@@ -10,7 +10,7 @@ use crate::device::system_timer::{get_time, micro_delay};
 use crate::device::usb;
 
 use crate::device::usb::hcd::dwc::dwc_otg::{printDWCErrors, read_volatile, DWCSplitControlState, DWCSplitStateMachine, DwcEnableChannel, UpdateDwcOddFrame, DWC_CHANNEL_CALLBACK};
-use crate::device::usb::hcd::dwc::dwc_otgreg::{HCINT_FRMOVRUN, HCINT_NYET, HCINT_XACTERR, HFNUM_FRNUM_MASK, DOTG_HFNUM};
+use crate::device::usb::hcd::dwc::dwc_otgreg::{DOTG_HCTSIZ, DOTG_HFNUM, HCINT_FRMOVRUN, HCINT_NYET, HCINT_XACTERR, HFNUM_FRNUM_MASK};
 use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCSPLT;
 use crate::device::usb::hcd::dwc::dwc_otg;
 use crate::device::usb::DwcActivateCsplit;
@@ -145,9 +145,15 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             unsafe {
                 DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state = DWCSplitStateMachine::CSPLIT;
             }
+            let mut cur_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+            while cur_frame - ss_hfnum < 2 {
+                cur_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+                micro_delay(10);
+            }
             let frame = DwcActivateCsplit(channel);
             unsafe {
-                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].mr_cs_hfnum = frame + 1;
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].mr_cs_hfnum = frame;
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries = 1;
             }
             return false;
         } else {
@@ -173,24 +179,47 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
                 return true;
             }
 
+            if unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries >= 3} {
+                let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
+                println!("| Endpoint CSPLIT has exceeded 3 tries, giving up hctsiz {:x} last transfer {:x} state {:?}", hctsiz, device.last_transfer, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] });
+                return true;
+            }
+
             let mr_cs_hfnum = unsafe {
                 DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].mr_cs_hfnum
             };
 
             while cur_frame == mr_cs_hfnum {
                 cur_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+                micro_delay(10);
             }
             
             let frame = DwcEnableChannel(channel);
             unsafe {
                 DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].mr_cs_hfnum = frame;
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries += 1;
             }
             return false;
         } else {
             unsafe {
                 DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state = DWCSplitStateMachine::NONE;
             }
-            println!("| Endpoint CSPLIT {}: hcint {:x} last transfer {:x}", channel, hcint, device.last_transfer);
+            let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
+            println!("| Endpoint CSPLIT {}: hcint {:x} last transfer {:x} hctisiz {:x}", channel, hcint, device.last_transfer, hctsiz);
+
+            use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_GINTSTS;
+            let gintsts = read_volatile(DOTG_GINTSTS);
+            use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCINT;
+            let hcint = read_volatile(DOTG_HCINT(channel as usize));
+            use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCCHAR;
+            let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+            let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
+
+            println!("| HCD gintsts: {:#x}", gintsts);
+            println!("| HCD hcint: {:#x}", hcint);
+            println!("| HCD hcchar: {:#x}", hcchar);
+            println!("| HCD hctsiz: {:#x}", hctsiz);
+            println!("| HCD channel: {:#x}\n", channel);
         }
     }
 
