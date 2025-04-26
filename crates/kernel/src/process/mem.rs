@@ -11,9 +11,11 @@ use crate::arch::memory::vmm::{
 use crate::event::async_handler::{run_async_handler, HandlerContext};
 use crate::event::context::Context;
 use crate::event::exceptions::DataAbortISS;
+use crate::process::signal::SignalFlags;
 use crate::syscall::proc::exit_user_thread;
 
 use super::fd::ArcFd;
+use super::signal;
 
 #[derive(Debug)]
 pub enum MmapError {
@@ -310,6 +312,10 @@ unsafe impl Sync for UserAddrSpace {}
 pub fn page_fault_handler(ctx: &mut Context, far: usize, _iss: DataAbortISS) -> *mut Context {
     run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
+        
+        if proc.signal_flags.contains(signal::SignalFlags::IN_HANDLER) {
+            println!("Page fault at addr {far:#10x} while in a signal handler");
+        } 
 
         // TODO: make sure misaligned loads don't loop here?
         let page_addr = (far / PAGE_SIZE) * PAGE_SIZE;
@@ -318,6 +324,13 @@ pub fn page_fault_handler(ctx: &mut Context, far: usize, _iss: DataAbortISS) -> 
         let vme = mem.get_vme(page_addr);
         match vme {
             None => {
+                
+                if let Some(user_page_fault_handler) = proc.signal_handlers.user_page_fault_handler {
+                    proc.signal_flags.set(SignalFlags::IN_HANDLER, true);
+                    //TODO: run page fault handler and plug in correct args
+                    proc.signal_flags.set(SignalFlags::IN_HANDLER, false);
+                }
+
                 let exit_code = &proc.exit_code;
                 exit_code.set(crate::process::ExitStatus {
                     status: -1i32 as u32,

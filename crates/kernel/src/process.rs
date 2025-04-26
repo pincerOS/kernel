@@ -6,6 +6,7 @@ use crate::sync::SpinLock;
 
 pub mod fd;
 pub mod mem;
+pub mod signal;
 
 pub type ProcessRef = Arc<Process>;
 
@@ -22,6 +23,8 @@ pub struct Process {
     pub root: Option<fd::ArcFd>,
     pub file_descriptors: SpinLock<FileDescriptorList>,
     pub exit_code: Arc<BlockingOnceCell<ExitStatus>>,
+    pub signal_handlers: signal::SignalHandlers,
+    pub signal_flags: signal::SignalFlags, // TODO: replace this with signal queue
 }
 
 impl Process {
@@ -33,6 +36,8 @@ impl Process {
             root: None,
             file_descriptors: SpinLock::new(FileDescriptorList { desc: Vec::new() }),
             exit_code: Arc::new(BlockingOnceCell::new()),
+            signal_handlers: signal::SignalHandlers::new(),
+            signal_flags: signal::SignalFlags::empty(),
         }
     }
 
