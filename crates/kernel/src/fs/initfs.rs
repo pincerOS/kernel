@@ -253,7 +253,7 @@ impl FileDescriptor for InitFsFile {
             boxed_future(async move { Err(()) })
         }
     }
-    fn mmap_page(&self, _offset: u64) -> SmallFuture<Option<FileDescResult>> {
+    fn mmap_page(&self, offset: u64) -> SmallFuture<Option<FileDescResult>> {
         if self.header.is_dir() {
             return boxed_future(async move { None });
         }
@@ -264,7 +264,7 @@ impl FileDescriptor for InitFsFile {
             let page_paddr = page.paddr;
             let page_virt = PAGE_ALLOCATOR.get().get_mapped_frame::<Size4KiB>(page);
             let buf_ref = unsafe { core::slice::from_raw_parts_mut(page_virt as *mut u8, 4096) };
-            match self.read(_offset, buf_ref).await.as_result() {
+            match self.read(offset, buf_ref).await.as_result() {
                 Ok(_val) => {
                     return Some(FileDescResult::ok(page_paddr as u64));
                 }

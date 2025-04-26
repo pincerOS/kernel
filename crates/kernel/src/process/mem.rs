@@ -97,12 +97,8 @@ impl UserAddrSpace {
                     .unwrap();
 
                 //Don't want to copy data in shared mem
-                if let MappingKind::File {
-                    fd: arc,
-                    offset: _off,
-                } = &node.kind
-                {
-                    if let Some(_s) = arc.as_any().downcast_ref::<MemFd>() {
+                if let MappingKind::File { fd, .. } = &node.kind {
+                    if let Some(_s) = fd.as_any().downcast_ref::<MemFd>() {
                         continue;
                     }
                 }
@@ -229,10 +225,7 @@ impl UserAddrSpace {
                     MappingKind::Anon => {
                         // TODO: free
                     }
-                    MappingKind::File {
-                        fd: _arc,
-                        offset: _off,
-                    } => {
+                    MappingKind::File { .. } => {
                         // TODO: notify file that it's unused?
                         // (for ref counts, page cache?)
                     }
@@ -293,11 +286,9 @@ impl UserAddrSpace {
                 {
                     Some(Ok(page)) => page,
                     Some(Err(_e)) => {
-                        println!("Error in mmap page");
                         return Err(MmapError::FileError);
                     }
                     None => {
-                        println!("Mmap page returned none");
                         return Err(MmapError::FileError);
                     }
                 };
