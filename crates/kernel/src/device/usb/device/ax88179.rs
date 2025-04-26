@@ -63,7 +63,7 @@ pub unsafe fn axge_send_packet(
             buf.into_boxed_slice(),
             size,
             pid,
-            2, //TODO: Check this
+            1, //TODO: Check this
             10
         )
     };
@@ -105,7 +105,7 @@ pub unsafe fn axge_receive_packet(
             buffer,
             buffer_length,
             pid,
-            1, //TODOI: check this
+            2, //TODOI: check this
             10,
         )
     };

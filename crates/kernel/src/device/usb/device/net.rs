@@ -137,12 +137,12 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     return ResultCode::OK;
 }
 
-pub fn NetInitiateReceive(device: &mut UsbDevice, buffer: Box<[u8]>,buffer_length: u32) {
+pub fn NetInitiateReceive(device: &mut UsbDevice, buffer: Box<[u8]>, buffer_length: u32) {
     unsafe {
         if let Some(receive_func) = NET_DEVICE.net_receive {
             receive_func(device, buffer, buffer_length);
         } else {
-            println!("| Net: No callback for receive.");
+            println!("| Net: No callback for initiate receive.");
         }
     }
 }
@@ -172,6 +172,7 @@ pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
 pub fn NetSend(_buffer: *mut u8, _buffer_length: u32) {
     //Do nothing for now
     //Called when USB packet is actually sent out
+    println!("| Net: Send");
 }
 
 pub fn NetReceive(buffer: *mut u8, buffer_length: u32) {
