@@ -20,7 +20,7 @@ use alloc::vec;
  */ 
 //https://elixir.bootlin.com/freebsd/v14.2/source/sys/dev/usb/net/if_axge.c
 
-const MAC_ADDRESS: [u8; 6] = [0x00, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E]; // TODO: TBD / make this dynamic
+const MAC_ADDRESS: [u8; 6] = [0x54, 0x52, 0x00, 0x12, 0x34, 0x56]; // TODO: TBD / make this dynamic
 
 pub unsafe fn axge_send_packet(
     device: &mut UsbDevice,

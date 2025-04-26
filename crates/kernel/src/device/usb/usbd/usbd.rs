@@ -771,6 +771,19 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
             println!("| USBD: No class attach handler");
             shutdown();
         }
+    } else if device.interfaces[0].class == InterfaceClass::InterfaceClassVendorSpecific {
+        println!("| USBD: Vendor specific device");
+
+        if device.descriptor.vendor_id == 0xB95 && device.descriptor.product_id == 0x1790 {
+            println!("| USBD: Net: AX88179 Detected");
+            let class_attach = bus.interface_class_attach[InterfaceClass::InterfaceClassCommunications as usize];
+            let result = class_attach.unwrap()(device, 0);
+            if result != ResultCode::OK {
+                println!("| USBD: Class attach handler failed");
+                return result;
+            }
+        }
+
     } else {
         println!("| USBD: Invalid interface class");
     }

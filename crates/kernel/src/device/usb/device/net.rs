@@ -7,6 +7,7 @@
 use super::super::usbd::descriptors::*;
 use super::super::usbd::device::*;
 
+use crate::device::system_timer::micro_delay;
 use crate::device::usb::types::*;
 use crate::device::usb::usbd::endpoint::register_interrupt_endpoint;
 use crate::device::usb::usbd::endpoint::*;
@@ -85,7 +86,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     let mut buffer = [0u8; 64];
     // Ethernet Frame
     let dest_mac = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]; // Broadcast
-    let src_mac = [0x11, 0x11, 0x22, 0x33, 0x44, 0x55]; // Example MAC
+    let src_mac = [0x54, 0x52, 0x00, 0x12, 0x34, 0x56]; // Example MAC
     let ethertype = [0x08, 0x00]; // IPv4
 
     // Write Ethernet Header
@@ -118,6 +119,19 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // rndis_send_packet(device, buffer.as_mut_ptr(), 64);
     // rndis_receive_packet(device, Box::new(buffer), 64);
     // }
+
+    unsafe {
+        for i in 0..100 {
+            NetSendPacket(
+                device,
+                buffer.as_mut_ptr(),
+                64,
+            );
+            println!("| Net: Sending Packet {}", i);
+            micro_delay(10000);
+        }
+        
+    }
     // micro_delay(1000000);
     // shutdown();
     return ResultCode::OK;
