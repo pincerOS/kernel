@@ -261,10 +261,9 @@ pub fn axge_csum_cfg(device: &mut UsbDevice) {
 
 pub fn axge_rxfilter(debice: &mut UsbDevice) {
     println!("| AXGE: Setting RX filter");
-    let mut rxmode = RCR_DROP_CRCERR | RCR_START | RCR_ACPT_BCAST | RCR_ACPT_ALL_MCAST;
-
+    // let mut rxmode = RCR_DROP_CRCERR | RCR_START | RCR_ACPT_BCAST | RCR_ACPT_ALL_MCAST;
+    let rxmode = RCR_STOP;
     axge_write_cmd_2(debice, AXGE_ACCESS_MAC, 2, AXGE_RCR as u16, rxmode);
-
 }
 
 pub fn axge_chip_init(device: &mut UsbDevice) {
