@@ -290,7 +290,6 @@ fn HcdPrepareChannel(
     let hctsiz = convert_host_transfer_size(dwc_sc.channel[channel as usize].transfer_size);
     // println!("| HCTSIZE {:#x}\n", hctsiz);
     write_volatile(DOTG_HCTSIZ(channel as usize), hctsiz);
-    println!("| HCD: Prepare channel hctsiz {:#x} hcsplt {:#x} hcchar {:#x} char {}\n", hctsiz, hcsplt, hcchar, channel);
     return ResultCode::OK;
 }
 
