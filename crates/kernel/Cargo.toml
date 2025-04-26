@@ -15,3 +15,4 @@ endian = { path = "../endian" }
 elf = { path = "../elf" }
 filesystem = { path = "../filesystem" }
 initfs = { path = "../initfs"}
+gfx = { path = "../gfx" }

@@ -547,7 +547,11 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
                                 let queue = client.handle.server_to_client_queue();
                                 queue.try_send_data(event).ok();
                             }
-                            HoveredState::None => (),
+                            HoveredState::None => {
+                                if button == 3 && pressed {
+                                    spawn_paint();
+                                }
+                            },
                             _ => (),
                         }
                     }
@@ -796,6 +800,22 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
 
 fn spawn_console() {
     let path = b"/console.elf";
+    let file = ulib::sys::openat(3, path, 0, 0).unwrap();
+    ulib::sys::spawn_elf(&ulib::sys::SpawnArgs {
+        fd: file,
+        stdin: None,
+        stdout: None,
+        stderr: None,
+        args: &[ulib::sys::ArgStr {
+            len: path.len(),
+            ptr: path.as_ptr(),
+        }],
+    })
+    .unwrap();
+}
+
+fn spawn_paint() {
+    let path = b"/paint";
     let file = ulib::sys::openat(3, path, 0, 0).unwrap();
     ulib::sys::spawn_elf(&ulib::sys::SpawnArgs {
         fd: file,

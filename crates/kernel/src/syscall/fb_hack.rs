@@ -19,6 +19,7 @@ pub unsafe fn sys_acquire_fb(ctx: &mut Context) -> *mut Context {
         let proc = context.cur_process().unwrap();
 
         println!("| acquiring framebuffer");
+        crate::device::CONSOLE.get().lock().disable();
         let fb = unsafe { MAILBOX.get().lock().get_framebuffer_raw(width, height) };
 
         let descriptor = FramebufferFd(fb);

@@ -1,0 +1,14 @@
+[package]
+name = "doomgeneric"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ulib = { path = "../ulib", features = ["runtime"] }
+display-client = { path = "../display-client" }
+
+[dev-dependencies]
+ulib = { path = "../ulib", features = ["test"] }
+
+[build-dependencies]
+cc = "1.0"

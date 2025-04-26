@@ -6,6 +6,7 @@ members = [
     "crates/display-client",
     "crates/display-proto",
     "crates/display-server",
+    "crates/doomgeneric",
     "crates/elf",
     "crates/endian",
     "crates/filesystem",
@@ -14,7 +15,9 @@ members = [
     "crates/initfs",
     "crates/kernel",
     "crates/lz4",
+    "crates/paint",
     "crates/shell",
+    "crates/show",
     "crates/ulib",
 ]
 

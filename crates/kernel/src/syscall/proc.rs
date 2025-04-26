@@ -89,10 +89,10 @@ pub unsafe fn sys_spawn(ctx: &mut Context) -> *mut Context {
             wait_fd = fd;
         }
 
-        println!(
-            "Creating new process with page dir {:#010x}, initial sp {user_sp:#x}, entry {user_entry:#x}",
-            process.get_ttbr0()
-        );
+        // println!(
+        //     "Creating new process with page dir {:#010x}, initial sp {user_sp:#x}, entry {user_entry:#x}",
+        //     process.get_ttbr0()
+        // );
         let mut user_thread = unsafe { Thread::new_user(process, user_sp, user_entry) };
         user_thread.context.as_mut().unwrap().regs[0] = user_x0;
         event::SCHEDULER.add_task(event::Event::schedule_thread(user_thread));

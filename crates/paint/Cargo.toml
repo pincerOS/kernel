@@ -1,0 +1,15 @@
+[package]
+name = "paint"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bytemuck = { version = "1.19.0", default-features = false }
+display-client = { path = "../display-client" }
+lz4 = { path = "../lz4" }
+ulib = { path = "../ulib", features = ["heap-impl"] }
+gfx = { path = "../gfx" }
+glam = { version = "0.30", default-features = false, features = ["nostd-libm"] }
+
+[dev-dependencies]
+ulib = { path = "../ulib", features = ["test"] }

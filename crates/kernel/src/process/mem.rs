@@ -126,11 +126,19 @@ impl UserAddrSpace {
 
         if let Some((_, last_before)) = self.memory_range_map.range(0..start_addr).last() {
             if last_before.start + last_before.size > start_addr {
+                // println!(
+                //     "Mapping of {:#x} (size {:#x}) collides with mapping {:#x} (size {:#x})",
+                //     start_addr, size_pages, last_before.start, last_before.size
+                // );
                 return Err(MmapError::MemoryRangeCollision);
             }
         }
         if let Some((_, first_after)) = self.memory_range_map.range(start_addr..).next() {
             if start_addr + size_pages > first_after.start {
+                // println!(
+                //     "Mapping of {:#x} (size {:#x}) collides with mapping {:#x} (size {:#x})",
+                //     start_addr, size_pages, first_after.start, first_after.size
+                // );
                 return Err(MmapError::MemoryRangeCollision);
             }
         }
@@ -169,6 +177,9 @@ impl UserAddrSpace {
         size: usize,
         kind: MappingKind,
     ) -> Result<usize, MmapError> {
+        if size == 0 {
+            return Err(MmapError::RequestedSizeUnavailable);
+        }
         let start_addr = match start_addr {
             Some(s) => s,
             None => self.find_vme_space(size)?,

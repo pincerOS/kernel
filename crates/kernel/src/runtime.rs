@@ -32,6 +32,17 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
         .ok();
         // Avoid unlocking the lock on drop
         core::mem::forget(guard);
+
+        if crate::device::CONSOLE.is_initialized() {
+            let str = alloc::format!(
+                "Kernel panic at '{location}:{line}:{column}'\nmessage: {}",
+                info.message()
+            );
+            let mut console = unsafe { crate::device::CONSOLE.get().force_acquire() };
+            console.input(str.as_bytes());
+            console.render();
+            core::mem::forget(console);
+        }
     }
 
     // TODO: write error message to a fixed location in memory and reset?

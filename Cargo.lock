@@ -21,6 +21,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef657dfab802224e671f5818e9a4935f9b1957ed18e58292690cc39e7a4092a3"
 
 [[package]]
+name = "cc"
+version = "1.2.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "525046617d8376e3db1deffb079e91cef90a89fc3ca5c185bbf8c9ecdd15cd5c"
+dependencies = [
+ "shlex",
+]
+
+[[package]]
 name = "console"
 version = "0.1.0"
 dependencies = [
@@ -68,6 +77,15 @@ dependencies = [
  "linked_list_allocator",
  "lz4",
  "thunderdome",
+ "ulib",
+]
+
+[[package]]
+name = "doomgeneric"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "display-client",
  "ulib",
 ]
 
@@ -131,6 +149,7 @@ dependencies = [
  "elf",
  "endian",
  "filesystem",
+ "gfx",
  "initfs",
  "linked_list_allocator",
  "smallbox",
@@ -167,6 +186,18 @@ name = "lz4"
 version = "0.1.0"
 
 [[package]]
+name = "paint"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "display-client",
+ "gfx",
+ "glam",
+ "lz4",
+ "ulib",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -177,6 +208,23 @@ name = "shell-utils"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "ulib",
+]
+
+[[package]]
+name = "shlex"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+
+[[package]]
+name = "show"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "display-client",
+ "gfx",
+ "lz4",
  "ulib",
 ]
 

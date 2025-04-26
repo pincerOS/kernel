@@ -7,6 +7,10 @@ pub struct CharGrid {
     pub rows: usize,
     pub cols: usize,
     pub stride: usize,
+    pub char_dims: (usize, usize),
+    pub scale: usize,
+    pub hpad: usize,
+    pub vpad: usize,
 }
 
 #[derive(Copy, Clone)]
@@ -52,6 +56,10 @@ impl CharGrid {
             rows,
             cols,
             stride,
+            char_dims,
+            scale,
+            hpad,
+            vpad,
         }
     }
 }
