@@ -88,6 +88,8 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
         panic!("| Endpoint {}: HCINT_XFERCOMPL not set, aborting.", channel);
     }
 
+    println!("| ENdpoint BULK SENT {}: hcint {:x}", channel, hcint);
+
     //Most Likely not going to be called but could be useful for cases where precise timing of when message gets off the system is needed
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
     if let Some(callback) = endpoint_device.endpoints[endpoint.device_endpoint_number as usize] {

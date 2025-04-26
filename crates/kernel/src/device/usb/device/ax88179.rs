@@ -54,7 +54,7 @@ pub unsafe fn axge_send_packet(
             UsbPipeAddress {
                 transfer_type: UsbTransfer::Bulk,
                 speed: device.speed,
-                end_point: 2, //TODO: check this
+                end_point: 3, //TODO: check this
                 device: device.number as u8,
                 direction: UsbDirection::Out,
                 max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
@@ -63,7 +63,7 @@ pub unsafe fn axge_send_packet(
             buf.into_boxed_slice(),
             size,
             pid,
-            1, //TODO: Check this
+            2, //TODO: Check this
             10
         )
     };
@@ -105,7 +105,7 @@ pub unsafe fn axge_receive_packet(
             buffer,
             buffer_length,
             pid,
-            2, //TODOI: check this
+            1, //TODOI: check this
             10,
         )
     };
