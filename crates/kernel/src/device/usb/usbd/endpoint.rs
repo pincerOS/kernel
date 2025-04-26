@@ -298,6 +298,29 @@ pub fn register_interrupt_endpoint(
         let μs = endpoint_time as u64 * 1000;
         let mut interval = interval(μs).with_missed_tick_behavior(MissedTicks::Skip);
         println!("| USB: Starting interrupt endpoint with interval {} μs", μs);
+
+        let hf1 = unsafe { dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK };
+        let hf1_time = get_time();
+        let mut hf2 = unsafe { dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK };
+        let mut hf2_time = get_time();
+        while hf1 == hf2 {
+            hf2 = unsafe { dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK };
+            hf2_time = get_time();
+        }
+        let mut hf3 = unsafe { dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK };
+        let mut hf3_time = get_time();
+        while hf2 == hf3 {
+            hf3 = unsafe { dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK };
+            hf3_time = get_time();
+        }
+        let mut hf4 = unsafe { dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK };
+        let mut hf4_time = get_time();
+        while hf3 == hf4 {
+            hf4 = unsafe { dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK };
+            hf4_time = get_time();
+        }
+        println!("| USB: HFNUM: {} {} {} {} {} {} {} {}", hf1, hf1_time, hf2, hf2_time, hf3, hf3_time, hf4, hf4_time);
+
         let mut prev_time = get_time();
         while interval.tick().await {
             let cur_time = get_time();

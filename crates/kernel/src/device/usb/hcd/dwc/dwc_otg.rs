@@ -817,13 +817,13 @@ fn HcdChannelSendWait(
         // Check for a stuck transfer.
         if packets == dwc_sc.channel[channel as usize].transfer_size.PacketCount {
             //TODO: Hacky fix for a NAK on interrupt endpoint transfer
+            println!("| HCD: Transfer to packet (2) got stuck.");
             let hcint = read_volatile(DOTG_HCINT(channel as usize));
             if hcint & HCINT_NAK != 0 {
                 device.error = UsbTransferError::NoAcknowledge;
             } else {
                 device.error = UsbTransferError::ConnectionError;
             }
-            println!("| HCD: Transfer to packet (2) got stuck.");
             return ResultCode::ErrorDevice;
         }
 
@@ -1245,6 +1245,7 @@ pub unsafe fn HcdSubmitControlMessage(
             request,
             pid,
         );
+
         if result != ResultCode::OK {
             println!("| HCD: Coult not send data to device\n");
 
