@@ -64,6 +64,24 @@ pub enum UsbDeviceRequestRequest {
     SendBreak = 0x23,
 }
 
+pub fn command_to_usb_device_request(
+    cmd: u8,
+) -> UsbDeviceRequestRequest {
+    match cmd {
+        0x00 => UsbDeviceRequestRequest::GetStatus,
+        0x01 => UsbDeviceRequestRequest::ClearFeature,
+        0x02 => UsbDeviceRequestRequest::SetFeature,
+        0x03 => UsbDeviceRequestRequest::SetAddress,
+        0x04 => UsbDeviceRequestRequest::GetDescriptor,
+        0x05 => UsbDeviceRequestRequest::SetDescriptor,
+        0x06 => UsbDeviceRequestRequest::GetConfiguration,
+        0x07 => UsbDeviceRequestRequest::SetConfiguration,
+        0x08 => UsbDeviceRequestRequest::GetInterface,
+        0x09 => UsbDeviceRequestRequest::SetInterface,
+        _ => panic!("| USBDEVICE REQUEST cmd {} not implemented", cmd),
+    }
+}
+
 impl Default for UsbDeviceRequestRequest {
     fn default() -> Self {
         UsbDeviceRequestRequest::GetStatus
