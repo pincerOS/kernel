@@ -1,3 +1,5 @@
+use core::result;
+
 use crate::device::system_timer::micro_delay;
 use crate::device::usb::hcd::dwc::dwc_otg::ms_to_micro;
 use crate::device::usb::types::*;
@@ -183,7 +185,7 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
     // let mut val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
     // while val & BMCR_RESET != 0 {
     //     micro_delay(ms_to_micro(10));
-    //     val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
+        // val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
     // }
 
     // let mut reg = BMCR_RESET;
@@ -204,6 +206,7 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
     //     axge_miibus_writereg(device, 3, MII_BMCR, reg);
     // }
     // micro_delay(ms_to_micro(1000));
+    ax88179_reset(device);
     println!("| AXGE: PHY reset complete");
     return ResultCode::OK;
 }
@@ -384,6 +387,223 @@ fn axge_write_mem(device: &mut UsbDevice, cmd: u8, index: u16, val: u16, buf: *m
     }
 
     return ResultCode::OK;
+}
+
+pub fn ax88179_auto_detach(dev: &mut UsbDevice) {
+    let mut tmp16: u16 = 0;
+	let mut tmp8: u8 = 0;
+
+	// if ax88179_read_cmd(dev, AX_ACCESS_EEPROM, 0x43, 1, 2, &mut tmp16  as *mut u16 as *mut u8) < 0 {
+	// 	return;
+    // }
+
+	if ((tmp16 == 0xFFFF) || ((tmp16 & 0x0100) == 0)) {
+		return;
+    }
+    unsafe {
+        /* Enable Auto Detach bit */
+        tmp8 = 0;
+        ax88179_read_cmd(dev, AX_ACCESS_MAC, AX_CLK_SELECT as u16, 1, 1, &mut tmp8 as *mut u8);
+        tmp8 |= AX_CLK_SELECT_ULR;
+        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_CLK_SELECT as u16, 1, 1, &mut tmp8 as *mut u8);
+
+        ax88179_read_cmd(dev, AX_ACCESS_MAC, AX_PHYPWR_RSTCTL as u16, 2, 2, &mut tmp16 as *mut u16 as *mut u8);
+        tmp16 |= AX_PHYPWR_RSTCTL_AT;
+        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_PHYPWR_RSTCTL as u16, 2, 2, &mut tmp16 as *mut u16 as *mut u8);
+    }
+}
+
+pub fn ax88179_reset(dev: &mut UsbDevice) {
+
+    let mut buf = [0u8; 6];
+    let mut tmp16 = buf.as_mut_ptr() as *mut u16;
+    let mut tmp = buf.as_mut_ptr() as *mut u8;
+
+
+
+	/* Power up ethernet PHY */
+    unsafe {
+        *tmp16 = 0;
+        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_PHYPWR_RSTCTL as u16, 2, 2, tmp16 as *mut u8);
+
+        *tmp16 = AX_PHYPWR_RSTCTL_IPRL;
+        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_PHYPWR_RSTCTL  as u16, 2, 2, tmp16 as *mut u8);
+        micro_delay(500);
+
+        *tmp = AX_CLK_SELECT_ACS | AX_CLK_SELECT_BCS;
+        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_CLK_SELECT as u16, 1, 1, tmp);
+        micro_delay(200);
+
+        /* Ethernet PHY Auto Detach*/
+        ax88179_auto_detach(dev);
+
+        /* Read MAC address from DTB or asix chip */
+        // ax88179_get_mac_addr(dev);
+        // memcpy(dev->net->perm_addr, dev->net->dev_addr, ETH_ALEN);
+
+        /* RX bulk configuration */
+        // memcpy(tmp, &AX88179_BULKIN_SIZE[0], 5);
+        // ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_RX_BULKIN_QCTRL, 5, 5, tmp);
+
+        // dev->rx_urb_size = 1024 * 20;
+
+        *tmp = 0x34;
+        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_PAUSE_WATERLVL_LOW as u16, 1, 1, tmp);
+
+        *tmp = 0x52;
+        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_PAUSE_WATERLVL_HIGH as u16,
+                1, 1, tmp);
+
+        /* Enable checksum offload */
+        *tmp = AX_RXCOE_IP | AX_RXCOE_TCP | AX_RXCOE_UDP |
+            AX_RXCOE_TCPV6 | AX_RXCOE_UDPV6;
+        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_RXCOE_CTL as u16, 1, 1, tmp);
+
+        *tmp = AX_TXCOE_IP | AX_TXCOE_TCP | AX_TXCOE_UDP |
+            AX_TXCOE_TCPV6 | AX_TXCOE_UDPV6;
+        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_TXCOE_CTL as u16, 1, 1, tmp);
+
+        /* Configure RX control register => start operation */
+        *tmp16 = AX_RX_CTL_DROPCRCERR | AX_RX_CTL_IPE | AX_RX_CTL_START |
+            AX_RX_CTL_AP | AX_RX_CTL_AMALL | AX_RX_CTL_AB;
+        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_RX_CTL as u16, 2, 2, tmp16 as *mut u8);
+
+        *tmp = AX_MONITOR_MODE_PMETYPE | AX_MONITOR_MODE_PMEPOL |
+            AX_MONITOR_MODE_RWMP;
+        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_MONITOR_MOD as u16, 1, 1, tmp);
+
+        /* Configure default medium type => giga */
+        *tmp16 = AX_MEDIUM_RECEIVE_EN | AX_MEDIUM_TXFLOW_CTRLEN |
+            AX_MEDIUM_RXFLOW_CTRLEN | AX_MEDIUM_FULL_DUPLEX |
+            AX_MEDIUM_GIGAMODE;
+        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_MEDIUM_STATUS_MODE as u16, 2, 2, tmp16 as *mut u8);
+    }
+
+    mii_nway_restart(dev);
+
+}
+
+pub fn mii_nway_restart(dev: &mut UsbDevice) {
+    let mut bmcr = ax88179_mdio_read(dev, MII_BMCR);
+
+    if bmcr & 0x1000 == 0 {
+        bmcr |= 0x0200;
+        ax88179_mdio_write(dev, MII_BMCR, bmcr);
+    }
+}
+
+pub fn ax88179_mdio_read(dev: &mut UsbDevice, loc: u16) -> u16 {
+    let mut tmp16: u16 = 0;
+
+    // Read MDIO register
+    ax88179_read_cmd(dev, AXGE_ACCESS_PHY, 3, loc, 2, &mut tmp16 as *mut u16 as *mut u8);
+    return tmp16;
+}
+
+pub fn ax88179_mdio_write(dev: &mut UsbDevice, loc: u16, val: u16) {
+    let mut tmp16: u16 = val;
+    ax88179_write_cmd(dev, AXGE_ACCESS_PHY, 3, loc, 2, &mut tmp16 as *mut u16 as *mut u8);
+}
+
+pub fn ax88179_read_cmd(device: &mut UsbDevice, cmd: u8, value: u16, index: u16, size: u16, data: *mut u8) {
+    if size == 2 {
+        let mut buf: u16 = 0;
+        __ax88179_read_cmd(device, cmd, value, index, size, &buf as *const u16 as *mut u8);
+        buf.to_le_bytes();
+        unsafe {
+            *(data as *mut u16) = buf;
+        }
+
+    } else if size == 4 {
+        let mut buf: u32 = 0;
+        __ax88179_read_cmd(device, cmd, value, index, size, &buf as *const u32 as *mut u8);
+        buf.to_le_bytes();
+        unsafe {
+            *(data as *mut u32) = buf;
+        }
+    } else {
+        __ax88179_read_cmd(device, cmd, value, index, size, data);
+    }
+}
+
+pub fn ax88179_write_cmd(device: &mut UsbDevice, cmd: u8, value: u16, index: u16, size: u16, data: *mut u8) {
+    if size == 2 {
+        let mut buf: u16;
+        buf = unsafe { core::ptr::read(data as *const u16) };
+        buf.to_le_bytes();
+
+        __ax88179_write_cmd(device, cmd, value, index, size, &buf as *const u16 as *mut u8);
+    } else {
+        __ax88179_write_cmd(device, cmd, value, index, size, data);
+    }
+}
+
+pub fn __ax88179_read_cmd(device: &mut UsbDevice, cmd: u8, value: u16, index: u16, size: u16, data: *mut u8) -> ResultCode {
+    let result = unsafe {
+        UsbControlMessage(
+            device,
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Control,
+                speed: device.speed,
+                end_point: 0,
+                device: device.number as u8,
+                direction: UsbDirection::In,
+                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
+                _reserved: 0,
+            },
+            data,
+            size as u32,
+            &mut UsbDeviceRequest {
+                request_type: 0xC0,
+                request: command_to_usb_device_request(cmd),
+                index: index as u16,
+                value: value as u16,
+                length: size as u16,
+            },
+            1000, // timeout
+        )
+    };
+
+    if result != ResultCode::OK {
+        print!("| AXGE: Failed to read command.\n");
+        return result;
+    }
+
+    return result;
+}
+
+pub fn __ax88179_write_cmd(device: &mut UsbDevice, cmd: u8, value: u16, index: u16, size: u16, data: *mut u8) -> ResultCode {
+    let result = unsafe {
+        UsbControlMessage(
+            device,
+            UsbPipeAddress {
+                transfer_type: UsbTransfer::Control,
+                speed: device.speed,
+                end_point: 0,
+                device: device.number as u8,
+                direction: UsbDirection::Out,
+                max_size: size_from_number(device.descriptor.max_packet_size0 as u32),
+                _reserved: 0,
+            },
+            data,
+            size as u32,
+            &mut UsbDeviceRequest {
+                request_type: 0x40,
+                request: command_to_usb_device_request(cmd),
+                index: index as u16,
+                value: value as u16,
+                length: size as u16,
+            },
+            1000, // timeout
+        )
+    };
+
+    if result != ResultCode::OK {
+        print!("| AXGE: Failed to write command.\n");
+        return result;
+    }
+
+    return result;
 }
 
 
@@ -604,3 +824,127 @@ pub const GMII_PHY_PGSEL_EXT: u16 = 0x0007;
 pub const GMII_PHY_PGSEL_PAGE0: u16 = 0x0000;
 pub const GMII_PHY_PGSEL_PAGE3: u16 = 0x0003;
 pub const GMII_PHY_PGSEL_PAGE5: u16 = 0x0005;
+
+
+
+
+// PHY ID and EEPROM
+pub const AX88179_PHY_ID: u8 = 0x03;
+pub const AX_EEPROM_LEN: u16 = 0x100;
+pub const AX88179_EEPROM_MAGIC: u32 = 0x1790_0b95;
+
+// Multicast filter settings
+pub const AX_MCAST_FLTSIZE: u8 = 8;
+pub const AX_MAX_MCAST: u8 = 64;
+
+// Interrupt status
+pub const AX_INT_PPLS_LINK: u32 = 1 << 16;
+
+// RX header
+pub const AX_RXHDR_L4_TYPE_MASK: u8 = 0x1c;
+pub const AX_RXHDR_L4_TYPE_UDP: u8 = 4;
+pub const AX_RXHDR_L4_TYPE_TCP: u8 = 16;
+pub const AX_RXHDR_L3CSUM_ERR: u8 = 2;
+pub const AX_RXHDR_L4CSUM_ERR: u8 = 1;
+pub const AX_RXHDR_CRC_ERR: u32 = 1 << 29;
+pub const AX_RXHDR_DROP_ERR: u32 = 1 << 31;
+
+// Access types
+pub const AX_ACCESS_MAC: u8 = 0x01;
+pub const AX_ACCESS_PHY: u8 = 0x02;
+pub const AX_ACCESS_EEPROM: u8 = 0x04;
+pub const AX_ACCESS_EFUS: u8 = 0x05;
+pub const AX_RELOAD_EEPROM_EFUSE: u8 = 0x06;
+
+// Pause water level
+pub const AX_PAUSE_WATERLVL_HIGH: u8 = 0x54;
+pub const AX_PAUSE_WATERLVL_LOW: u8 = 0x55;
+
+// Physical Link Status
+pub const PHYSICAL_LINK_STATUS: u8 = 0x02;
+pub const AX_USB_SS: u8 = 1 << 2;
+pub const AX_USB_HS: u8 = 1 << 1;
+
+// General Status
+pub const GENERAL_STATUS: u8 = 0x03;
+pub const AX_SECLD: u8 = 1 << 2;
+
+// SROM (EEPROM) addresses
+pub const AX_SROM_ADDR: u8 = 0x07;
+pub const AX_SROM_CMD: u8 = 0x0a;
+pub const EEP_RD: u8 = 1 << 2;
+pub const EEP_BUSY: u8 = 1 << 4;
+pub const AX_SROM_DATA_LOW: u8 = 0x08;
+pub const AX_SROM_DATA_HIGH: u8 = 0x09;
+
+// RX Control
+pub const AX_RX_CTL: u8 = 0x0b;
+pub const AX_RX_CTL_DROPCRCERR: u16 = 0x0100;
+pub const AX_RX_CTL_IPE: u16 = 0x0200;
+pub const AX_RX_CTL_START: u16 = 0x0080;
+pub const AX_RX_CTL_AP: u16 = 0x0020;
+pub const AX_RX_CTL_AM: u16 = 0x0010;
+pub const AX_RX_CTL_AB: u16 = 0x0008;
+pub const AX_RX_CTL_AMALL: u16 = 0x0002;
+pub const AX_RX_CTL_PRO: u16 = 0x0001;
+pub const AX_RX_CTL_STOP: u16 = 0x0000;
+
+// Node ID, Multicast Filter Array
+pub const AX_NODE_ID: u8 = 0x10;
+pub const AX_MULFLTARY: u8 = 0x16;
+
+// Medium Status Mode
+pub const AX_MEDIUM_STATUS_MODE: u8 = 0x22;
+pub const AX_MEDIUM_GIGAMODE: u16 = 0x0001;
+pub const AX_MEDIUM_FULL_DUPLEX: u16 = 0x0002;
+pub const AX_MEDIUM_EN_125MHZ: u16 = 0x0008;
+pub const AX_MEDIUM_RXFLOW_CTRLEN: u16 = 0x0010;
+pub const AX_MEDIUM_TXFLOW_CTRLEN: u16 = 0x0020;
+pub const AX_MEDIUM_RECEIVE_EN: u16 = 0x0100;
+pub const AX_MEDIUM_PS: u16 = 0x0200;
+pub const AX_MEDIUM_JUMBO_EN: u16 = 0x8040;
+
+// Monitor Mode
+pub const AX_MONITOR_MOD: u8 = 0x24;
+pub const AX_MONITOR_MODE_RWLC: u8 = 1 << 1;
+pub const AX_MONITOR_MODE_RWMP: u8 = 1 << 2;
+pub const AX_MONITOR_MODE_PMEPOL: u8 = 1 << 5;
+pub const AX_MONITOR_MODE_PMETYPE: u8 = 1 << 6;
+
+// GPIO Control
+pub const AX_GPIO_CTRL: u8 = 0x25;
+pub const AX_GPIO_CTRL_GPIO3EN: u8 = 1 << 7;
+pub const AX_GPIO_CTRL_GPIO2EN: u8 = 1 << 6;
+pub const AX_GPIO_CTRL_GPIO1EN: u8 = 1 << 5;
+
+// PHY Power Reset Control
+pub const AX_PHYPWR_RSTCTL: u8 = 0x26;
+pub const AX_PHYPWR_RSTCTL_BZ: u16 = 0x0010;
+pub const AX_PHYPWR_RSTCTL_IPRL: u16 = 0x0020;
+pub const AX_PHYPWR_RSTCTL_AT: u16 = 0x1000;
+
+// RX Bulk IN Queue Control
+pub const AX_RX_BULKIN_QCTRL: u8 = 0x2e;
+
+// Clock Select
+pub const AX_CLK_SELECT: u8 = 0x33;
+pub const AX_CLK_SELECT_BCS: u8 = 1 << 0;
+pub const AX_CLK_SELECT_ACS: u8 = 1 << 1;
+pub const AX_CLK_SELECT_ULR: u8 = 1 << 3;
+
+
+// RX Checksum Offload Engine (COE) Control
+pub const AX_RXCOE_CTL: u8 = 0x34;
+pub const AX_RXCOE_IP: u8 = 0x01;
+pub const AX_RXCOE_TCP: u8 = 0x02;
+pub const AX_RXCOE_UDP: u8 = 0x04;
+pub const AX_RXCOE_TCPV6: u8 = 0x20;
+pub const AX_RXCOE_UDPV6: u8 = 0x40;
+
+// TX Checksum Offload Engine (COE) Control
+pub const AX_TXCOE_CTL: u8 = 0x35;
+pub const AX_TXCOE_IP: u8 = 0x01;
+pub const AX_TXCOE_TCP: u8 = 0x02;
+pub const AX_TXCOE_UDP: u8 = 0x04;
+pub const AX_TXCOE_TCPV6: u8 = 0x20;
+pub const AX_TXCOE_UDPV6: u8 = 0x40;
