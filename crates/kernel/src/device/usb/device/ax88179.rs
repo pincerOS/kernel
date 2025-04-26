@@ -161,13 +161,40 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
 
     //issue phy reset
     println!("| AXGE: Resetting PHY");
-    axge_write_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR, BMCR_RESET);
+    // axge_write_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR, BMCR_RESET);
     
-    let mut val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
-    while val & BMCR_RESET != 0 {
-        micro_delay(ms_to_micro(10));
-        val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
+    // let mut val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
+    // while val & BMCR_RESET != 0 {
+    //     micro_delay(ms_to_micro(10));
+    //     val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
+    // }
+
+        // axge_write_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR, BMCR_RESET);
+    
+    // let mut val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
+    // while val & BMCR_RESET != 0 {
+    //     micro_delay(ms_to_micro(10));
+    //     val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
+    // }
+
+    let mut reg = BMCR_RESET;
+
+    axge_miibus_writereg(device, 0, MII_BMCR, reg);
+
+    //wait 100 ms for it t ocomplete 
+    for _ in 0..100 {
+        reg = axge_miibus_readreg(device, 0, MII_BMCR);
+        if reg & BMCR_RESET == 0 {
+            break;
+        }
+        micro_delay(1000);
     }
+
+    reg &= !(BMCR_PDOWN | BMCR_ISO);
+    if axge_miibus_readreg(device, 0, MII_BMCR) != reg {
+        axge_miibus_writereg(device, 0, MII_BMCR, reg);
+    }
+    micro_delay(ms_to_micro(100));
     println!("| AXGE: PHY reset complete");
     return ResultCode::OK;
 }
@@ -316,8 +343,23 @@ fn axge_write_mem(device: &mut UsbDevice, cmd: u8, index: u16, val: u16, buf: *m
     return ResultCode::OK;
 }
 
+
+// Basic mode control register (rw)
+pub const MII_BMCR: u16 = 0x00;
+
+pub const BMCR_RESET: u16 = 0x8000;
+pub const BMCR_LOOP: u16 = 0x4000;
+pub const BMCR_SPEED0: u16 = 0x2000;
+pub const BMCR_AUTOEN: u16 = 0x1000;
+pub const BMCR_PDOWN: u16 = 0x0800;
+pub const BMCR_ISO: u16 = 0x0400;
+pub const BMCR_STARTNEG: u16 = 0x0200;
+pub const BMCR_FDX: u16 = 0x0100;
+pub const BMCR_CTEST: u16 = 0x0080;
+pub const BMCR_SPEED1: u16 = 0x0040;
+
+
 pub const PHY_BMCR: u16 = 0x00; // Basic Mode Control Register
-pub const BMCR_RESET: u16 = 0x8000; // Reset the PHY
 
 // Length of an Ethernet address
 pub const ETHER_ADDR_LEN: u8 = 6;
