@@ -27,13 +27,19 @@ pub unsafe fn axge_send_packet(
     buffer: *mut u8,
     buffer_length: u32,
 ) -> ResultCode {
-    let size = 4 + buffer_length;
+    let size = 8 + buffer_length;
 
     let mut buf = vec![0u8; size as usize];
-    buf[0] = (buffer_length & 0xFF) as u8;
-    buf[1] = ((buffer_length >> 8) & 0xFF) as u8;
-    buf[2] = 1;
-    buf[3] = 0;
+    
+    let mut tx_hdr1 = buffer_length as u32;
+    let mut tx_hdr2 = 0u32;
+
+    // if (tx_hdr1 //don't need padding
+    let b1 = tx_hdr1.to_le_bytes();
+    let b2 = tx_hdr2.to_le_bytes();
+    buf[0..4].copy_from_slice(&b1);
+    buf[4..8].copy_from_slice(&b2);
+
 
     unsafe {
         core::ptr::copy_nonoverlapping(buffer, buf.as_mut_ptr().add(4), buffer_length as usize);
@@ -160,6 +166,8 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
     //This is my attempt at htis from gpt code -> no clue if it works
 
     //issue phy reset
+    ax88179_led_setting(device);
+
     println!("| AXGE: Resetting PHY");
     // axge_write_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR, BMCR_RESET);
     
@@ -178,27 +186,62 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
     //     val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
     // }
 
-    let mut reg = BMCR_RESET;
+    // let mut reg = BMCR_RESET;
 
-    axge_miibus_writereg(device, 3, MII_BMCR, reg);
+    // axge_miibus_writereg(device, 3, MII_BMCR, reg);
 
-    //wait 100 ms for it t ocomplete 
-    for _ in 0..100 {
-        reg = axge_miibus_readreg(device, 3, MII_BMCR);
-        if reg & BMCR_RESET == 0 {
-            break;
-        }
-        micro_delay(1000);
-    }
+    // //wait 100 ms for it t ocomplete 
+    // for _ in 0..100 {
+    //     reg = axge_miibus_readreg(device, 3, MII_BMCR);
+    //     if reg & BMCR_RESET == 0 {
+    //         break;
+    //     }
+    //     micro_delay(1000);
+    // }
 
-    reg &= !(BMCR_PDOWN | BMCR_ISO);
-    if axge_miibus_readreg(device, 3, MII_BMCR) != reg {
-        axge_miibus_writereg(device, 3, MII_BMCR, reg);
-    }
-    micro_delay(ms_to_micro(1000));
+    // reg &= !(BMCR_PDOWN | BMCR_ISO);
+    // if axge_miibus_readreg(device, 3, MII_BMCR) != reg {
+    //     axge_miibus_writereg(device, 3, MII_BMCR, reg);
+    // }
+    // micro_delay(ms_to_micro(1000));
     println!("| AXGE: PHY reset complete");
     return ResultCode::OK;
 }
+
+//cmd -> cmd
+//
+pub fn ax88179_led_setting(device: &mut UsbDevice) {
+    let mut tmp = GMII_PHY_PGSEL_EXT;
+    println!("| AXGE: Setting LED settings");
+    // ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
+    //     GMII_PHY_PAGE_SELECT, 2, &tmp);
+    axge_write_cmd_2(device, AXGE_ACCESS_PHY, GMII_PHY_PGSEL_EXT,3, tmp);
+    tmp = 0x2c;
+
+    axge_write_cmd_2(device, AXGE_ACCESS_PHY, GMII_PHYPAGE as u16, 3, tmp);
+
+    let mut ledact = axge_read_cmd_2(device, AXGE_ACCESS_PHY, GMII_LED_ACT as u16, 3);
+    let mut ledlink = axge_read_cmd_2(device, AXGE_ACCESS_PHY, GMII_LED_LINK as u16, 3);
+
+    ledact &= GMII_LED_ACTIVE_MASK;
+	ledlink &= GMII_LED_LINK_MASK;
+
+    ledact |= GMII_LED0_ACTIVE | GMII_LED1_ACTIVE | GMII_LED2_ACTIVE;
+    ledlink |= GMII_LED0_LINK_10 | GMII_LED1_LINK_100 | GMII_LED2_LINK_1000;
+
+    axge_write_cmd_2(device, AXGE_ACCESS_PHY, GMII_LED_ACT as u16, 3, ledact);
+    axge_write_cmd_2(device, AXGE_ACCESS_PHY, GMII_LED_LINK as u16, 3, ledlink);
+
+    tmp = GMII_PHY_PGSEL_PAGE0;
+
+    axge_write_cmd_2(device, AXGE_ACCESS_PHY, GMII_PHY_PAGE_SELECT as u16, 3, tmp);
+
+    let ledfd = 0x10 | 0x04 | 0x01;
+    axge_write_cmd_1(device, AXGE_ACCESS_MAC, 0x73, ledfd);
+
+    println!("| AXGE: LED settings complete");
+}
+
 
 pub fn axge_miibus_readreg(device: &mut UsbDevice, phy: u16, reg: u16) -> u16 {
     let val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, reg, phy);
@@ -507,3 +550,58 @@ pub const AXGE_CONFIG_IDX: u16 = 0;
 
 // Interface index 0
 pub const AXGE_IFACE_IDX: u16 = 0;
+
+
+
+// Utility macro in C: #define BIT(x) (1 << (x))
+// In Rust (no_std), we just shift manually.
+
+pub const GMII_LED_ACT: u8 = 0x1a;
+pub const GMII_LED_ACTIVE_MASK: u16 = 0xff8f;
+pub const GMII_LED0_ACTIVE: u16 = 1 << 4;
+pub const GMII_LED1_ACTIVE: u16 = 1 << 5;
+pub const GMII_LED2_ACTIVE: u16 = 1 << 6;
+
+pub const GMII_LED_LINK: u8 = 0x1c;
+pub const GMII_LED_LINK_MASK: u16 = 0xf888;
+pub const GMII_LED0_LINK_10: u16 = 1 << 0;
+pub const GMII_LED0_LINK_100: u16 = 1 << 1;
+pub const GMII_LED0_LINK_1000: u16 = 1 << 2;
+pub const GMII_LED1_LINK_10: u16 = 1 << 4;
+pub const GMII_LED1_LINK_100: u16 = 1 << 5;
+pub const GMII_LED1_LINK_1000: u16 = 1 << 6;
+pub const GMII_LED2_LINK_10: u16 = 1 << 8;
+pub const GMII_LED2_LINK_100: u16 = 1 << 9;
+pub const GMII_LED2_LINK_1000: u16 = 1 << 10;
+
+// LED control fields
+pub const LED0_ACTIVE: u16 = 1 << 0;
+pub const LED0_LINK_10: u16 = 1 << 1;
+pub const LED0_LINK_100: u16 = 1 << 2;
+pub const LED0_LINK_1000: u16 = 1 << 3;
+pub const LED0_FD: u16 = 1 << 4;
+pub const LED0_USB3_MASK: u16 = 0x001f;
+
+pub const LED1_ACTIVE: u16 = 1 << 5;
+pub const LED1_LINK_10: u16 = 1 << 6;
+pub const LED1_LINK_100: u16 = 1 << 7;
+pub const LED1_LINK_1000: u16 = 1 << 8;
+pub const LED1_FD: u16 = 1 << 9;
+pub const LED1_USB3_MASK: u16 = 0x03e0;
+
+pub const LED2_ACTIVE: u16 = 1 << 10;
+pub const LED2_LINK_10: u16 = 1 << 11;
+pub const LED2_LINK_100: u16 = 1 << 12;
+pub const LED2_LINK_1000: u16 = 1 << 13;
+pub const LED2_FD: u16 = 1 << 14;
+pub const LED_VALID: u16 = 1 << 15;
+pub const LED2_USB3_MASK: u16 = 0x7c00;
+
+// PHY Page select
+pub const GMII_PHYPAGE: u8 = 0x1e;
+pub const GMII_PHY_PAGE_SELECT: u8 = 0x1f;
+
+pub const GMII_PHY_PGSEL_EXT: u16 = 0x0007;
+pub const GMII_PHY_PGSEL_PAGE0: u16 = 0x0000;
+pub const GMII_PHY_PGSEL_PAGE3: u16 = 0x0003;
+pub const GMII_PHY_PGSEL_PAGE5: u16 = 0x0005;
