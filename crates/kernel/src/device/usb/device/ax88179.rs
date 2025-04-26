@@ -168,7 +168,7 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
     //This is my attempt at htis from gpt code -> no clue if it works
 
     //issue phy reset
-    ax88179_led_setting(device);
+    // ax88179_led_setting(device);
 
     println!("| AXGE: Resetting PHY");
     // axge_write_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR, BMCR_RESET);
