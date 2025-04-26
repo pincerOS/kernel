@@ -4,6 +4,8 @@ use core::arch::asm;
 
 use bitflags::bitflags;
 
+use super::palloc::PAddr;
+
 bitflags! {
     // TODO: Address feature-dependent bits after TBI1
     #[derive(Clone, Copy, Debug)]
@@ -186,6 +188,35 @@ pub union TranslationDescriptor {
     pub leaf: LeafDescriptor,
 }
 
+impl core::fmt::Debug for TranslationDescriptor {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("TranslationDescriptor")
+            .field("table", unsafe { &self.table })
+            .field("leaf", unsafe { &self.leaf })
+            .finish()
+    }
+}
+
+impl From<LeafDescriptor> for TranslationDescriptor {
+    fn from(leaf: LeafDescriptor) -> Self {
+        TranslationDescriptor { leaf }
+    }
+}
+
+impl From<TableDescriptor> for TranslationDescriptor {
+    fn from(table: TableDescriptor) -> Self {
+        TranslationDescriptor { table }
+    }
+}
+
+impl TranslationDescriptor {
+    pub fn unset() -> Self {
+        Self {
+            leaf: LeafDescriptor::empty(),
+        }
+    }
+}
+
 /// A translation table.
 ///
 /// Note that alignment varies based on the configured translation process, and so must be checked at runtime.
@@ -214,38 +245,38 @@ impl LeafTable {
     }
 }
 
-enum PageSize {
+pub enum PageSize {
     Size4KiB,
     Size16KiB,
     Size64KiB,
 }
 
 impl TcrEl1 {
-    const fn set_t0sz(self, t0sz: u8) -> Self {
+    pub const fn set_t0sz(self, t0sz: u8) -> Self {
         assert!(t0sz < (1 << 6), "field size mismatch");
         self.difference(Self::T0SZ)
             .union(Self::from_bits_retain(t0sz as u64))
     }
 
-    const fn set_irgn0(self, irgn0: u8) -> Self {
+    pub const fn set_irgn0(self, irgn0: u8) -> Self {
         assert!(irgn0 < (1 << 2), "field size mismatch");
         self.difference(Self::IRGN0)
             .union(Self::from_bits_retain((irgn0 as u64) << 8))
     }
 
-    const fn set_orgn0(self, orgn0: u8) -> Self {
+    pub const fn set_orgn0(self, orgn0: u8) -> Self {
         assert!(orgn0 < (1 << 2), "field size mismatch");
         self.difference(Self::ORGN0)
             .union(Self::from_bits_retain((orgn0 as u64) << 10))
     }
 
-    const fn set_sh0(self, sh0: u8) -> Self {
+    pub const fn set_sh0(self, sh0: u8) -> Self {
         assert!(sh0 < (1 << 2), "field size mismatch");
         self.difference(Self::SH0)
             .union(Self::from_bits_retain((sh0 as u64) << 12))
     }
 
-    const fn set_tg0(self, tg0: PageSize) -> Self {
+    pub const fn set_tg0(self, tg0: PageSize) -> Self {
         let tg0 = match tg0 {
             PageSize::Size4KiB => 0b00,
             PageSize::Size16KiB => 0b10,
@@ -257,31 +288,31 @@ impl TcrEl1 {
             .union(Self::from_bits_retain((tg0 as u64) << 14))
     }
 
-    const fn set_t1sz(self, t1sz: u8) -> Self {
+    pub const fn set_t1sz(self, t1sz: u8) -> Self {
         assert!(t1sz < (1 << 6));
         self.difference(Self::T1SZ)
             .union(Self::from_bits_retain((t1sz as u64) << 16))
     }
 
-    const fn set_irgn1(self, irgn1: u8) -> Self {
+    pub const fn set_irgn1(self, irgn1: u8) -> Self {
         assert!(irgn1 < (1 << 2), "field size mismatch");
         self.difference(Self::IRGN1)
             .union(Self::from_bits_retain((irgn1 as u64) << 24))
     }
 
-    const fn set_orgn1(self, orgn1: u8) -> Self {
+    pub const fn set_orgn1(self, orgn1: u8) -> Self {
         assert!(orgn1 < (1 << 2), "field size mismatch");
         self.difference(Self::ORGN1)
             .union(Self::from_bits_retain((orgn1 as u64) << 26))
     }
 
-    const fn set_sh1(self, sh1: u8) -> Self {
+    pub const fn set_sh1(self, sh1: u8) -> Self {
         assert!(sh1 < (1 << 2), "field size mismatch");
         self.difference(Self::SH1)
             .union(Self::from_bits_retain((sh1 as u64) << 28))
     }
 
-    const fn set_tg1(self, tg1: PageSize) -> Self {
+    pub const fn set_tg1(self, tg1: PageSize) -> Self {
         let tg1 = match tg1 {
             PageSize::Size4KiB => 0b10,
             PageSize::Size16KiB => 0b01,
@@ -293,32 +324,11 @@ impl TcrEl1 {
             .union(Self::from_bits_retain((tg1 as u64) << 30))
     }
 
-    const fn set_ips(self, ips: u8) -> Self {
+    pub const fn set_ips(self, ips: u8) -> Self {
         assert!(ips < (1 << 3), "field size mismatch");
         assert!(ips != 0b111, "reserved encoding");
         self.difference(Self::IPS)
             .union(Self::from_bits_retain((ips as u64) << 32))
-    }
-
-    pub const fn default() -> Self {
-        Self::empty()
-            .set_t0sz(39) // 25 bits of address translation
-            .difference(Self::EPD0)
-            .set_irgn0(0b01)
-            .set_orgn0(0b01)
-            .set_sh0(0b10)
-            .set_tg0(PageSize::Size4KiB)
-            .set_t1sz(39) // 25 bits of address translation
-            .difference(Self::A1)
-            .difference(Self::EPD1)
-            .set_irgn1(0b01)
-            .set_orgn1(0b01)
-            .set_sh1(0b10)
-            .set_tg1(PageSize::Size4KiB)
-            .set_ips(0b101)
-            .union(Self::AS)
-            .difference(Self::TBI0)
-            .difference(Self::TBI1)
     }
 }
 
@@ -331,12 +341,21 @@ impl TableDescriptor {
     }
 
     // usize or u64
-    pub const fn get_pa(self) -> usize {
+    pub const fn get_phys_frame_num(self) -> usize {
         ((self.bits() >> 12) & ((1 << 36) - 1)) as usize
+    }
+
+    pub const fn get_pa(self) -> PAddr {
+        PAddr(self.intersection(Self::NEXT_ADDR).bits() as usize)
     }
 
     pub const fn is_valid(self) -> bool {
         self.contains(Self::VALID)
+    }
+
+    pub fn set_valid(self, valid: bool) -> Self {
+        self.difference(Self::VALID)
+            .union(Self::from_bits_retain(valid as u64))
     }
 
     // temporary, should be moved to more proper location
@@ -371,12 +390,31 @@ impl LeafDescriptor {
             .union(Self::from_bits_retain(pa as u64))
     }
 
+    //usize or u64
+    pub const fn get_phys_frame_num(self) -> usize {
+        return ((self.bits() >> 12) & ((1 << 36) - 1)) as usize;
+    }
+
+    pub const fn get_pa(self) -> PAddr {
+        PAddr(self.intersection(Self::OA).bits() as usize)
+    }
+
     pub const fn clear_pxn(self) -> Self {
         self.difference(Self::PXN)
     }
 
     pub const fn is_valid(self) -> bool {
         self.contains(Self::VALID)
+    }
+
+    pub fn set_valid(self, valid: bool) -> Self {
+        self.difference(Self::VALID)
+            .union(Self::from_bits_retain(valid as u64))
+    }
+
+    pub fn set_user_permissions(&mut self, val: bool) -> Self {
+        self.difference(Self::UNPRIVILEGED_ACCESS)
+            .union(Self::from_bits_retain((val as u64) << 6))
     }
 
     pub const fn set_mair(self, mair: u8) -> Self {

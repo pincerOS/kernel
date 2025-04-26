@@ -105,6 +105,10 @@ impl UARTInner {
         (unsafe { self.reg(Self::UART_FR).read() } & (1 << 4) > 0)
     }
     pub fn writec(&mut self, c: u8) {
+        // if super::LED_OUT.is_initialized() {
+        //     super::LED_OUT.get().put(c);
+        //     // crate::sync::spin_sleep(33 * 1000);
+        // }
         unsafe {
             while self.transmit_fifo_full() {}
             self.reg(Self::UART_DR).write(c as u32);
@@ -125,6 +129,21 @@ impl UARTInner {
             }
         }
     }
+
+    pub fn write_bytes(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.writec(*b);
+        }
+        // if super::CONSOLE.is_initialized() {
+        //     let mut console = super::CONSOLE.get().lock();
+        //     console.input(bytes);
+        //     if bytes.contains(&b'\n') {
+        //         console.render();
+        //     }
+        //     drop(console);
+        //     spin_sleep(3000);
+        // }
+    }
 }
 
 unsafe impl Send for UARTInner {}
@@ -141,28 +160,11 @@ impl core::fmt::Write for UARTInner {
 impl core::fmt::Write for &UARTLock {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         let mut inner = self.lock();
-        for b in s.bytes() {
-            inner.writec(b);
-        }
+        inner.write_bytes(s.as_bytes());
         Ok(())
     }
     fn write_fmt(&mut self, args: core::fmt::Arguments<'_>) -> core::fmt::Result {
         let mut inner = self.lock();
         inner.write_fmt(args)
     }
-}
-
-#[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => {{
-        use core::fmt::Write;
-        write!($crate::device::uart::UART.get(), $($arg)*).ok();
-    }};
-}
-#[macro_export]
-macro_rules! println {
-    ($($arg:tt)*) => {{
-        use core::fmt::Write;
-        writeln!($crate::device::uart::UART.get(), $($arg)*).ok();
-    }};
 }

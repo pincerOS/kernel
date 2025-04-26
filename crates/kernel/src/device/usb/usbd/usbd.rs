@@ -27,8 +27,12 @@ use super::device::*;
 use super::pipe::*;
 use super::request::*;
 use crate::device::usb::usbd::endpoint::*;
+use crate::device::usb::usbd::transfer::*;
 
 use core::ptr;
+
+//TODO: This needs checking under load
+pub static USB_TRANSFER_QUEUE: UsbTransferQueue = UsbTransferQueue::new();
 
 /** The default timeout in ms of control transfers. */
 pub const ControlMessageTimeout: usize = 10;
@@ -51,13 +55,8 @@ pub fn UsbInitialise(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
         return ResultCode::ErrorCompiler;
     }
 
-    if HcdInitialize(bus, base_addr) != ResultCode::OK {
-        println!("Error: HcdInitialize failed");
-        return ResultCode::ErrorDevice;
-    }
-
-    if HcdStart(bus) != ResultCode::OK {
-        println!("Error: HcdStart failed");
+    if DwcInit(bus, base_addr) != ResultCode::OK {
+        println!("Error: DwcInit failed");
         return ResultCode::ErrorDevice;
     }
 
@@ -70,54 +69,85 @@ pub fn UsbInitialise(bus: &mut UsbBus, base_addr: *mut ()) -> ResultCode {
     result
 }
 
-pub unsafe fn UsbBulkMessage(
+pub unsafe fn UsbSendBulkMessage(
     device: &mut UsbDevice,
     pipe: UsbPipeAddress,
-    buffer: *mut u8,
+    buffer: Box<[u8]>,
     buffer_length: u32,
     packet_id: PacketId,
     device_endpoint_number: u8,
     timeout_: u32,
 ) -> ResultCode {
-    let mut available_channel = dwc_otg_get_active_channel();
-    while available_channel == ChannelCount as u8 {
-        available_channel = dwc_otg_get_active_channel();
-    } //TODO: Make a queue system instead of busy waiting
+    let callback_fn = if pipe.direction == UsbDirection::In {
+        finish_bulk_endpoint_callback_in
+    } else {
+        finish_bulk_endpoint_callback_out
+    };
+
+    let b = Box::new(UsbXfer {
+        endpoint_descriptor: endpoint_descriptor {
+            endpoint_address: pipe.end_point,
+            endpoint_direction: pipe.direction,
+            endpoint_type: pipe.transfer_type,
+            max_packet_size: pipe.max_size,
+            device_endpoint_number: device_endpoint_number,
+            device: device,
+            device_number: device.number,
+            device_speed: device.speed,
+            buffer_length: buffer_length,
+            // buffer: buffer,
+            timeout: timeout_,
+        },
+        buffer: Some(buffer),
+        buffer_length: buffer_length,
+        callback: Some(callback_fn),
+        packet_id: packet_id,
+        pipe: pipe,
+    });
+
+    let result;
+    result = USB_TRANSFER_QUEUE.add_transfer(b, pipe.transfer_type);
+    if result.is_err() {
+        panic!("| USBD: Failed to add transfer to queue");
+    }
+
+    let available_channel = dwc_otg_get_active_channel();
+    if available_channel == ChannelCount as u8 {
+        //no available channel at the moment
+        return ResultCode::OK;
+    }
 
     unsafe {
-        DWC_CHANNEL_CALLBACK.endpoint_descriptors[available_channel as usize] =
-            Some(endpoint_descriptor {
-                endpoint_address: pipe.end_point,
-                endpoint_direction: pipe.direction,
-                endpoint_type: pipe.transfer_type,
-                max_packet_size: pipe.max_size,
-                device_endpoint_number: device_endpoint_number,
-                device: device,
-                device_number: device.number,
-                device_speed: device.speed,
-                buffer_length: buffer_length,
-                buffer: buffer,
-                channel: available_channel,
-                timeout: timeout_,
-            });
+        let transfer = USB_TRANSFER_QUEUE.get_transfer();
 
-        if pipe.direction == UsbDirection::Out {
-            DWC_CHANNEL_CALLBACK.callback[available_channel as usize] =
-                Some(finish_bulk_endpoint_callback_out);
-        } else {
-            DWC_CHANNEL_CALLBACK.callback[available_channel as usize] =
-                Some(finish_bulk_endpoint_callback_in);
+        if transfer.is_none() {
+            dwc_otg_free_channel(available_channel as u32);
+            return ResultCode::OK;
         }
+
+        return UsbBulkMessage(device, transfer.unwrap(), available_channel);
+    }
+}
+
+pub unsafe fn UsbBulkMessage(
+    device: &mut UsbDevice,
+    usb_xfer: Box<UsbXfer>,
+    channel: u8,
+) -> ResultCode {
+    unsafe {
+        DWC_CHANNEL_CALLBACK.endpoint_descriptors[channel as usize] =
+            Some(usb_xfer.endpoint_descriptor);
+        DWC_CHANNEL_CALLBACK.callback[channel as usize] = usb_xfer.callback;
     }
 
     let result = unsafe {
         HcdSubmitBulkMessage(
             device,
-            available_channel,
-            pipe,
-            buffer,
-            buffer_length,
-            packet_id,
+            channel,
+            usb_xfer.pipe,
+            usb_xfer.buffer,
+            usb_xfer.buffer_length,
+            usb_xfer.packet_id,
         )
     };
 
@@ -129,39 +159,66 @@ pub unsafe fn UsbBulkMessage(
     return result;
 }
 
-pub unsafe fn UsbInterruptMessage(
+pub unsafe fn UsbSendInterruptMessage(
     device: &mut UsbDevice,
     pipe: UsbPipeAddress,
-    buffer: *mut u8,
     buffer_length: u32,
     packet_id: PacketId,
     _timeout_: u32,
-    callback: fn(endpoint_descriptor, u32),
+    callback: fn(endpoint_descriptor, u32, u8) -> bool,
     endpoint: endpoint_descriptor,
 ) -> ResultCode {
-    let mut available_channel = dwc_otg_get_active_channel();
-    while available_channel == ChannelCount as u8 {
-        available_channel = dwc_otg_get_active_channel();
-    } //TODO: Make a queue system instead of busy waiting
+    let b = Box::new(UsbXfer {
+        endpoint_descriptor: endpoint,
+        buffer: None,
+        buffer_length: buffer_length,
+        callback: Some(callback),
+        packet_id: packet_id,
+        pipe: pipe,
+    });
 
-    let new_endpoint = endpoint_descriptor {
-        channel: available_channel,
-        ..endpoint
-    }; //TODO: make a better way to do edit endpoint
+    let result;
+    result = USB_TRANSFER_QUEUE.add_transfer(b, pipe.transfer_type);
+    if result.is_err() {
+        panic!("| USBD: Failed to add transfer to queue");
+    }
+
+    let available_channel = dwc_otg_get_active_channel();
+    if available_channel == ChannelCount as u8 {
+        //no available channel at the moment
+        return ResultCode::OK;
+    }
 
     unsafe {
-        DWC_CHANNEL_CALLBACK.callback[available_channel as usize] = Some(callback);
-        DWC_CHANNEL_CALLBACK.endpoint_descriptors[available_channel as usize] = Some(new_endpoint);
+        let transfer = USB_TRANSFER_QUEUE.get_transfer();
+
+        if transfer.is_none() {
+            dwc_otg_free_channel(available_channel as u32);
+            return ResultCode::OK;
+        }
+
+        return UsbInterruptMessage(device, transfer.unwrap(), available_channel);
+    }
+}
+
+pub unsafe fn UsbInterruptMessage(
+    device: &mut UsbDevice,
+    usb_xfer: Box<UsbXfer>,
+    channel: u8,
+) -> ResultCode {
+    unsafe {
+        DWC_CHANNEL_CALLBACK.callback[channel as usize] = Some(usb_xfer.callback.unwrap());
+        DWC_CHANNEL_CALLBACK.endpoint_descriptors[channel as usize] =
+            Some(usb_xfer.endpoint_descriptor);
     }
 
     let result = unsafe {
         HcdSubmitInterruptMessage(
             device,
-            available_channel,
-            pipe,
-            buffer,
-            buffer_length,
-            packet_id,
+            channel,
+            usb_xfer.pipe,
+            usb_xfer.buffer_length,
+            usb_xfer.packet_id,
         )
     };
 
@@ -244,12 +301,19 @@ pub unsafe fn UsbGetDescriptor(
     };
 
     if result != ResultCode::OK {
-        println!("| USBD: Failed to get descriptor");
+        println!(
+            "| USBD: Failed to get descriptor {} {}",
+            device.last_transfer, minimumLength
+        );
         return result;
     }
 
     if device.last_transfer < minimumLength {
-        println!("| USBD: Descriptor too short");
+        println!(
+            "| USBD: Descriptor too short {} {}",
+            device.last_transfer, minimumLength
+        );
+        printDWCErrors(0);
         return ResultCode::ErrorDevice;
     }
 
@@ -294,7 +358,6 @@ fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
         };
     } else if device.speed == UsbSpeed::Full {
         device.descriptor.max_packet_size0 = 64;
-        // device.descriptor.max_packet_size0 = 8;
         result = unsafe {
             UsbGetDescriptor(
                 device,
@@ -308,6 +371,8 @@ fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
             )
         };
         if result != ResultCode::OK {
+            //print the device descriptor
+            println!("| USBD: failed device descriptor {:?}", device.descriptor);
             return result;
         }
 
@@ -328,7 +393,6 @@ fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
         };
     } else {
         device.descriptor.max_packet_size0 = 64;
-        // device.descriptor.max_packet_size0 = 8;
         return unsafe {
             UsbGetDescriptor(
                 device,
@@ -345,7 +409,6 @@ fn UsbReadDeviceDescriptor(device: &mut UsbDevice) -> ResultCode {
 }
 
 fn UsbSetAddress(device: &mut UsbDevice, address: u8) -> ResultCode {
-    // println!("| USBD: Set device address to {}", address);
     if device.status != UsbDeviceStatus::Default {
         println!("| USBD: Device not in default state");
         return ResultCode::ErrorDevice;
@@ -562,33 +625,32 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
 pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
     let bus = unsafe { &mut *(device.bus) };
 
-    // println!("| USBD: Attaching device {}", device.number);
-
     let address = device.number;
     device.number = 0;
 
     let mut result = UsbReadDeviceDescriptor(device);
-    //print USB device descriptor
-    // println!("| USBD: Device descriptor:\n {:#?}", device.descriptor);
+
     if result != ResultCode::OK {
         println!("| USBD: Failed to read device descriptor");
+
         return result;
     }
+
     device.status = UsbDeviceStatus::Default;
 
-    if let Some(parent) = device.parent {
-        unsafe {
-            if let Some(device_child_reset) = (*parent).device_child_reset {
-                result = device_child_reset(&mut *parent, device);
-                if result != ResultCode::OK {
-                    println!("| USBD: Failed to reset parent device");
-                    return result;
-                }
-            }
-        }
-    } else {
-        // println!("| USBD: No parent device");
-    }
+    // if let Some(parent) = device.parent {
+    //     unsafe {
+    //         if let Some(device_child_reset) = (*parent).device_child_reset {
+    //             result = device_child_reset(&mut *parent, device);
+    //             if result != ResultCode::OK {
+    //                 println!("| USBD: Failed to reset parent device");
+    //                 return result;
+    //             }
+    //         }
+    //     }
+    // } else {
+    //     println!("| USBD: No parent device");
+    // }
 
     result = UsbSetAddress(device, address as u8);
     if result != ResultCode::OK {
@@ -599,11 +661,12 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
 
     device.number = address;
     result = UsbReadDeviceDescriptor(device);
+
     if result != ResultCode::OK {
         println!("| USBD: Failed to read device descriptor");
         return result;
     }
-    // println!("| USBD: Device descriptor:\n {:#?}", device.descriptor);
+    println!("| USBD: Device descriptor: {:?}", device.descriptor);
 
     let vendor_id = device.descriptor.vendor_id;
     let product_id = device.descriptor.product_id;
@@ -618,10 +681,10 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
         return result;
     }
 
-    // println!(
-    //     "\n Device interface class: {} at device number {}\n",
-    //     device.interfaces[0].class as u16, device.number
-    // );
+    println!(
+        "\n Device interface class: {} at device number {}\n",
+        device.interfaces[0].class as u16, device.number
+    );
 
     if (device.interfaces[0].class as usize) < INTERFACE_CLASS_ATTACH_COUNT {
         // for j in 0..device.configuration.interface_count {
@@ -636,7 +699,6 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
         //         );
         //     }
         // }
-
         if let Some(class_attach) = bus.interface_class_attach[device.interfaces[0].class as usize]
         {
             result = class_attach(device, 0);
@@ -655,18 +717,42 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
     return ResultCode::OK;
 }
 
-pub fn UsbAllocateDevice(devices: &mut Box<UsbDevice>) -> ResultCode {
+pub fn UsbAllocateDevice(mut devices: Box<UsbDevice>) -> ResultCode {
     let bus = unsafe { &mut *(devices.bus) };
     let device = devices.as_mut();
     device.status = UsbDeviceStatus::Attached;
     device.error = UsbTransferError::NoError;
     device.port_number = 0;
     device.configuration_index = 0xff;
+    device.descriptor.max_packet_size0 = 8;
 
     for number in 0..MaximumDevices {
         if bus.devices[number].is_none() {
             // println!("| USBD: Allocating device {}", number);
             device.number = number as u32 + 1;
+            if device.number == 1 {
+                //Roothub -> get speed
+                use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HPRT;
+                let hprt = read_volatile(DOTG_HPRT);
+                let _ = match (hprt >> 17) & 0b11 {
+                    0b00 => {
+                        device.speed = UsbSpeed::High;
+                        // device.speed = UsbSpeed::Full;
+                        "High-Speed"
+                    }
+                    0b01 => {
+                        device.speed = UsbSpeed::Full;
+                        "Full-Speed"
+                    }
+                    0b10 => {
+                        device.speed = UsbSpeed::Low;
+                        "Low-Speed"
+                    }
+                    _ => {
+                        panic!("| USBD: Unknown speed")
+                    }
+                };
+            }
             bus.devices[number] = Some(devices);
             break;
         }
@@ -682,16 +768,16 @@ fn UsbAttachRootHub(bus: &mut UsbBus) -> ResultCode {
         return ResultCode::ErrorDevice;
     }
 
-    let mut device = unsafe { Box::new(UsbDevice::new(bus, 0 as u32)) };
+    let device = unsafe { Box::new(UsbDevice::new(bus, 0 as u32)) };
 
-    if UsbAllocateDevice(&mut device) != ResultCode::OK {
+    if UsbAllocateDevice(device) != ResultCode::OK {
         println!("Error: UsbAllocateDevice failed");
         return ResultCode::ErrorMemory;
     }
 
-    unsafe { (*bus.devices[0].unwrap()).status = UsbDeviceStatus::Powered };
+    bus.devices[0].as_mut().unwrap().status = UsbDeviceStatus::Powered;
 
-    return UsbAttachDevice(unsafe { &mut (*bus.devices[0].unwrap()) });
+    return UsbAttachDevice(&mut (bus.devices[0].as_mut().unwrap()));
 }
 
 // pub fn UsbCheckForChange(bus: &mut UsbBus) {

@@ -15,8 +15,7 @@ use core::slice;
 
 use i_mode::{EXT2_S_IFDIR, EXT2_S_IFREG};
 
-#[cfg(test)]
-#[cfg(feature = "std")]
+#[cfg(all(test, feature = "std"))]
 mod tests;
 
 #[cfg(feature = "std")]

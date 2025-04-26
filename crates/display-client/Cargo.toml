@@ -1,0 +1,11 @@
+[package]
+name = "display-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+display-proto = { path = "../display-proto" }
+ulib = { path = "../ulib" }
+
+[dev-dependencies]
+ulib = { path = "../ulib", features = ["test"] }

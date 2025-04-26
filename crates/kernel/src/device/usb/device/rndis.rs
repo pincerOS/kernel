@@ -10,11 +10,12 @@ use crate::device::usb::types::*;
 use crate::device::usb::usbd::device::*;
 use crate::device::usb::usbd::pipe::*;
 use crate::device::usb::usbd::request::*;
-use crate::device::usb::usbd::usbd::UsbBulkMessage;
+use crate::device::usb::usbd::usbd::UsbSendBulkMessage;
 use crate::device::usb::UsbControlMessage;
 
 use crate::device::usb::device::net::*;
 use crate::device::usb::PacketId;
+use alloc::boxed::Box;
 use alloc::vec;
 
 const ControlTimeoutPeriod: u32 = 10;
@@ -383,7 +384,7 @@ pub unsafe fn rndis_send_packet(
     }
 
     let result = unsafe {
-        UsbBulkMessage(
+        UsbSendBulkMessage(
             device,
             UsbPipeAddress {
                 transfer_type: UsbTransfer::Bulk,
@@ -394,7 +395,7 @@ pub unsafe fn rndis_send_packet(
                 max_size: size_from_number(64),
                 _reserved: 0,
             },
-            complete_buffer.as_mut_ptr(),
+            complete_buffer.into_boxed_slice(),
             size as u32,
             PacketId::Data0,
             1,
@@ -412,11 +413,11 @@ pub unsafe fn rndis_send_packet(
 
 pub unsafe fn rndis_receive_packet(
     device: &mut UsbDevice,
-    buffer: *mut u8,
+    buffer: Box<[u8]>,
     buffer_length: u32,
 ) -> ResultCode {
     let result = unsafe {
-        UsbBulkMessage(
+        UsbSendBulkMessage(
             device,
             UsbPipeAddress {
                 transfer_type: UsbTransfer::Bulk,

@@ -23,7 +23,7 @@ use bitflags::bitflags;
     11.23.2.1.
 */
 #[repr(C, packed)]
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct HubDescriptor {
     pub DescriptorLength: u8,           // +0x0
     pub DescriptorType: DescriptorType, // +0x1

@@ -1,7 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/console",
     "crates/device-tree",
+    "crates/display-client",
+    "crates/display-proto",
+    "crates/display-server",
     "crates/elf",
     "crates/endian",
     "crates/filesystem",
@@ -9,6 +13,7 @@ members = [
     "crates/initfs",
     "crates/kernel",
     "crates/lz4",
+    "crates/shell",
     "crates/ulib",
 ]
 
@@ -19,6 +24,7 @@ incremental = false
 debug = 2
 panic = "abort"
 debug-assertions = true
+overflow-checks = true
 
 [profile.dev]
 incremental = false

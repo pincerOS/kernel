@@ -1,8 +1,9 @@
 use core::arch::{asm, global_asm};
 
-use super::context::{deschedule_thread, Context, DescheduleAction, CORES};
+use super::context::Context;
 use crate::arch::halt;
 use crate::sync::HandlerTableInner;
+use crate::syscall::proc::exit_current_user_thread;
 use crate::uart;
 
 global_asm!(
@@ -210,6 +211,14 @@ static EXCEPTION_CLASS: [&str; 64] = {
     arr
 };
 
+// See D23.2 General system control registers; ESR_EL1
+// (page 7502 on my version)
+bitflags::bitflags! {
+    pub struct DataAbortISS: u32 {
+        const WRITE = 1 << 6;
+    }
+}
+
 unsafe fn read_far_el1() -> usize {
     let far: usize;
     unsafe {
@@ -255,6 +264,8 @@ unsafe extern "C" fn exception_handler_example(
         println!("{:#?}", ctx);
     }
 
+    // crate::device::LED_OUT.get().put(exception_class as u8);
+
     match exception_class {
         _ => halt(),
     }
@@ -268,6 +279,7 @@ unsafe extern "C" fn exception_handler_unhandled(
     _esr: u64,
     _arg: u64,
 ) -> *mut Context {
+    // crate::device::LED_OUT.get().put(0b11100111);
     halt();
 }
 
@@ -288,6 +300,9 @@ unsafe extern "C" fn exception_handler_user(
         .unwrap_or(&"unspecified");
     let _insn_len = if ((esr >> 25) & 1) != 0 { 4 } else { 2 };
 
+    let _iss2 = (esr >> 32) & ((1 << 23) - 1);
+    let iss = esr & ((1 << 25) - 1);
+
     match exception_class {
         0x15 => {
             // supervisor call
@@ -300,11 +315,13 @@ unsafe extern "C" fn exception_handler_user(
                 }
                 println!("Unknown syscall number {arg:#x}; stopping user thread");
 
-                let thread = CORES.with_current(|core| core.thread.take());
-                let mut thread = thread.expect("usermode syscall without active thread");
-                unsafe { thread.save_context(ctx.into(), false) };
-                unsafe { deschedule_thread(DescheduleAction::FreeThread, Some(thread)) }
+                unsafe { exit_current_user_thread(ctx, (-1i32) as u32) }
             }
+        }
+        0x24 => {
+            // data abort from lower EL
+            let iss = DataAbortISS::from_bits_retain(iss as u32);
+            crate::process::mem::page_fault_handler(ctx, far, iss)
         }
         _ => {
             if uart::UART.is_initialized() {
@@ -312,7 +329,8 @@ unsafe extern "C" fn exception_handler_user(
                 println!("ttbr0={ttbr0:#010x}");
                 println!("{:#?}", ctx);
             }
-            halt()
+
+            unsafe { exit_current_user_thread(ctx, (-2i32) as u32) }
         }
     }
 }

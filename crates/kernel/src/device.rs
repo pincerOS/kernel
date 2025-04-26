@@ -1,19 +1,22 @@
 #[macro_use]
-pub mod uart;
+pub mod macros;
+
 pub mod bcm2835_aux;
 pub mod bcm2836_intc;
 pub mod gic;
 pub mod gpio;
 pub mod mailbox;
 pub mod rng;
+pub mod sdcard;
 pub mod system_timer;
+pub mod uart;
 pub mod usb;
 pub mod watchdog;
 
+use crate::device::usb::usbd::device::UsbBus;
 use crate::memory;
 use crate::memory::{map_device, map_device_block};
-use crate::sync::UnsafeInit;
-use crate::SpinLock;
+use crate::sync::{InterruptSpinLock, UnsafeInit};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use device_tree::format::StructEntry;
@@ -91,38 +94,21 @@ pub fn find_device_addr(iter: MappingIterator) -> Result<Option<(usize, usize)>,
     Ok(None)
 }
 
-pub static WATCHDOG: UnsafeInit<SpinLock<watchdog::bcm2835_wdt_driver>> =
+pub static WATCHDOG: UnsafeInit<InterruptSpinLock<watchdog::bcm2835_wdt_driver>> =
     unsafe { UnsafeInit::uninit() };
 
 type InitTask = Box<dyn Fn() + Send + Sync>;
 pub static PER_CORE_INIT: UnsafeInit<Vec<InitTask>> = unsafe { UnsafeInit::uninit() };
 
-pub static GPIO: UnsafeInit<SpinLock<gpio::bcm2711_gpio_driver>> = unsafe { UnsafeInit::uninit() };
-pub static MAILBOX: UnsafeInit<SpinLock<mailbox::VideoCoreMailbox>> =
+pub static GPIO: UnsafeInit<InterruptSpinLock<gpio::bcm2711_gpio_driver>> =
     unsafe { UnsafeInit::uninit() };
+pub static MAILBOX: UnsafeInit<InterruptSpinLock<mailbox::VideoCoreMailbox>> =
+    unsafe { UnsafeInit::uninit() };
+
+pub static BOX: UnsafeInit<Box<UsbBus>> = unsafe { UnsafeInit::uninit() };
 
 pub fn init_devices(tree: &DeviceTree<'_>) {
     let mut init_fns: Vec<InitTask> = Vec::new();
-
-    let mut uarts = discover_compatible(tree, b"arm,pl011").unwrap();
-    {
-        let uart = uarts.next().unwrap();
-        let (uart_addr, _) = find_device_addr(uart).unwrap().unwrap();
-        let uart_base = unsafe { map_device(uart_addr) }.as_ptr();
-
-        unsafe { uart::UART.init(uart::UARTLock::new(uart::UARTInner::new(uart_base))) };
-        println!("| initialized UART");
-    }
-
-    let mut miniuarts = discover_compatible(tree, b"brcm,bcm2835-aux").unwrap();
-    if let Some(miniuart) = miniuarts.next() {
-        use core::fmt::Write;
-        let (miniuart_addr, _) = find_device_addr(miniuart).unwrap().unwrap();
-        let miniuart_base = unsafe { map_device(miniuart_addr) }.as_ptr();
-        let mut miniuart = unsafe { bcm2835_aux::MiniUart::new(miniuart_base) };
-        writeln!(miniuart, "| initialized Mini UART (bcm2835-aux)").ok();
-        println!("| initialized Mini UART");
-    }
 
     {
         let watchdog = discover_compatible(tree, b"brcm,bcm2835-pm-wdt")
@@ -134,10 +120,10 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
 
         unsafe {
             let watchdog = watchdog::bcm2835_wdt_driver::init(watchdog_base);
-            WATCHDOG.init(SpinLock::new(watchdog));
+            WATCHDOG.init(InterruptSpinLock::new(watchdog));
         }
-        println!("| initialized power managment watchdog");
-        println!("| last reset: {:#010x}", WATCHDOG.get().lock().last_reset());
+        // println!("| initialized power managment watchdog");
+        // println!("| last reset: {:#010x}", WATCHDOG.get().lock().last_reset());
     }
 
     {
@@ -148,8 +134,74 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let (mailbox_addr, _) = find_device_addr(mailbox).unwrap().unwrap();
         let mailbox_base = unsafe { memory::map_device(mailbox_addr) }.as_ptr();
         unsafe {
-            MAILBOX.init(SpinLock::new(mailbox::VideoCoreMailbox::init(mailbox_base)));
+            MAILBOX.init(InterruptSpinLock::new(mailbox::VideoCoreMailbox::init(
+                mailbox_base,
+            )));
         }
+    }
+
+    {
+        let gpio = discover_compatible(tree, b"brcm,bcm2711-gpio")
+            .unwrap()
+            .next()
+            .unwrap();
+        let (gpio_addr, _) = find_device_addr(gpio).unwrap().unwrap();
+        let gpio_base = unsafe { map_device(gpio_addr) }.as_ptr();
+        let gpio = unsafe { gpio::bcm2711_gpio_driver::init(gpio_base) };
+        unsafe { GPIO.init(InterruptSpinLock::new(gpio)) };
+    }
+
+    let mut uarts = discover_compatible(tree, b"arm,pl011").unwrap();
+    {
+        let uart = uarts.next().unwrap();
+        let (uart_addr, _) = find_device_addr(uart).unwrap().unwrap();
+        let uart_base = unsafe { map_device(uart_addr) }.as_ptr();
+
+        unsafe { uart::UART.init(uart::UARTLock::new(uart::UARTInner::new(uart_base))) };
+        // println!("| initialized UART");
+    }
+
+    // TODO: don't hardcode which uart is used for prints
+
+    let mut miniuarts = discover_compatible(tree, b"brcm,bcm2835-aux").unwrap();
+    if let Some(miniuart) = miniuarts.next() {
+        let (miniuart_addr, _) = find_device_addr(miniuart).unwrap().unwrap();
+        let miniuart_base = unsafe { map_device(miniuart_addr) }.as_ptr();
+        let miniuart = unsafe { bcm2835_aux::MiniUart::new(miniuart_base) };
+        unsafe { bcm2835_aux::MINI_UART.init(bcm2835_aux::MiniUartLock::new(miniuart)) };
+        println!("| initialized Mini UART");
+    }
+
+    {
+        let mut guard = MAILBOX.get().lock();
+        // TODO: this freezes after clock 11?
+        // for clock in 0x01..=0x0E {
+        //     // let state = unsafe { guard.get_property(mailbox::PropGetClockState { id: clock }).unwrap() };
+        //     let rate = unsafe { guard.get_property(mailbox::PropGetClockRate { id: clock }).unwrap() };
+        //     // let measured = unsafe { guard.get_property(mailbox::PropGetClockRateMeasured { id: clock }).unwrap() };
+        //     let min = unsafe { guard.get_property(mailbox::PropGetMinClockRate { id: clock }).unwrap() };
+        //     let max = unsafe { guard.get_property(mailbox::PropGetMaxClockRate { id: clock }).unwrap() };
+        //     println!("Clock {clock}: state = {}, rate = {}, measured = {}, min = {}, max = {}", 0, rate.rate, 0, min.rate, max.rate);
+        // }
+
+        let clock_rate_req = mailbox::PropGetClockRate {
+            id: mailbox::CLOCK_ARM,
+        };
+        let cur_rate = unsafe { guard.get_property(clock_rate_req).unwrap() }.rate;
+        let max_rate_req = mailbox::PropGetMaxClockRate {
+            id: mailbox::CLOCK_ARM,
+        };
+        let _max_rate = unsafe { guard.get_property(max_rate_req).unwrap() }.rate;
+        let target_rate = 1_500_000_000;
+
+        let set_rate_req = mailbox::PropSetClockRate {
+            id: mailbox::CLOCK_ARM,
+            rate: target_rate,
+            skip_setting_turbo: 0,
+        };
+        println!("| Changing arm clock from {cur_rate} to {target_rate}");
+        let new_rate = unsafe { guard.get_property(set_rate_req).unwrap() };
+        println!("| Set clock rate; new rate = {}", new_rate.rate);
     }
 
     if let Some(gic) = discover_compatible(tree, b"arm,gic-400").unwrap().next() {
@@ -158,7 +210,6 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         let gic_base = unsafe { map_device_block(gic_addr, 0x8000) }.as_ptr();
 
         println!("| GIC-400 addr: {:#010x}", gic_addr);
-        println!("| GIC-400 base: {:#010x}", gic_base as usize);
 
         let gic = unsafe { gic::Gic400Driver::init(gic_base) };
         unsafe { gic::GIC.init(gic) };
@@ -187,6 +238,35 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         }
     }
 
+    // println!("| acquiring framebuffer");
+    // let mut surface = unsafe { MAILBOX.get().lock().map_framebuffer_kernel(640, 480) };
+    // println!("| surface constructed");
+    // let (width, height) = surface.dimensions();
+
+    // for i in 0.. {
+    //     println!("| drawing frame");
+    //     let color = 0xFFFF0000 | (i as i32 % 512 - 256).abs().min(255) as u32;
+    //     let color2 = 0xFF0000FF | (((i as i32 % 512 - 256).abs().min(255) as u32) << 16);
+    //     let stripe_width = width / 20;
+    //     let offset = i * (120 / surface.framerate());
+    //     for r in 0..height {
+    //         for c in 0..width {
+    //             let cluster = (c + offset % (2 * stripe_width)) / stripe_width;
+    //             let color = if cluster % 2 == 0 { color } else { color2 };
+    //             surface[(r, c)] = color;
+    //         }
+    //     }
+
+    //     surface.present();
+    // }
+    // let console = console::init();
+    // unsafe { CONSOLE.init(InterruptSpinLock::new(console)) };
+    // for i in 0.. {
+    // println!("Line {i}");
+    // console.input(alloc::format!("Line {i}\n").as_bytes());
+    // console.render();
+    // }
+
     {
         println!("| initializing timer");
         let timer_iter = discover_compatible(tree, b"brcm,bcm2835-system-timer")
@@ -201,31 +281,23 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         println!("| timer initialized, time: {time}");
     }
 
-    {
-        let gpio = discover_compatible(tree, b"brcm,bcm2711-gpio")
-            .unwrap()
-            .next()
-            .unwrap();
-        let (gpio_addr, _) = find_device_addr(gpio).unwrap().unwrap();
-        let gpio_base = unsafe { map_device(gpio_addr) }.as_ptr();
-        println!("| GPIO controller addr: {:#010x}", gpio_addr);
-        println!("| GPIO controller base: {:#010x}", gpio_base as usize);
-        let gpio = unsafe { gpio::bcm2711_gpio_driver::init_with_defaults(gpio_base, true) };
-        unsafe { GPIO.init(SpinLock::new(gpio)) };
-        println!("| initialized GPIO");
-    }
-
     if ENABLE_USB {
         println!("| Initializing USB");
-        let usb = discover_compatible(tree, b"brcm,bcm2708-usb")
+        let usb = discover_compatible(tree, b"brcm,bcm2835-usb")
             .unwrap()
             .next()
+            .or_else(|| {
+                discover_compatible(tree, b"brcm,bcm2708-usb")
+                    .unwrap()
+                    .next()
+            })
             .unwrap();
 
         let (usb_addr, _) = find_device_addr(usb).unwrap().unwrap();
         let usb_base = unsafe { map_device_block(usb_addr, 0x11000) }.as_ptr(); //size is from core gloabl to dev ep 15
 
-        let _bus = usb::usb_init(usb_base);
+        let bus = usb::usb_init(usb_base);
+        unsafe { BOX.init(bus) };
     }
 
     // Set up the interrupt controllers to preempt on the arm generic
@@ -323,6 +395,7 @@ pub fn enable_cpus(tree: &device_tree::DeviceTree<'_>, start_fn: unsafe extern "
 
                 let start = unsafe { map_physical(release_addr, 8).cast::<u64>() };
                 unsafe { core::ptr::write_volatile(start.as_ptr(), physical_start) };
+                unsafe { memory::invalidate_physical_buffer_for_device(start.as_ptr().cast(), 8) };
 
                 core_count += 1;
             }

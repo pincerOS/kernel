@@ -4,8 +4,8 @@
 extern crate alloc;
 extern crate kernel;
 
-use device::{discover_compatible, find_device_addr, mailbox};
-use kernel::*;
+use device::mailbox;
+use kernel::{device::MAILBOX, *};
 
 #[no_mangle]
 extern "Rust" fn kernel_main(tree: device_tree::DeviceTree<'static>) {
@@ -16,17 +16,9 @@ extern "Rust" fn kernel_main(tree: device_tree::DeviceTree<'static>) {
     crate::event::thread::stop();
 }
 
-async fn main(tree: device_tree::DeviceTree<'static>) {
-    let mailbox = discover_compatible(&tree, b"brcm,bcm2835-mbox")
-        .unwrap()
-        .next()
-        .unwrap();
-    let (mailbox_addr, _) = find_device_addr(mailbox).unwrap().unwrap();
-    let mailbox_base = unsafe { memory::map_device(mailbox_addr) }.as_ptr();
-    let mut mailbox = unsafe { mailbox::VideoCoreMailbox::init(mailbox_base) };
-
+async fn main(_tree: device_tree::DeviceTree<'static>) {
     println!("| acquiring framebuffer");
-    let mut surface = unsafe { mailbox.get_framebuffer() };
+    let mut surface = unsafe { MAILBOX.get().lock().map_framebuffer_kernel(640, 480) };
 
     println!("| starting vsync demo; make sure to run with 'just run-ui'");
     vsync_tearing_demo(&mut surface).await;
@@ -50,5 +42,7 @@ async fn vsync_tearing_demo(surface: &mut mailbox::Surface) {
 
         surface.present();
         surface.wait_for_frame().await;
+        // println!("SD Capacity: {}", SD.get().lock().get_capacity());
+        // println!("SD Block Size: {}", SD.get().lock().get_block_size());
     }
 }

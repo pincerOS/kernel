@@ -9,5 +9,6 @@ kernel.elf
 *.tmp.*
 *.img
 net0.pcap
+*.dd
 .llvmbox
 /test/generated_tests

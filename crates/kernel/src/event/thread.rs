@@ -131,19 +131,6 @@ impl Thread {
         !self.is_kernel_thread()
     }
 
-    pub fn set_sp(user_regs: &mut Option<UserRegs>, ctx: &mut Context, sp: usize) {
-        match user_regs {
-            Some(user) if user.usermode => ctx.sp_el0 = sp,
-            Some(_) | None => ctx.kernel_sp = sp,
-        }
-    }
-    pub fn get_sp(user_regs: &Option<UserRegs>, ctx: &Context) -> usize {
-        match user_regs {
-            Some(user) if user.usermode => ctx.sp_el0,
-            Some(_) | None => ctx.kernel_sp,
-        }
-    }
-
     /// Save the given register context into the thread's state.
     ///
     /// `stable` indicates whether `context` points to a stable location
@@ -232,6 +219,13 @@ impl Thread {
             let core_sp = CORES.with_current(|core| core.core_sp.get());
             ctx.kernel_sp = core_sp;
         }
+    }
+
+    pub fn set_exited(&mut self, status: u32) {
+        let exit_code = &self.process.as_ref().unwrap().exit_code;
+        exit_code.set(crate::process::ExitStatus {
+            status: status as u32,
+        });
     }
 }
 

@@ -3,7 +3,7 @@
 #[unsafe(no_mangle)]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     use crate::arch::halt;
-    use crate::uart;
+    use crate::device::bcm2835_aux::MINI_UART;
     use core::sync::atomic;
 
     static PANICKING: atomic::AtomicBool = atomic::AtomicBool::new(false);
@@ -16,9 +16,9 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
         Some(loc) => (loc.file(), loc.line(), loc.column()),
         _ => ("unknown", 0, 0),
     };
-    if uart::UART.is_initialized() {
+    if MINI_UART.is_initialized() {
         use core::fmt::Write;
-        let uart = uart::UART.get();
+        let uart = MINI_UART.get();
         // Bypass the UART lock to print the panic message; this isn't sound,
         // but the UART struct only uses mutability to access to the MMIO,
         // so it shouldn't cause issues (beyond the fact that it's already
@@ -35,10 +35,11 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     }
 
     // TODO: write error message to a fixed location in memory and reset?
-    {
+    if crate::device::WATCHDOG.is_initialized() {
+        // crate::device::LED_OUT.get().put(0b00011000);
         // Shut down the system
         let mut watchdog = crate::device::WATCHDOG.get().lock();
-        unsafe { watchdog.reset(63) };
+        unsafe { watchdog.reset(0) };
     }
     halt();
 }

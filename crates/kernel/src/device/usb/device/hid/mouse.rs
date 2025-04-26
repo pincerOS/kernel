@@ -6,8 +6,8 @@ use crate::SpinLock;
 #[derive(Debug)]
 pub enum MouseEvent {
     Move {
-        x: i8,
-        y: i8,
+        x: i16,
+        y: i16,
     },
     Button {
         button: MouseButton,
@@ -67,11 +67,21 @@ pub static LAST_BUTTONS: AtomicU8 = AtomicU8::new(0);
 pub unsafe fn MouseAnalyze(buffer: *mut u8, buffer_length: u32) {
     let buffer = unsafe { core::slice::from_raw_parts(buffer, buffer_length as usize) };
 
-    if buffer.is_empty() {
-        return;
-    }
+    let (buttons, x, y, wheel) = match buffer {
+        &[] => return,
+        &[buttons, x, y, wheel] => (buttons, x as i8 as i16, y as i8 as i16, wheel as i8),
+        &[buttons, _, xa, xb, ya, yb, wheel, _] => (
+            buttons,
+            i16::from_le_bytes([xa, xb]),
+            i16::from_le_bytes([ya, yb]),
+            wheel as i8,
+        ),
+        _ => {
+            println!("Not enough data in MouseAnalyze: {:?}", buffer);
+            return;
+        }
+    };
 
-    let [buttons, x, y, wheel] = buffer.try_into().unwrap();
     let old_buttons = LAST_BUTTONS.swap(buttons, Ordering::SeqCst);
 
     let send = |ev| unsafe { MOUSE_EVENTS.buffer.send_overwrite(ev) };
@@ -95,12 +105,9 @@ pub unsafe fn MouseAnalyze(buffer: *mut u8, buffer_length: u32) {
     });
 
     if x != 0 || y != 0 {
-        send(MouseEvent::Move {
-            x: x as i8,
-            y: y as i8,
-        });
+        send(MouseEvent::Move { x, y });
     }
     if wheel != 0 {
-        send(MouseEvent::Wheel { delta: wheel as i8 });
+        send(MouseEvent::Wheel { delta: wheel });
     }
 }

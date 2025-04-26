@@ -7,6 +7,7 @@ use alloc::boxed::Box;
 
 use super::context::{enter_event_loop, Context, CORES};
 use super::scheduler::Priority;
+use super::thread::UserRegs;
 use super::{task, thread};
 use crate::event;
 
@@ -110,6 +111,11 @@ where
             if !future.data.suspend_thread.get() {
                 let thread = unsafe { &mut *future.data.thread.get() }.take().unwrap();
                 CORES.with_current(|core| core.thread.set(Some(thread)));
+
+                let woken = task::TASKS.return_task(task_id, task::Task::new(future, priority));
+                if woken {
+                    event::SCHEDULER.add_task(event::Event::async_task(task_id, priority));
+                }
 
                 // Return back to the user context
                 ctx.as_ptr()
@@ -228,19 +234,13 @@ impl<'outer> HandlerContext<'outer> {
         }
     }
 
-    pub fn set_sp(&mut self, sp: usize) {
-        let thread = self.cur_thread_mut().as_mut().unwrap();
-        thread::Thread::set_sp(
-            &mut thread.user_regs,
-            unsafe { thread.last_context.as_mut() },
-            sp,
-        );
+    pub fn user_regs(&mut self) -> ThreadRefMut<'_, Option<UserRegs>> {
         self.outer_data.user_regs_changed.set(true);
-    }
-
-    pub fn get_sp(&self) -> usize {
-        let thread = self.cur_thread();
-        thread::Thread::get_sp(&thread.user_regs, unsafe { thread.last_context.as_ref() })
+        let thread = self.cur_thread_mut().as_mut().unwrap();
+        ThreadRefMut {
+            inner: &mut thread.user_regs,
+            marker: core::marker::PhantomData,
+        }
     }
 
     fn enable_user_vmem(&self) {
@@ -382,9 +382,13 @@ where
         let inner = unsafe { Pin::new_unchecked(this.inner.assume_init_mut()) };
 
         let _context = core::task::ready!(inner.poll(ctx));
+
+        // Finished running the task; if the thread wasn't detatched / resumed
+        // separately, schedule it now.
         if !this.data.in_handler.get() {
-            let thread = unsafe { &mut *this.data.thread.get() }.take().unwrap();
-            event::SCHEDULER.add_task(event::Event::schedule_thread(thread));
+            if let Some(thread) = unsafe { &mut *this.data.thread.get() }.take() {
+                event::SCHEDULER.add_task(event::Event::schedule_thread(thread));
+            }
         }
         ().into()
     }
