@@ -356,10 +356,11 @@ pub fn register_interrupt_endpoint(
         while interval.tick().await {
             let cur_time = get_time();
             if cur_time - prev_time < μs {
-                println!("| USB: INTerrupt time skew: cur {} prev {} diff {}, interval {} μs", cur_time, prev_time, cur_time - prev_time, μs);
+
+            } else {
+                interrupt_endpoint_callback(endpoint);
             }
             prev_time = cur_time;
-            interrupt_endpoint_callback(endpoint);
         }
     });
 }
