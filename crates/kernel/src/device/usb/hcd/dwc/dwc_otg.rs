@@ -1028,17 +1028,6 @@ pub unsafe fn HcdSubmitBulkMessage(
     };
 
     if pipe.direction == UsbDirection::Out {
-        //print the first 32 bytes of the buffer
-        let buf = buffer.as_ref().unwrap();
-        unsafe {
-            for i in 0..32 {
-                print!(
-                    "{:#x} ",
-                    buf[i] as u8
-                );
-            }
-            println!();
-        }
         let data_buffer = dwc_sc.dma_addr[channel as usize] as *mut u8;
         unsafe {
             memory_copy(

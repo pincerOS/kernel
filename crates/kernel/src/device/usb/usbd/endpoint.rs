@@ -119,10 +119,12 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
     let dma_addr = dwc_sc.dma_addr[channel as usize];
 
     if hcint & HCINT_CHHLTD == 0 {
-        panic!(
+        println!(
             "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x}.",
             channel, hcint
         );
+        DwcEnableChannel(channel);
+        return false;
     }
 
     let split_control_state = split_control.state;
