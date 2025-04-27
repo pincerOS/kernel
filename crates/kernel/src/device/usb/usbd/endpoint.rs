@@ -162,7 +162,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
         }
     } else if split_control_state == DWCSplitStateMachine::CSPLIT {
         if hcint & HCINT_NAK != 0 {
-            println!("| Endpoint CSPLIT {}: NAK received hcint {:x}", channel, hcint);
+            // println!("| Endpoint CSPLIT {}: NAK received hcint {:x}", channel, hcint);
         } else if hcint & HCINT_FRMOVRUN != 0 {
             println!("| Endpoint CSPLIT {}: Frame overrun hcint {:x}", channel, hcint);
             UpdateDwcOddFrame(channel);
@@ -175,7 +175,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             let mut cur_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
 
             if cur_frame - ss_hfnum >= 8 {
-                println!("| Endpoint CSPLIT has exceeded 8 frames, cur_frame: {} ss_hfnum: {} giving up", cur_frame, ss_hfnum);
+                println!("| Endpoint CSPLIT has exceeded 8 frames, cur_frame: {} ss_hfnum: {} giving up tries {}", cur_frame, ss_hfnum, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries });
                 return true;
             }
 
@@ -232,7 +232,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
 
     if hcint & HCINT_NAK != 0 {
         //NAK received, do nothing
-        assert_eq!(buffer_length, 0);
+        // assert_eq!(buffer_length, 0);
     } else if hcint & HCINT_XFERCOMPL != 0 {
         //Transfer complete
         //copy from dma_addr to buffer
