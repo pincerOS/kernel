@@ -108,11 +108,11 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
     let last_transfer = endpoint.buffer_length - transfer_size; 
 
     if hcint & HCINT_CHHLTD == 0 {
-        println!("| Endpoint {}: HCINT_CHHLTD not set, aborting. Bulk out", channel);
+        println!("| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint {:x} Bulk out", channel, hcint);
     }
 
     if hcint & HCINT_XFERCOMPL == 0 {
-        println!("| Endpoint {}: HCINT_XFERCOMPL not set, aborting. Bulk out", channel);
+        println!("| Endpoint {}: HCINT_XFERCOMPL not set, aborting.hcint {:x}  Bulk out", channel, hcint);
     }
 
     // println!("| ENdpoint BULK SENT {}: hcint {:x}", channel, hcint);
