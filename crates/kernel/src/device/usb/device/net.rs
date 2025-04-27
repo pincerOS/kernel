@@ -32,6 +32,8 @@ pub fn NetLoad(bus: &mut UsbBus) {
         Some(NetAttach);
 }
 
+pub static mut BUFFER: [u8; 512] = [0; 512];
+
 pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // println!(
     //     "| Net: Subclass: {:x}, Protocol: {:x}",
@@ -119,7 +121,10 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // rndis_send_packet(device, buffer.as_mut_ptr(), 64);
     // rndis_receive_packet(device, Box::new(buffer), 64);
     // }
-
+    unsafe {
+        let receive_buffer = Box::new(BUFFER);
+        NetInitiateReceive(device, receive_buffer, 64);
+    }
     unsafe {
         for i in 0..100 {
             NetSendPacket(
@@ -165,7 +170,7 @@ pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
 
     if buffer32[0] != 0 {
         println!("| Net: Buffer1: {:?}", buffer32[0]);
-        shutdown();
+        // shutdown();
     }
 }
 
