@@ -58,8 +58,8 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     if hcint & HCINT_CHHLTD == 0 {
-        panic!(
-            "| Endpoint {} in: HCINT_CHHLTD not set, aborting. hcint: {:x}.",
+        println!(
+            "| Endpoint {} in: HCINT_CHHLTD not set, not aborting. hcint: {:x}.",
             channel, hcint
         );
     }
