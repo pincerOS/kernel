@@ -175,7 +175,7 @@ pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
 pub fn NetSend(_buffer: *mut u8, _buffer_length: u32) {
     //Do nothing for now
     //Called when USB packet is actually sent out
-    // println!("| Net: Send");
+    println!("| Net: Sent of length {}", _buffer_length);
 }
 
 pub fn NetReceive(buffer: *mut u8, buffer_length: u32) {

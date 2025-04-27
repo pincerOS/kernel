@@ -71,6 +71,8 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
         );
     }
 
+    println!("| Endpoint BULK RECEIVED {}: hcint {:x} len {}", channel, hcint, last_transfer);
+
     let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
     let dma_addr = dwc_sc.dma_addr[channel as usize];
 
@@ -115,7 +117,7 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
         panic!("| Endpoint {}: HCINT_XFERCOMPL not set, aborting.hcint {:x}  Bulk out", channel, hcint);
     }
 
-    // println!("| ENdpoint BULK SENT {}: hcint {:x}", channel, hcint);
+    println!("| ENdpoint BULK SENT {}: hcint {:x} len {}", channel, hcint, last_transfer);
 
     //Most Likely not going to be called but could be useful for cases where precise timing of when message gets off the system is needed
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
