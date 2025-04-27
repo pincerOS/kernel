@@ -44,7 +44,7 @@ pub unsafe fn axge_send_packet(
 
 
     unsafe {
-        core::ptr::copy_nonoverlapping(buffer, buf.as_mut_ptr().add(4), buffer_length as usize);
+        core::ptr::copy_nonoverlapping(buffer, buf.as_mut_ptr().add(8), buffer_length as usize);
     }
 
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
