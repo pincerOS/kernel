@@ -143,7 +143,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
         // );
         let mut i = 0;
         let mut hcint_nochhltd = 0;
-        while i < 50{
+        while i < 50 {
             let hcint_nochhltd = dwc_otg::read_volatile(DOTG_HCINT(channel as usize));
             if hcint_nochhltd & HCINT_CHHLTD != 0 {
                 break;
@@ -153,10 +153,10 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
         }
 
         if hcint_nochhltd & HCINT_CHHLTD == 0 {
-            println!(
-                "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x} hcchar: {:x}",
-                channel, hcint, hcint_nochhltd
-            );
+            // println!(
+            //     "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x} hcint2: {:x}",
+            //     channel, hcint, hcint_nochhltd
+            // );
             return true;
         }
 
@@ -213,7 +213,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
             }
             return false;
         } else {
-            println!("| Endpoint {}: UNKNOWWN HCINT split_control is SSPLIT hcint {:x}", channel, hcint);
+            // println!("| Endpoint {}: UNKNOWWN HCINT split_control is SSPLIT hcint {:x}", channel, hcint);
             return true;
         }
     } else if split_control_state == DWCSplitStateMachine::CSPLIT {
