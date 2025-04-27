@@ -48,13 +48,13 @@ pub unsafe fn axge_send_packet(
     }
 
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
-    let pid = if endpoint_device.endpoint_pid[2] % 2 == 0 {
+    let pid = if endpoint_device.endpoint_pid[1] % 2 == 0 {
         PacketId::Data0
     } else {
         PacketId::Data1
     };
 
-    endpoint_device.endpoint_pid[2] += 1;
+    endpoint_device.endpoint_pid[1] += 1;
 
     let result = unsafe {
         UsbSendBulkMessage(
