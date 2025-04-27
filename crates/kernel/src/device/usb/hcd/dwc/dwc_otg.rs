@@ -947,8 +947,8 @@ fn HcdChannelSendOne(
     if pipe.transfer_type == UsbTransfer::Bulk && pipe.direction == UsbDirection::In {
         write_volatile(
             DOTG_HCINTMSK(channel as usize),
-            HCINTMSK_XFERCOMPLMSK
-                | HCINTMSK_CHHLTDMSK
+            // HCINTMSK_XFERCOMPLMSK
+                HCINTMSK_CHHLTDMSK
                 // | HCINTMSK_AHBERRMSK
                 // | HCINTMSK_STALLMSK
                 // | HCINTMSK_ACKMSK
@@ -961,8 +961,8 @@ fn HcdChannelSendOne(
     } else {
         write_volatile(
             DOTG_HCINTMSK(channel as usize),
-            HCINTMSK_XFERCOMPLMSK
-                | HCINTMSK_CHHLTDMSK
+            // HCINTMSK_XFERCOMPLMSK
+                HCINTMSK_CHHLTDMSK
                 // | HCINTMSK_AHBERRMSK
                 // | HCINTMSK_STALLMSK
                 // | HCINTMSK_NAKMSK
