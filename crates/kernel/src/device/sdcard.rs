@@ -4,9 +4,9 @@ pub static SD: UnsafeInit<SpinLock<bcm2711_emmc2_driver>> = unsafe { UnsafeInit:
 
 // SDHCI driver for raspberry pi 4b
 // TODO:
-// Rest of PR fixes
-// Better error handling
-// Assert test in sd.rs in /examples
+// spin_sleep() timing validation
+// cleanup error handling
+// cleanup comments
 
 // https://github.com/jncronin/rpi-boot/blob/master/emmc.c
 // https://github.com/rsta2/circle/blob/master/addon/SDCard/emmc.cpp
@@ -1631,26 +1631,6 @@ impl bcm2711_emmc2_driver {
         &self.emmc.id
     }
 
-    pub fn read_sectors(
-        &mut self,
-        index: u64,
-        buffer: &mut [u8],
-    ) -> Result<(), filesystem::BlockDeviceError> {
-        self.seek(index * filesystem::SECTOR_SIZE as u64);
-        self.read(buffer)
-            .map_err(|_| filesystem::BlockDeviceError::Unknown)?;
-        Ok(())
-    }
-    pub fn write_sectors(
-        &mut self,
-        index: u64,
-        buffer: &[u8],
-    ) -> Result<(), filesystem::BlockDeviceError> {
-        self.seek(index * filesystem::SECTOR_SIZE as u64);
-        self.write(buffer)
-            .map_err(|_| filesystem::BlockDeviceError::Unknown)?;
-        Ok(())
-    }
 }
 
 impl BlockDevice for bcm2711_emmc2_driver {
@@ -1669,6 +1649,27 @@ impl BlockDevice for bcm2711_emmc2_driver {
         &mut self,
         index: u64,
         buffer: &[u8; filesystem::SECTOR_SIZE],
+    ) -> Result<(), filesystem::BlockDeviceError> {
+        self.seek(index * filesystem::SECTOR_SIZE as u64);
+        self.write(buffer)
+            .map_err(|_| filesystem::BlockDeviceError::Unknown)?;
+        Ok(())
+    }
+
+    fn read_sectors(
+        &mut self,
+        index: u64,
+        buffer: &mut [u8],
+    ) -> Result<(), filesystem::BlockDeviceError> {
+        self.seek(index * filesystem::SECTOR_SIZE as u64);
+        self.read(buffer)
+            .map_err(|_| filesystem::BlockDeviceError::Unknown)?;
+        Ok(())
+    }
+    fn write_sectors(
+        &mut self,
+        index: u64,
+        buffer: &[u8],
     ) -> Result<(), filesystem::BlockDeviceError> {
         self.seek(index * filesystem::SECTOR_SIZE as u64);
         self.write(buffer)

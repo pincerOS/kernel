@@ -258,24 +258,24 @@ const _: () = assert!(size_of::<BGD>() == 32);
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub struct INode {
-    i_mode: u16,
-    i_uid: u16,
-    i_size: u32,
-    i_atime: u32,
-    i_ctime: u32,
-    i_mtime: u32,
-    i_dtime: u32,
-    i_gid: u16,
-    i_links_count: u16,
-    i_blocks: u32,
-    i_flags: u32,
-    i_osd1: u32,
-    i_block: [u32; 15], // 12 direct, single, double, triple
-    i_generation: u32,
-    i_file_acl: u32,
-    i_dir_acl: u32,
-    i_faddr: u32,
-    i_osd2: [u8; 12],
+    pub i_mode: u16,
+    pub i_uid: u16,
+    pub i_size: u32,
+    pub i_atime: u32,
+    pub i_ctime: u32,
+    pub i_mtime: u32,
+    pub i_dtime: u32,
+    pub i_gid: u16,
+    pub i_links_count: u16,
+    pub i_blocks: u32,
+    pub i_flags: u32,
+    pub i_osd1: u32,
+    pub i_block: [u32; 15], // 12 direct, single, double, triple
+    pub i_generation: u32,
+    pub i_file_acl: u32,
+    pub i_dir_acl: u32,
+    pub i_faddr: u32,
+    pub i_osd2: [u8; 12],
 }
 
 const _: () = assert!(size_of::<INode>() == 128);
@@ -351,8 +351,8 @@ const UNALLOCATED_BLOCK_SLOT: u32 = 0;
 
 #[derive(Debug)]
 pub struct INodeWrapper {
-    inode: INode,
-    _inode_num: u32,
+    pub inode: INode,
+    pub _inode_num: u32,
 }
 
 unsafe impl bytemuck::Zeroable for DirectoryEntryData {}
