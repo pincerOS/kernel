@@ -31,55 +31,27 @@ extern "Rust" fn kernel_main(tree: device_tree::DeviceTree) {
     unsafe { SD.init(SpinLock::new(sdcard)) };
     println!("| initialized SD Card");
 
-    let mut sd = SD.get().lock();
-    let mut buf = [0u8; 512];
-    let mut buf1024 = [7u8; 1024];
-    let buf0 = [0u8; 512];
-    let buf1 = [1u8; 512];
-
-    println!("Reading block 1");
-    sd.read_sector(1, &mut buf).unwrap();
-    println!("{:?}", buf);
-    println!("Writing 1 to block 1");
-    sd.write_sector(1, &buf1).unwrap();
-    println!("Reading block 1");
-    sd.read_sector(1, &mut buf).unwrap();
-    println!("{:?}", buf);
-    assert_eq!(buf, buf1);
-    println!("Reading block 0");
-    sd.read_sector(0, &mut buf).unwrap();
-    println!("{:?}", buf);
-    println!("Writing 1 to block 0");
-    sd.write_sector(0, &buf1).unwrap();
-    println!("Reading block 0");
-    sd.read_sector(0, &mut buf).unwrap();
-    println!("{:?}", buf);
-    assert_eq!(buf, buf1);
-    println!("Reading block 0 & 1");
-    sd.read_sectors(0, &mut buf1024).unwrap();
-    println!("{:?}", buf1024);
-    assert_eq!(buf1024[0..512], buf1);
-    assert_eq!(buf1024[512..1024], buf1);
-    println!("Reading block 2");
-    sd.read_sector(2, &mut buf).unwrap();
-    println!("{:?}", buf);
-
-    println!("Writing 0 to block 0 & 1");
-    sd.write_sector(0, &buf0).unwrap();
-    sd.write_sector(1, &buf0).unwrap();
-
-    println!("Reading block 0 & 1");
-    sd.read_sectors(0, &mut buf1024).unwrap();
-    println!("{:?}", buf1024);
-    assert_eq!(buf1024[0..512], buf0);
-    assert_eq!(buf1024[512..1024], buf0);
-
     let block_device = SD.get();
+    println!("Initializing ext2 filesystem");
     let mut fs = filesystem::Ext2::new(block_device).unwrap();
 
+    println!("Reading root dir");
     let root = fs.get_root_inode_wrapper();
     root.borrow_mut().get_dir_entries(&mut fs, |entry| {
-        println!("entry: {:?}", entry);
+        let filename = core::str::from_utf8(entry.name).unwrap();
+        println!("- {:?}: {:?}", filename, entry);
         core::ops::ControlFlow::<()>::Continue(())
     }, None).unwrap();
+
+    println!("Creating 'example-file.txt'");
+    fs.create_file(&mut *root.borrow_mut(), b"example-file.txt").unwrap();
+
+    println!("Re-reading root dir");
+    root.borrow_mut().get_dir_entries(&mut fs, |entry| {
+        let filename = core::str::from_utf8(entry.name).unwrap();
+        println!("- {:?}: {:?}", filename, entry);
+        core::ops::ControlFlow::<()>::Continue(())
+    }, None).unwrap();
+
+    println!("Done with test");
 }

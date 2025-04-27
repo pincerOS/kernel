@@ -104,13 +104,14 @@ struct DirectoryEntryData {
 
 const _: () = assert!(size_of::<DirectoryEntryData>() == 8);
 
+#[derive(Debug)]
 pub struct DirectoryEntryRef<'a> {
-    inode_num: u32,
-    rec_len: u16,
-    name_len: u8,
-    file_type: u8,
-    name: &'a [u8],
-    dir_offset: usize,
+    pub inode_num: u32,
+    pub rec_len: u16,
+    pub name_len: u8,
+    pub file_type: u8,
+    pub name: &'a [u8],
+    pub dir_offset: usize,
 }
 
 impl DirectoryEntryData {

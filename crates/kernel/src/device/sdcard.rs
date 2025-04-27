@@ -1,7 +1,5 @@
 #![allow(dead_code, nonstandard_style)]
 
-pub static SD: UnsafeInit<SpinLock<bcm2711_emmc2_driver>> = unsafe { UnsafeInit::uninit() };
-
 // SDHCI driver for raspberry pi 4b
 // TODO:
 // spin_sleep() timing validation
@@ -20,6 +18,8 @@ use filesystem::BlockDevice;
 
 // use super::{gpio, GPIO};
 use super::{mailbox, MAILBOX};
+
+pub static SD: UnsafeInit<SpinLock<bcm2711_emmc2_driver>> = unsafe { UnsafeInit::uninit() };
 
 #[derive(Debug, Copy, Clone)]
 pub struct SdScr {
@@ -1631,10 +1631,7 @@ impl bcm2711_emmc2_driver {
         &self.emmc.id
     }
 
-}
-
-impl BlockDevice for bcm2711_emmc2_driver {
-    fn read_sector(
+    pub fn read_sector(
         &mut self,
         index: u64,
         buffer: &mut [u8; filesystem::SECTOR_SIZE],
@@ -1645,7 +1642,7 @@ impl BlockDevice for bcm2711_emmc2_driver {
         Ok(())
     }
 
-    fn write_sector(
+    pub fn write_sector(
         &mut self,
         index: u64,
         buffer: &[u8; filesystem::SECTOR_SIZE],
@@ -1656,7 +1653,7 @@ impl BlockDevice for bcm2711_emmc2_driver {
         Ok(())
     }
 
-    fn read_sectors(
+    pub fn read_sectors(
         &mut self,
         index: u64,
         buffer: &mut [u8],
@@ -1666,7 +1663,7 @@ impl BlockDevice for bcm2711_emmc2_driver {
             .map_err(|_| filesystem::BlockDeviceError::Unknown)?;
         Ok(())
     }
-    fn write_sectors(
+    pub fn write_sectors(
         &mut self,
         index: u64,
         buffer: &[u8],
@@ -1675,6 +1672,40 @@ impl BlockDevice for bcm2711_emmc2_driver {
         self.write(buffer)
             .map_err(|_| filesystem::BlockDeviceError::Unknown)?;
         Ok(())
+    }
+}
+
+impl BlockDevice for &SpinLock<bcm2711_emmc2_driver> {
+    fn read_sector(
+        &mut self,
+        index: u64,
+        buffer: &mut [u8; filesystem::SECTOR_SIZE],
+    ) -> Result<(), filesystem::BlockDeviceError> {
+        self.lock().read_sector(index, buffer)
+    }
+
+    fn write_sector(
+        &mut self,
+        index: u64,
+        buffer: &[u8; filesystem::SECTOR_SIZE],
+    ) -> Result<(), filesystem::BlockDeviceError> {
+        self.lock().write_sector(index, buffer)
+    }
+
+    fn read_sectors(
+        &mut self,
+        start_index: u64,
+        buffer: &mut [u8],
+    ) -> Result<(), filesystem::BlockDeviceError> {
+        self.lock().read_sectors(start_index, buffer)
+    }
+
+    fn write_sectors(
+        &mut self,
+        start_index: u64,
+        buffer: &[u8],
+    ) -> Result<(), filesystem::BlockDeviceError> {
+        self.lock().write_sectors(start_index, buffer)
     }
 }
 
