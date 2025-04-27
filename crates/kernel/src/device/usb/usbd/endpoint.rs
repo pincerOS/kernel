@@ -65,10 +65,12 @@ pub fn finish_bulk_endpoint_callback_in(
                 "| Endpoint {} in: HCINT_NAK with transfer, aborting. hcint: {:x} last transfer: {} Bulk in \n\n",
                 channel, hcint, last_transfer
             );
-            return true;
+            // return true;
         }
+    }
         // return; // WARN: aaron said to comment this out
-    } else if hcint & HCINT_CHHLTD == 0 {
+    
+    if hcint & HCINT_CHHLTD == 0 {
         panic!(
             "| Endpoint {} in: HCINT_CHHLTD not set, aborting. hcint: {:x} last transfer: {}",
             channel, hcint, last_transfer
@@ -113,13 +115,15 @@ pub fn finish_bulk_endpoint_callback_out(
     let transfer_size = HcdUpdateTransferSize(device, channel);
     let last_transfer = endpoint.buffer_length - transfer_size;
 
+    println!("Bulk out transfer hcint {:x} , last transfer: {} ", hcint, last_transfer);
     if hcint & HCINT_CHHLTD == 0 {
-        panic!("| Endpoint {}: HCINT_CHHLTD not set, aborting. bulk out", channel);
+        panic!("| Endpoint {}: HCINT_CHHLTD not set, aborting. bulk out hcint {:x}", channel, hcint);
     }
 
     if hcint & HCINT_XFERCOMPL == 0 {
-        panic!("| Endpoint {}: HCINT_XFERCOMPL not set, aborting. bulk out", channel);
+        panic!("| Endpoint {}: HCINT_XFERCOMPL not set, aborting. bulk out hcint {:x}", channel, hcint);
     }
+
 
     //Most Likely not going to be called but could be useful for cases where precise timing of when message gets off the system is needed
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();

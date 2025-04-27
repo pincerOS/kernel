@@ -28,7 +28,7 @@ pub fn send_ipv4_packet(
             )
         }
         Err(e) => {
-            println!("failed to resolve ip, queuing another send, waiting for ARP");
+            // println!("failed to resolve ip, queuing another send, waiting for ARP");
             thread::thread(move || {
                 let interface = get_interface_mut();
                 let _ = send_ipv4_packet(interface, payload, protocol, dst_addr);
@@ -74,7 +74,7 @@ pub fn recv_ip_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Re
 // get next hop for a packet destined to a specified address.
 pub fn ipv4_addr_route(interface: &mut Interface, address: Ipv4Address) -> Ipv4Address {
     if interface.ipv4_addr.is_member(address) || interface.ipv4_addr.is_broadcast(address) {
-        println!("{} will be routed through link", address);
+        // println!("{} will be routed through link", address);
         address
     } else {
         println!("{} will be routed through default gateway", address);
