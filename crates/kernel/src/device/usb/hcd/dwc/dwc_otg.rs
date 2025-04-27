@@ -185,6 +185,15 @@ pub fn DwcEnableChannel(channel: u8) -> u32 {
     return frame;
 }
 
+//frame2 should be before frame1
+pub fn DwcFrameDifference(frame1: u32, frame2: u32) -> u32 {
+    if frame2 > frame1 {
+        return (frame1 + 0x3fff) - frame2;
+    } else {
+        return frame1 - frame2;
+    }
+}
+
 /**
     \brief Prepares a channel to communicated with a device.
 
