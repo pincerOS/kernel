@@ -795,7 +795,7 @@ fn handle_conns(mut fb: framebuffer::Framebuffer, server_socket: FileDesc) {
 }
 
 fn spawn_console() {
-    let path = b"/console.elf";
+    let path = b"/console";
     let file = ulib::sys::openat(3, path, 0, 0).unwrap();
     ulib::sys::spawn_elf(&ulib::sys::SpawnArgs {
         fd: file,

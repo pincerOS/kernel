@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 
 set -ex
+cd "$(dirname "$0")/.."
 
-EXAMPLE=${1-"net"}
+EXAMPLE=${1-"user"}
 TARGET=aarch64-unknown-none-softfloat
 PROFILE=${PROFILE-"release"}
 

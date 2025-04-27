@@ -12,3 +12,4 @@ net0.pcap
 *.dd
 .llvmbox
 /test/generated_tests
+/disk-image

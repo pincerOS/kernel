@@ -3,14 +3,13 @@
 set -ex
 cd "$(dirname "$0")"
 
-BIN="console"
+BIN="doomgeneric"
 TARGET=aarch64-unknown-none-softfloat
 PROFILE=${PROFILE-"release"}
 
-cargo rustc --profile="${PROFILE}" \
+CC=clang cargo rustc --profile="${PROFILE}" \
     --target="${TARGET}" \
-    --bin="${BIN}" \
-    -- -C relocation-model=static
+    --bin="${BIN}"
 
 if test "$PROFILE" = "dev" ; then
     BINARY=../../target/${TARGET}/debug/${BIN}

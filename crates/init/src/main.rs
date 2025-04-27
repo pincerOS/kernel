@@ -21,7 +21,7 @@ pub extern "C" fn main() {
 
     let root_fd = 3;
 
-    let path = b"display-server.elf";
+    let path = b"display-server";
     let file = ulib::sys::openat(root_fd, path, 0, 0).unwrap();
     spawn_elf(&ulib::sys::SpawnArgs {
         fd: file,
@@ -36,7 +36,7 @@ pub extern "C" fn main() {
     .unwrap();
 
     for _ in 0..4 {
-        let console_path = "console.elf".as_bytes();
+        let console_path = "console".as_bytes();
         let shell_path = "shell".as_bytes();
 
         spawn_elf(&ulib::sys::SpawnArgs {

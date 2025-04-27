@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 SERIAL_DEV=/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_B0044ASI-if00-port0
 LOGFILE=log/$(date -Is).log
 echo "Logging to $LOGFILE"

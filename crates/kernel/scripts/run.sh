@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -e
+cd "$(dirname "$0")/.."
 
 # Check if sdcard.img exists, create it if not
 if [ ! -f sdcard.img ]; then

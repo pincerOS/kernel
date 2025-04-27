@@ -1,28 +1,27 @@
 #!/usr/bin/env bash
 
 set -ex
+cd "$(dirname "$0")"
 
 BIN="init"
 TARGET=aarch64-unknown-none-softfloat
 PROFILE=${PROFILE-"release"}
 
-mkdir -p fs
+FS_PATH="../../disk-image"
+mkdir -p "$FS_PATH"
 
-# ./shell.rs
-# cp shell.elf fs/
-# ./ls.rs
-# cp ls.elf fs/
 ./sharedMemTest.rs
-cp sharedMemTest.elf fs/
+cp sharedMemTest.elf "$FS_PATH/"
 
 
-cargo run -q -p initfs --bin util \
-    -- create --compress --out fs.arc --root fs fs --verbose
+cargo run -q -p initfs --bin util --release \
+    -- create --compress --out fs.arc --root "$FS_PATH" "$FS_PATH" --verbose
 
 # cargo clean
 cargo rustc --profile="${PROFILE}" \
-    --target=${TARGET} -- \
-    -C relocation-model=static
+    --target="${TARGET}" \
+    --bin="${BIN}" \
+    -- -C relocation-model=static
 
 if test "$PROFILE" = "dev" ; then
     BINARY=../../target/${TARGET}/debug/${BIN}

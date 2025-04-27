@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -ex
+cd "$(dirname "$0")"
 
 TARGET=aarch64-unknown-none-softfloat
 PROFILE=${PROFILE:-release}
@@ -21,4 +22,7 @@ for src in src/bin/*.rs; do
     fi
 
     cp "${BINARY}" "bin/${BIN}"
+    if test -n "$DESTDIR" ; then
+        cp "${BINARY}" "$DESTDIR/${BIN}"
+    fi
 done

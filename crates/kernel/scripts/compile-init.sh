@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 
 set -ex
-cd "$(dirname "$0")/../../shell"
-./build.sh
-cd ../init/
-mv ../shell/bin/* fs/
-./build.sh
+cd "$(dirname "$0")/.."
+
+FS_PATH="../../disk-image"
+
+DESTDIR="$FS_PATH" ../shell/build.sh
+DESTDIR="$FS_PATH" ../console/build.sh
+DESTDIR="$FS_PATH" ../display-server/build.sh
+../init/build.sh
