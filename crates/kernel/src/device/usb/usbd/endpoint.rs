@@ -35,7 +35,13 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
     let device = unsafe { &mut *endpoint.device };
 
     let transfer_size = HcdUpdateTransferSize(device, channel);
-    device.last_transfer = endpoint.buffer_length - transfer_size;
+    if transfer_size > endpoint.buffer_length {
+        println!(
+            "| Endpoint {}: transfer size {} is greater than buffer length {} in bulk out",
+            channel, transfer_size, endpoint.buffer_length
+        );
+    }
+    let last_transfer = endpoint.buffer_length - transfer_size;
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     if hcint & HCINT_CHHLTD == 0 {
@@ -66,7 +72,7 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
     //      Also, we suffer issue from buffer_length not being known before the copy so the callback likely will have better information about the buffer
     if let Some(callback) = endpoint_device.endpoints[endpoint.device_endpoint_number as usize] {
         // TODO: make this take a slice
-        unsafe { callback(dma_addr as *mut u8, device.last_transfer) };
+        unsafe { callback(dma_addr as *mut u8, last_transfer) };
     } else {
         panic!(
             "| USB: No callback for endpoint number {}.",
@@ -79,7 +85,13 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
 pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u32, channel: u8, _split_control: DWCSplitControlState) -> bool {
     let device = unsafe { &mut *endpoint.device };
     let transfer_size = HcdUpdateTransferSize(device, channel);
-    device.last_transfer = endpoint.buffer_length - transfer_size;
+    if transfer_size > endpoint.buffer_length {
+        println!(
+            "| Endpoint {}: transfer size {} is greater than buffer length {} in bulk out",
+            channel, transfer_size, endpoint.buffer_length
+        );
+    }
+    let last_transfer = endpoint.buffer_length - transfer_size; 
 
     if hcint & HCINT_CHHLTD == 0 {
         panic!("| Endpoint {}: HCINT_CHHLTD not set, aborting.", channel);
@@ -89,20 +101,20 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
         panic!("| Endpoint {}: HCINT_XFERCOMPL not set, aborting.", channel);
     }
 
-    println!("| ENdpoint BULK SENT {}: hcint {:x}", channel, hcint);
+    // println!("| ENdpoint BULK SENT {}: hcint {:x}", channel, hcint);
 
     //Most Likely not going to be called but could be useful for cases where precise timing of when message gets off the system is needed
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
     if let Some(callback) = endpoint_device.endpoints[endpoint.device_endpoint_number as usize] {
         let mut buffer = [0]; //fake buffer
-        unsafe { callback(buffer.as_mut_ptr(), device.last_transfer) };
+        unsafe { callback(buffer.as_mut_ptr(), last_transfer) };
     } else {
         panic!(
             "| USB: No callback for endpoint number {}.",
             endpoint.device_endpoint_number
         );
     }
-
+    // device.last_transfer = last_transfer;
     return true;
 }
 
@@ -123,7 +135,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x}.",
             channel, hcint
         );
-        DwcEnableChannel(channel);
+        // DwcEnableChannel(channel);
         return false;
     }
 
@@ -179,13 +191,13 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             let mut cur_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
 
             if DwcFrameDifference(cur_frame, ss_hfnum) >= 8 {
-                println!("| Endpoint CSPLIT has exceeded 8 frames, cur_frame: {} ss_hfnum: {} giving up tries {}", cur_frame, ss_hfnum, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries });
+                println!("| Endpoint CSPLIT {} has exceeded 8 frames, cur_frame: {} ss_hfnum: {} giving up tries {}", channel, cur_frame, ss_hfnum, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries });
                 return true;
             }
 
             if unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries >= 3} {
                 let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
-                println!("| Endpoint CSPLIT has exceeded 3 tries, giving up hctsiz {:x} last transfer {:x} state {:?}", hctsiz, last_transfer, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] });
+                println!("| Endpoint CSPLIT {} has exceeded 3 tries, giving up hctsiz {:x} last transfer {:x} state {:?}", channel, hctsiz, last_transfer, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] });
                 return true;
             }
 
@@ -264,7 +276,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
 
         return false;
     } else {
-        println!("| Endpoint {}: Unknown interrupt, ignoring {} state {:#?}. Letting run for now...", channel, hcint, split_control);
+        println!("| Endpoint {}: Unknown interrupt, ignoring {:x} state {:#?}. Letting run for now...", channel, hcint, split_control);
         // return true;
     }
 
@@ -279,7 +291,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
         );
     }
 
-    device.last_transfer = last_transfer;
+    // device.last_transfer = last_transfer;
     return true;
 }
 

@@ -477,8 +477,10 @@ pub fn ax88179_reset(dev: &mut UsbDevice) {
         ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_TXCOE_CTL as u16, 1, 1, tmp);
 
         /* Configure RX control register => start operation */
-        *tmp16 = AX_RX_CTL_DROPCRCERR | AX_RX_CTL_IPE | AX_RX_CTL_START |
-            AX_RX_CTL_AP | AX_RX_CTL_AMALL | AX_RX_CTL_AB;
+        // *tmp16 = AX_RX_CTL_DROPCRCERR | AX_RX_CTL_IPE | AX_RX_CTL_START |
+        //     AX_RX_CTL_AP | AX_RX_CTL_AMALL | AX_RX_CTL_AB;
+        *tmp16 = AX_RX_CTL_START | AX_RX_CTL_AB | AX_RX_CTL_IPE |
+            AX_RX_CTL_PRO | AX_RX_CTL_AMALL | AX_RX_CTL_AP;
         ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_RX_CTL as u16, 2, 2, tmp16 as *mut u8);
 
         *tmp = AX_MONITOR_MODE_PMETYPE | AX_MONITOR_MODE_PMEPOL |
