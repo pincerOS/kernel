@@ -165,14 +165,12 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
 
                 unsafe {
                     let mut frame_val = NEXT_FRAME_CS.lock();
-                    let threshold = 1000;
-
-                    if *frame_val <= cur_frame && (*frame_val + threshold) > cur_frame {
+                    let current_current_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+                    if *frame_val == current_current_frame {
+                        //not succeed
+                    } else {
                         succeed = true;
-                        *frame_val = cur_frame + 1;
-                    } else if cur_frame < *frame_val && cur_frame + threshold < *frame_val {
-                        succeed = true;
-                        *frame_val = cur_frame + 1;
+                        *frame_val = current_current_frame;
                     }
                 }
             }
@@ -225,14 +223,12 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
 
                 unsafe {
                     let mut frame_val = NEXT_FRAME_CS.lock();
-                    let threshold = 1000;
-
-                    if *frame_val <= cur_frame && (*frame_val + threshold) > cur_frame {
+                    let current_current_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+                    if *frame_val == current_current_frame {
+                        //not succeed
+                    } else {
                         succeed = true;
-                        *frame_val = cur_frame + 1;
-                    } else if cur_frame < *frame_val && cur_frame + threshold < *frame_val {
-                        succeed = true;
-                        *frame_val = cur_frame + 1;
+                        *frame_val = current_current_frame;
                     }
                 }
                 micro_delay(10);
