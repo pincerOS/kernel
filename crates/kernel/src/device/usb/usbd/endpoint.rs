@@ -206,22 +206,25 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             unsafe {
                 DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state = DWCSplitStateMachine::NONE;
             }
-            let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
-            println!("| Endpoint CSPLIT {}: hcint {:x} last transfer {:x} hctisiz {:x}", channel, hcint, last_transfer, hctsiz);
 
-            use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_GINTSTS;
-            let gintsts = read_volatile(DOTG_GINTSTS);
-            use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCINT;
-            let hcint = read_volatile(DOTG_HCINT(channel as usize));
-            use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCCHAR;
-            let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
-            let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
-
-            println!("| HCD gintsts: {:#x}", gintsts);
-            println!("| HCD hcint: {:#x}", hcint);
-            println!("| HCD hcchar: {:#x}", hcchar);
-            println!("| HCD hctsiz: {:#x}", hctsiz);
-            println!("| HCD channel: {:#x}\n", channel);
+            if hcint & HCINT_ACK == 0 {
+                let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
+                println!("| Endpoint CSPLIT {}: hcint {:x} last transfer {:x} hctisiz {:x}", channel, hcint, last_transfer, hctsiz);
+    
+                use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_GINTSTS;
+                let gintsts = read_volatile(DOTG_GINTSTS);
+                use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCINT;
+                let hcint = read_volatile(DOTG_HCINT(channel as usize));
+                use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCCHAR;
+                let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+                let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
+    
+                println!("| HCD gintsts: {:#x}", gintsts);
+                println!("| HCD hcint: {:#x}", hcint);
+                println!("| HCD hcchar: {:#x}", hcchar);
+                println!("| HCD hctsiz: {:#x}", hctsiz);
+                println!("| HCD channel: {:#x}\n", channel);
+            }
         }
     }
 

@@ -208,14 +208,15 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
     // micro_delay(ms_to_micro(1000));
     ax88179_reset(device);
     println!("| AXGE: PHY reset complete");
-    ax88179_link_reset(device);
-    println!("| AXGE: Link reset complete");
 
     let mut rxctl = (AX_RX_CTL_START | AX_RX_CTL_AB | AX_RX_CTL_IPE) | AX_RX_CTL_PRO;
     ax88179_write_cmd(device, AX_ACCESS_MAC, AX_RX_CTL,
         2, 2, &mut rxctl as *mut u16 as *mut u8);
 
     println!("| AXGE: multicast mode set");
+
+    // ax88179_link_reset(device);
+    // println!("| AXGE: Link reset complete");
 
     return ResultCode::OK;
 }
