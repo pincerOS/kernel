@@ -13,6 +13,7 @@ use crate::device::usb::hcd::dwc::dwc_otg::{printDWCErrors, read_volatile, DWCSp
 use crate::device::usb::hcd::dwc::dwc_otgreg::{DOTG_HCTSIZ, DOTG_HFNUM, HCINT_FRMOVRUN, HCINT_NYET, HCINT_XACTERR, HFNUM_FRNUM_MASK};
 use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCSPLT;
 use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCCHAR;
+use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCINT;
 use crate::device::usb::DwcFrameDifference;
 use crate::device::usb::hcd::dwc::dwc_otg;
 use crate::device::usb::DwcActivateCsplit;
@@ -121,7 +122,8 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
     return true;
 }
 
-pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: u32, channel: u8, split_control: DWCSplitControlState) -> bool {
+pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_: u32, channel: u8, split_control: DWCSplitControlState) -> bool {
+    let mut hcint = hcint_;
     let device = unsafe { &mut *endpoint.device };
     let transfer_size = HcdUpdateTransferSize(device, channel);
     // device.last_transfer = endpoint.buffer_length - transfer_size;
@@ -132,6 +134,35 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
     let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
 
     let dma_addr = dwc_sc.dma_addr[channel as usize];
+
+    if hcint & HCINT_CHHLTD == 0 {
+        // let hcchar = dwc_otg::read_volatile(DOTG_HCCHAR(channel as usize));
+        // println!(
+        //     "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x} hcchar: {:x}",
+        //     channel, hcint, hcchar
+        // );
+        let mut i = 0;
+        let mut hcint_nochhltd = 0;
+        while i < 50{
+            let hcint_nochhltd = dwc_otg::read_volatile(DOTG_HCINT(channel as usize));
+            if hcint_nochhltd & HCINT_CHHLTD != 0 {
+                break;
+            }
+            i += 1;
+            micro_delay(10);
+        }
+
+        if hcint_nochhltd & HCINT_CHHLTD == 0 {
+            println!(
+                "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x} hcchar: {:x}",
+                channel, hcint, hcint_nochhltd
+            );
+            return true;
+        }
+
+
+        hcint |= hcint_nochhltd;
+    }
 
     let split_control_state = split_control.state;
     let ss_hfnum = split_control.ss_hfnum;
@@ -270,16 +301,6 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
                 println!("| HCD channel: {:#x}\n", channel);
             }
         }
-    }
-
-    if hcint & HCINT_CHHLTD == 0 {
-        let hcchar = dwc_otg::read_volatile(DOTG_HCCHAR(channel as usize));
-        println!(
-            "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x} hcchar: {:x}",
-            channel, hcint, hcchar
-        );
-
-        return true;
     }
 
     let mut buffer_length = last_transfer.clamp(0, 8);
