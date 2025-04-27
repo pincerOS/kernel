@@ -57,10 +57,14 @@ pub fn finish_bulk_endpoint_callback_in(
 
         if last_transfer > 0 && (hcint & HCINT_CHHLTD == 0) && (hcint & HCINT_XFERCOMPL == 0)
         {
-            DwcActivateChannel(channel);
+            // DwcActivateChannel(channel);
 
             return false;
         } else {
+            println!(
+                "| Endpoint {} in: HCINT_NAK with transfer, aborting. hcint: {:x} last transfer: {} Bulk in \n\n",
+                channel, hcint, last_transfer
+            );
             return true;
         }
         // return; // WARN: aaron said to comment this out
