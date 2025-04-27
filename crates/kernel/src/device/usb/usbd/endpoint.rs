@@ -19,6 +19,11 @@ use usb::types::*;
 use usb::usbd::device::*;
 use usb::usbd::pipe::*;
 use usb::PacketId;
+use crate::device::usb::hcd::dwc::dwc_otg;
+use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCINT;
+use crate::device::usb::DwcDisableChannel;
+use crate::device::system_timer::micro_delay;
+
 
 use crate::event::task::spawn_async_rt;
 use crate::shutdown;
@@ -34,7 +39,7 @@ pub fn finish_bulk_endpoint_callback_in(
     let device = unsafe { &mut *endpoint.device };
 
     let transfer_size = HcdUpdateTransferSize(device, channel);
-    device.last_transfer = endpoint.buffer_length - transfer_size;
+    let last_transfer = endpoint.buffer_length - transfer_size;
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     if hcint & HCINT_NAK != 0 {
@@ -47,10 +52,10 @@ pub fn finish_bulk_endpoint_callback_in(
         // }
         println!(
             "| Endpoint {} in: HCINT_NAK with transfer hcint: {:x} last transfer: {}",
-            channel, hcint, device.last_transfer
+            channel, hcint, last_transfer
         );
 
-        if device.last_transfer > 0 && (hcint & HCINT_CHHLTD == 0) && (hcint & HCINT_XFERCOMPL == 0)
+        if last_transfer > 0 && (hcint & HCINT_CHHLTD == 0) && (hcint & HCINT_XFERCOMPL == 0)
         {
             DwcActivateChannel(channel);
 
@@ -62,7 +67,7 @@ pub fn finish_bulk_endpoint_callback_in(
     } else if hcint & HCINT_CHHLTD == 0 {
         panic!(
             "| Endpoint {} in: HCINT_CHHLTD not set, aborting. hcint: {:x} last transfer: {}",
-            channel, hcint, device.last_transfer
+            channel, hcint, last_transfer
         );
     } else if hcint & HCINT_XFERCOMPL == 0 {
         panic!(
@@ -85,7 +90,7 @@ pub fn finish_bulk_endpoint_callback_in(
     //      Also, we suffer issue from buffer_length not being known before the copy so the callback likely will have better information about the buffer
     if let Some(callback) = endpoint_device.endpoints[endpoint.device_endpoint_number as usize] {
         // TODO: make this take a slice
-        unsafe { callback(dma_addr as *mut u8, device.last_transfer) };
+        unsafe { callback(dma_addr as *mut u8, last_transfer) };
     } else {
         panic!(
             "| USB: No callback for endpoint number {}.",
@@ -102,21 +107,21 @@ pub fn finish_bulk_endpoint_callback_out(
 ) -> bool {
     let device = unsafe { &mut *endpoint.device };
     let transfer_size = HcdUpdateTransferSize(device, channel);
-    device.last_transfer = endpoint.buffer_length - transfer_size;
+    let last_transfer = endpoint.buffer_length - transfer_size;
 
     if hcint & HCINT_CHHLTD == 0 {
-        panic!("| Endpoint {}: HCINT_CHHLTD not set, aborting.", channel);
+        panic!("| Endpoint {}: HCINT_CHHLTD not set, aborting. bulk out", channel);
     }
 
     if hcint & HCINT_XFERCOMPL == 0 {
-        panic!("| Endpoint {}: HCINT_XFERCOMPL not set, aborting.", channel);
+        panic!("| Endpoint {}: HCINT_XFERCOMPL not set, aborting. bulk out", channel);
     }
 
     //Most Likely not going to be called but could be useful for cases where precise timing of when message gets off the system is needed
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
     if let Some(callback) = endpoint_device.endpoints[endpoint.device_endpoint_number as usize] {
         let mut buffer = [0]; //fake buffer
-        unsafe { callback(buffer.as_mut_ptr(), device.last_transfer) };
+        unsafe { callback(buffer.as_mut_ptr(), last_transfer) };
     } else {
         panic!(
             "| USB: No callback for endpoint number {}.",
@@ -129,12 +134,13 @@ pub fn finish_bulk_endpoint_callback_out(
 
 pub fn finish_interrupt_endpoint_callback(
     endpoint: endpoint_descriptor,
-    hcint: u32,
+    hcint_: u32,
     channel: u8,
 ) -> bool {
+    let mut hcint = hcint_;
     let device = unsafe { &mut *endpoint.device };
     let transfer_size = HcdUpdateTransferSize(device, channel);
-    device.last_transfer = endpoint.buffer_length - transfer_size;
+    let last_transfer = endpoint.buffer_length - transfer_size;
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     //TODO: Hardcoded for usb-kbd for now
@@ -143,14 +149,32 @@ pub fn finish_interrupt_endpoint_callback(
     let dma_addr = dwc_sc.dma_addr[channel as usize];
 
     if hcint & HCINT_CHHLTD == 0 {
-        println!(
-            "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x}.",
-            channel, hcint
-        );
-        shutdown();
+        let mut i = 0;
+        let mut hcint_nochhltd = 0;
+        while i < 50 {
+            let hcint_nochhltd = dwc_otg::read_volatile(DOTG_HCINT(channel as usize));
+            if hcint_nochhltd & HCINT_CHHLTD != 0 {
+                break;
+            }
+            i += 1;
+            micro_delay(10);
+        }
+
+        if hcint_nochhltd & HCINT_CHHLTD == 0 {
+            // println!(
+            //     "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x} hcint2: {:x}",
+            //     channel, hcint, hcint_nochhltd
+            // );
+            DwcDisableChannel(channel);
+            hcint_nochhltd = dwc_otg::read_volatile(DOTG_HCINT(channel as usize));
+            // return true;
+        }
+
+
+        hcint |= hcint_nochhltd;
     }
 
-    let buffer_length = device.last_transfer.clamp(0, 8);
+    let buffer_length = last_transfer.clamp(0, 8);
     let mut buffer = Box::new_uninit_slice(buffer_length as usize);
 
     if hcint & HCINT_ACK != 0 {
