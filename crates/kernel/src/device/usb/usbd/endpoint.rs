@@ -13,6 +13,7 @@ use crate::device::usb::hcd::dwc::dwc_otg::{printDWCErrors, read_volatile, DWCSp
 use crate::device::usb::hcd::dwc::dwc_otgreg::{DOTG_HCTSIZ, DOTG_HFNUM, HCINT_FRMOVRUN, HCINT_NYET, HCINT_XACTERR, HFNUM_FRNUM_MASK};
 use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCSPLT;
 use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCCHAR;
+use crate::device::usb::DwcDisableChannel;
 use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCINT;
 use crate::device::usb::DwcFrameDifference;
 use crate::device::usb::hcd::dwc::dwc_otg;
@@ -157,7 +158,9 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
             //     "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x} hcint2: {:x}",
             //     channel, hcint, hcint_nochhltd
             // );
-            return true;
+            DwcDisableChannel(channel);
+            hcint_nochhltd = dwc_otg::read_volatile(DOTG_HCINT(channel as usize));
+            // return true;
         }
 
 
@@ -286,19 +289,19 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
                 let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
                 println!("| Endpoint CSPLIT {}: hcint {:x} last transfer {:x} hctisiz {:x}", channel, hcint, last_transfer, hctsiz);
     
-                use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_GINTSTS;
-                let gintsts = read_volatile(DOTG_GINTSTS);
-                use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCINT;
-                let hcint = read_volatile(DOTG_HCINT(channel as usize));
-                use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCCHAR;
-                let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
-                let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
+                // use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_GINTSTS;
+                // let gintsts = read_volatile(DOTG_GINTSTS);
+                // use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCINT;
+                // let hcint = read_volatile(DOTG_HCINT(channel as usize));
+                // use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCCHAR;
+                // let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+                // let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
     
-                println!("| HCD gintsts: {:#x}", gintsts);
-                println!("| HCD hcint: {:#x}", hcint);
-                println!("| HCD hcchar: {:#x}", hcchar);
-                println!("| HCD hctsiz: {:#x}", hctsiz);
-                println!("| HCD channel: {:#x}\n", channel);
+                // println!("| HCD gintsts: {:#x}", gintsts);
+                // println!("| HCD hcint: {:#x}", hcint);
+                // println!("| HCD hcchar: {:#x}", hcchar);
+                // println!("| HCD hctsiz: {:#x}", hctsiz);
+                // println!("| HCD channel: {:#x}\n", channel);
             }
         }
     }

@@ -451,7 +451,7 @@ pub fn ax88179_reset(dev: &mut UsbDevice) {
         // ax88179_get_mac_addr(dev);
         // memcpy(dev->net->perm_addr, dev->net->dev_addr, ETH_ALEN);
         ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_NODE_ID as u16, 6, 6,
-            MAC_ADDRESS.as_mut_ptr());
+            unsafe { MAC_ADDRESS.as_mut_ptr() });
 
         /* RX bulk configuration */
         // memcpy(tmp, &AX88179_BULKIN_SIZE[0], 5);

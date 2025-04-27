@@ -185,6 +185,13 @@ pub fn DwcEnableChannel(channel: u8) -> u32 {
     return frame;
 }
 
+pub fn DwcDisableChannel(channel: u8) {
+    let mut hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+    hcchar &= !HCCHAR_CHENA;
+    hcchar |= HCCHAR_CHDIS;
+    write_volatile(DOTG_HCCHAR(channel as usize), hcchar);
+}
+
 //frame2 should be before frame1
 pub fn DwcFrameDifference(frame1: u32, frame2: u32) -> u32 {
     if frame2 > frame1 {
