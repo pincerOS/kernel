@@ -183,6 +183,13 @@ pub fn NetSend(_buffer: *mut u8, _buffer_length: u32) {
 pub fn NetReceive(buffer: *mut u8, buffer_length: u32) {
     println!("| Net: Receive");
 
+    for i in 0..20 {
+        let byte = unsafe { *buffer.add(i as usize) };
+        print!("{:02X} ", byte);
+    }
+
+    println!();
+
     unsafe {
         if let Some(callback) = NET_DEVICE.receive_callback {
             callback(buffer, buffer_length);
