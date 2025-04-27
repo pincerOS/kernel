@@ -109,7 +109,8 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
 pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: u32, channel: u8, split_control: DWCSplitControlState) -> bool {
     let device = unsafe { &mut *endpoint.device };
     let transfer_size = HcdUpdateTransferSize(device, channel);
-    device.last_transfer = endpoint.buffer_length - transfer_size;
+    // device.last_transfer = endpoint.buffer_length - transfer_size;
+    let last_transfer = endpoint.buffer_length - transfer_size;
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     //TODO: Hardcoded for usb-kbd for now
@@ -182,7 +183,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
 
             if unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries >= 3} {
                 let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
-                println!("| Endpoint CSPLIT has exceeded 3 tries, giving up hctsiz {:x} last transfer {:x} state {:?}", hctsiz, device.last_transfer, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] });
+                println!("| Endpoint CSPLIT has exceeded 3 tries, giving up hctsiz {:x} last transfer {:x} state {:?}", hctsiz, last_transfer, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] });
                 return true;
             }
 
@@ -206,7 +207,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
                 DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state = DWCSplitStateMachine::NONE;
             }
             let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
-            println!("| Endpoint CSPLIT {}: hcint {:x} last transfer {:x} hctisiz {:x}", channel, hcint, device.last_transfer, hctsiz);
+            println!("| Endpoint CSPLIT {}: hcint {:x} last transfer {:x} hctisiz {:x}", channel, hcint, last_transfer, hctsiz);
 
             use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_GINTSTS;
             let gintsts = read_volatile(DOTG_GINTSTS);
@@ -224,13 +225,12 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
         }
     }
 
-    let mut buffer_length = device.last_transfer.clamp(0, 8);
-    let mut buffer = Box::new_uninit_slice(buffer_length as usize);
-
+    let mut buffer_length = last_transfer.clamp(0, 8);
+    
     if hcint & HCINT_ACK != 0 {
         endpoint_device.endpoint_pid[endpoint.device_endpoint_number as usize] += 1;
-
-        if device.last_transfer == 0 {
+        
+        if last_transfer == 0 {
             // if endpoint.buffer_length == 0 && transfer_size == 0 {
             buffer_length = 8;
             println!("| Endpoint {}: ACK received, but endpoint buffer is 0, weird. buffer len {} transfer siz {}", channel, endpoint.buffer_length, transfer_size);
@@ -238,7 +238,8 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             // }
         }
     }
-
+        
+    let mut buffer = Box::new_uninit_slice(buffer_length as usize);
     if hcint & HCINT_NAK != 0 {
         //NAK received, do nothing
         // assert_eq!(buffer_length, 0);
@@ -272,6 +273,8 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             endpoint.device_endpoint_number
         );
     }
+
+    device.last_transfer = last_transfer;
     return true;
 }
 
