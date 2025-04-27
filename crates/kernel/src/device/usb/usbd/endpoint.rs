@@ -201,13 +201,13 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
             let mut cur_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
 
             if DwcFrameDifference(cur_frame, ss_hfnum) >= 8 {
-                // println!("| Endpoint CSPLIT {} has exceeded 8 frames, cur_frame: {} ss_hfnum: {} giving up tries {}", channel, cur_frame, ss_hfnum, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries });
+                println!("| Endpoint CSPLIT {} has exceeded 8 frames, cur_frame: {} ss_hfnum: {} giving up tries {}", channel, cur_frame, ss_hfnum, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries });
                 return true;
             }
 
             if unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries >= 3} {
-                // let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
-                // println!("| Endpoint CSPLIT {} has exceeded 3 tries, giving up hctsiz {:x} last transfer {:x} state {:?}", channel, hctsiz, last_transfer, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] });
+                let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
+                println!("| Endpoint CSPLIT {} has exceeded 3 tries, giving up hctsiz {:x} last transfer {:x} state {:?}", channel, hctsiz, last_transfer, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] });
                 return true;
             }
 
