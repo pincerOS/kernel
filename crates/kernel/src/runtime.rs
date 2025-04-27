@@ -39,7 +39,7 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
         // crate::device::LED_OUT.get().put(0b00011000);
         // Shut down the system
         let mut watchdog = crate::device::WATCHDOG.get().lock();
-        unsafe { watchdog.reset(0) };
+        unsafe { watchdog.reset(63) };
     }
     halt();
 }

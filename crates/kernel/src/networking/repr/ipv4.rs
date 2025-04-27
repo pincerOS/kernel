@@ -165,7 +165,7 @@ impl AddressCidr {
         (address.as_u32() & mask) == (self.address.as_u32() & mask)
     }
     pub fn is_broadcast(&self, address: Address) -> bool {
-        println!("self broad {}", self.broadcast());
+        // println!("self broad {}", self.broadcast());
         address == self.broadcast()
     }
     pub fn broadcast(&self) -> Address {

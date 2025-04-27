@@ -36,7 +36,7 @@ use alloc::boxed::Box;
 pub const ChannelCount: usize = 8;
 pub static mut dwc_otg_driver: DWC_OTG = DWC_OTG { base_addr: 0 };
 
-// The USB_TRANSFER_QUEUE will hold future USB transfer requests (Usb Xfer). A channel is a representation by the USB spec to be able to access an endpoint (the thing talking to the USB device).
+// The USB_TRANSFER_QUEUE will hold future USB transfer requests (Usb Xfer). A channel is a resentation by the USB spec to be able to access an endpoint (the thing talking to the USB device).
 // Callbacks are the method that should be invoked once the data has been transferred.
 // USBD should first create a usb_xfer on the USB_TRANSFER_QUEUE and then see if a channel is available.
 // if a channel is available, it will be assigned to the usb_xfer and the callback will be set.
@@ -780,7 +780,7 @@ fn HcdChannelSendOne(
                 | HCINTMSK_CHHLTDMSK
                 | HCINTMSK_AHBERRMSK
                 | HCINTMSK_STALLMSK
-                | HCINTMSK_NAKMSK
+                // | HCINTMSK_NAKMSK
                 | HCINTMSK_ACKMSK
                 | HCINTMSK_NYETMSK
                 | HCINTMSK_XACTERRMSK
@@ -935,6 +935,13 @@ pub unsafe fn HcdSubmitInterruptMessage(
 
     device.error = UsbTransferError::NoError;
     return ResultCode::OK;
+}
+
+pub fn DwcDisableChannel(channel: u8) {
+    let mut hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
+    hcchar &= !HCCHAR_CHENA;
+    hcchar |= HCCHAR_CHDIS;
+    write_volatile(DOTG_HCCHAR(channel as usize), hcchar);
 }
 
 pub fn printDWCErrors(channel: u32) {
