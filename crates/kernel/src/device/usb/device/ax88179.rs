@@ -542,6 +542,7 @@ pub fn ax88179_link_reset(dev: &mut UsbDevice) {
 }
 
 pub fn ax88179_disable_eee(dev: &mut UsbDevice) {
+    println!("| AX88179: Disabling EEE");
     let mut tmp16 = GMII_PHY_PGSEL_PAGE3;
     unsafe { 
         ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID as u16,
@@ -558,6 +559,7 @@ pub fn ax88179_disable_eee(dev: &mut UsbDevice) {
 }
 
 pub fn mii_nway_restart(dev: &mut UsbDevice) {
+    println!("| AX88179: Restarting MII");
     let mut bmcr = ax88179_mdio_read(dev, MII_BMCR);
 
     if bmcr & 0x1000 == 0 {
@@ -567,6 +569,8 @@ pub fn mii_nway_restart(dev: &mut UsbDevice) {
 }
 
 pub fn ax88179_ethtool(dev: &mut UsbDevice) {
+    println!("| AX88179: Setting ethtool settings");
+
     let val = ax88179_phy_read_mmd_indirect(dev, MDIO_AN_EEE_ADV,
         MDIO_MMD_AN);
 

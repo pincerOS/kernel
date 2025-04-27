@@ -125,7 +125,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
     }
 
     let split_control_state = split_control.state;
-    let ss_hfnum = split_control.ss_hfnum;
+    let mut ss_hfnum = split_control.ss_hfnum;
 
     if split_control_state == DWCSplitStateMachine::SSPLIT {
         if hcint & HCINT_NAK != 0 {
@@ -146,9 +146,14 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
                 DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state = DWCSplitStateMachine::CSPLIT;
             }
             let mut cur_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+
+            
             while cur_frame - ss_hfnum < 2 {
                 cur_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
-                micro_delay(10);
+                // micro_delay(10);
+                if cur_frame < ss_hfnum {
+                    cur_frame += 0x3fff;
+                }
             }
             let frame = DwcActivateCsplit(channel);
             unsafe {
@@ -191,7 +196,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
 
             while cur_frame == mr_cs_hfnum {
                 cur_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
-                micro_delay(10);
+                // micro_delay(10);
             }
             
             let frame = DwcEnableChannel(channel);
