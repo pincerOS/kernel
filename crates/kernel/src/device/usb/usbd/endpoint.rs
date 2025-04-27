@@ -65,7 +65,7 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
     }
 
     if hcint & HCINT_XFERCOMPL == 0 {
-        panic!(
+        println!(
             "| Endpoint {} in: HCINT_XFERCOMPL not set, aborting. {:x}",
             channel, hcint
         );
