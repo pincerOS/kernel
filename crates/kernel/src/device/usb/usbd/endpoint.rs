@@ -42,11 +42,19 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
     let transfer_size = HcdUpdateTransferSize(device, channel);
     if transfer_size > endpoint.buffer_length {
         println!(
-            "| Endpoint {}: transfer size {} is greater than buffer length {} in bulk out",
+            "| Endpoint {}: transfer size {} is greater than buffer length {} in bulk in",
             channel, transfer_size, endpoint.buffer_length
         );
+        let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
+        println!(
+            "| Endpoint {}: hctsiz {:x} hcint {:x}",
+            channel, hctsiz, hcint
+        );
     }
-    let last_transfer = endpoint.buffer_length - transfer_size;
+
+    let last_transfer = transfer_size;
+
+    // let last_transfer = endpoint.buffer_length - transfer_size;
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     if hcint & HCINT_CHHLTD == 0 {
@@ -65,6 +73,7 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
 
     let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
     let dma_addr = dwc_sc.dma_addr[channel as usize];
+
 
     // let buffer = endpoint.buffer;
     // let buffer_length = device.last_transfer;
