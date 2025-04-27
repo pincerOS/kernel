@@ -454,7 +454,8 @@ pub fn ax88179_reset(dev: &mut UsbDevice) {
 
         /* RX bulk configuration */
         // memcpy(tmp, &AX88179_BULKIN_SIZE[0], 5);
-        // ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_RX_BULKIN_QCTRL, 5, 5, tmp);
+        let mut buf_tmp:[u8; 5] = [7, 0x4f, 0,	0x12, 0xff];
+        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_RX_BULKIN_QCTRL as u16, 5, 5, buf_tmp.as_mut_ptr());
 
         // dev->rx_urb_size = 1024 * 20;
 

@@ -118,11 +118,10 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
     let dma_addr = dwc_sc.dma_addr[channel as usize];
 
     if hcint & HCINT_CHHLTD == 0 {
-        println!(
+        panic!(
             "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x}.",
             channel, hcint
         );
-        shutdown();
     }
 
     let split_control_state = split_control.state;
@@ -225,11 +224,18 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
         }
     }
 
-    let buffer_length = device.last_transfer.clamp(0, 8);
+    let mut buffer_length = device.last_transfer.clamp(0, 8);
     let mut buffer = Box::new_uninit_slice(buffer_length as usize);
 
     if hcint & HCINT_ACK != 0 {
         endpoint_device.endpoint_pid[endpoint.device_endpoint_number as usize] += 1;
+
+        if device.last_transfer == 0 {
+            if endpoint.buffer_length == 0 && transfer_size == 0 {
+                buffer_length = 8;
+                println!("| Endpoint {}: ACK received, but endpoint buffer is 0, weird.", channel);
+            }
+        }
     }
 
     if hcint & HCINT_NAK != 0 {

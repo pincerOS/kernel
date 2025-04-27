@@ -226,6 +226,10 @@ pub unsafe fn UsbInterruptMessage(
             Some(usb_xfer.endpoint_descriptor);
     }
 
+    if usb_xfer.buffer_length != 8 {
+        println!("| USBD: Buffer length is at {} bytes", usb_xfer.buffer_length);
+    }
+
     let result = unsafe {
         HcdSubmitInterruptMessage(
             device,
