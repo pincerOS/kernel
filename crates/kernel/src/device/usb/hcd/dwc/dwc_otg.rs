@@ -914,7 +914,13 @@ fn HcdTransmitChannelNoWait(device: &UsbDevice, channel: u8, buffer: *mut u8) {
             .PacketsPerFrame = 1;
 
         if DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state == DWCSplitStateMachine::SSPLIT {
-            let hfnum = read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+            let mut hfnum = read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+
+            while hfnum % 8 == 6 {
+                micro_delay(10);
+                hfnum = read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+            }
+
             DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].ss_hfnum = hfnum;
         } //TODO: temporary
 
@@ -943,29 +949,29 @@ fn HcdChannelSendOne(
             DOTG_HCINTMSK(channel as usize),
             HCINTMSK_XFERCOMPLMSK
                 | HCINTMSK_CHHLTDMSK
-                | HCINTMSK_AHBERRMSK
-                | HCINTMSK_STALLMSK
-                | HCINTMSK_ACKMSK
-                | HCINTMSK_NYETMSK
-                | HCINTMSK_XACTERRMSK
-                | HCINTMSK_BBLERRMSK
-                | HCINTMSK_FRMOVRUNMSK
-                | HCINTMSK_DATATGLERRMSK,
+                // | HCINTMSK_AHBERRMSK
+                // | HCINTMSK_STALLMSK
+                // | HCINTMSK_ACKMSK
+                // | HCINTMSK_NYETMSK
+                // | HCINTMSK_XACTERRMSK
+                // | HCINTMSK_BBLERRMSK
+                // | HCINTMSK_FRMOVRUNMSK
+                // | HCINTMSK_DATATGLERRMSK,
         )
     } else {
         write_volatile(
             DOTG_HCINTMSK(channel as usize),
             HCINTMSK_XFERCOMPLMSK
                 | HCINTMSK_CHHLTDMSK
-                | HCINTMSK_AHBERRMSK
-                | HCINTMSK_STALLMSK
-                | HCINTMSK_NAKMSK
-                | HCINTMSK_ACKMSK
-                | HCINTMSK_NYETMSK
-                | HCINTMSK_XACTERRMSK
-                | HCINTMSK_BBLERRMSK
-                | HCINTMSK_FRMOVRUNMSK
-                | HCINTMSK_DATATGLERRMSK,
+                // | HCINTMSK_AHBERRMSK
+                // | HCINTMSK_STALLMSK
+                // | HCINTMSK_NAKMSK
+                // | HCINTMSK_ACKMSK
+                // | HCINTMSK_NYETMSK
+                // | HCINTMSK_XACTERRMSK
+                // | HCINTMSK_BBLERRMSK
+                // | HCINTMSK_FRMOVRUNMSK
+                // | HCINTMSK_DATATGLERRMSK,
         );
     }
 

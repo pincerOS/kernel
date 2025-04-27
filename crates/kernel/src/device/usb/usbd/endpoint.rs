@@ -58,14 +58,14 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     if hcint & HCINT_CHHLTD == 0 {
-        println!(
+        panic!(
             "| Endpoint {} in: HCINT_CHHLTD not set, not aborting. hcint: {:x}.",
             channel, hcint
         );
     }
 
     if hcint & HCINT_XFERCOMPL == 0 {
-        println!(
+        panic!(
             "| Endpoint {} in: HCINT_XFERCOMPL not set, aborting. {:x}",
             channel, hcint
         );
@@ -108,11 +108,11 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
     let last_transfer = endpoint.buffer_length - transfer_size; 
 
     if hcint & HCINT_CHHLTD == 0 {
-        println!("| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint {:x} Bulk out", channel, hcint);
+        panic!("| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint {:x} Bulk out", channel, hcint);
     }
 
     if hcint & HCINT_XFERCOMPL == 0 {
-        println!("| Endpoint {}: HCINT_XFERCOMPL not set, aborting.hcint {:x}  Bulk out", channel, hcint);
+        panic!("| Endpoint {}: HCINT_XFERCOMPL not set, aborting.hcint {:x}  Bulk out", channel, hcint);
     }
 
     // println!("| ENdpoint BULK SENT {}: hcint {:x}", channel, hcint);
@@ -146,11 +146,11 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
     let dma_addr = dwc_sc.dma_addr[channel as usize];
 
     if hcint & HCINT_CHHLTD == 0 {
-        // let hcchar = dwc_otg::read_volatile(DOTG_HCCHAR(channel as usize));
-        // println!(
-        //     "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x} hcchar: {:x}",
-        //     channel, hcint, hcchar
-        // );
+        let hcchar = dwc_otg::read_volatile(DOTG_HCCHAR(channel as usize));
+        panic!(
+            "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x} hcchar: {:x} finish_interrupt_endpoint_callback",
+            channel, hcint, hcchar
+        );
         let mut i = 0;
         let mut hcint_nochhltd = 0;
         while i < 50 {
@@ -174,6 +174,8 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
 
 
         hcint |= hcint_nochhltd;
+
+        return true;
     }
 
     let split_control_state = split_control.state;

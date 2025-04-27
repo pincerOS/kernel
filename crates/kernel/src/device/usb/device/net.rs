@@ -124,7 +124,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         NetInitiateReceive(device, receive_buffer, 0x10);
     }
     unsafe {
-        for i in 0..100 {
+        for i in 0..10 {
             NetSendPacket(
                 device,
                 buffer.as_mut_ptr(),
