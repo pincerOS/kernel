@@ -62,6 +62,7 @@ pub enum UsbDeviceRequestRequest {
     GetLineCoding = 0x21,
     SetControlLineState = 0x22,
     SendBreak = 0x23,
+    Command129 = 129,
 }
 
 pub fn command_to_usb_device_request(
@@ -78,6 +79,7 @@ pub fn command_to_usb_device_request(
         0x07 => UsbDeviceRequestRequest::SetConfiguration,
         0x08 => UsbDeviceRequestRequest::GetInterface,
         0x09 => UsbDeviceRequestRequest::SetInterface,
+        129 => UsbDeviceRequestRequest::Command129,
         _ => panic!("| USBDEVICE REQUEST cmd {} not implemented", cmd),
     }
 }
