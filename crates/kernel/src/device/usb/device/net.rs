@@ -121,7 +121,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // }
     unsafe {
         let receive_buffer = Box::new([0u8; 512]);
-        NetInitiateReceive(device, receive_buffer, 64);
+        NetInitiateReceive(device, receive_buffer, 0x10);
     }
     unsafe {
         for i in 0..100 {
@@ -167,7 +167,7 @@ pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
     }
 
     if buffer32[0] != 0 {
-        println!("| Net: Buffer1: {:?}", buffer32[0]);
+        // println!("| Net: Buffer1: {:?}", buffer32[0]);
 
     }
 }
@@ -175,16 +175,14 @@ pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
 pub fn NetSend(_buffer: *mut u8, _buffer_length: u32) {
     //Do nothing for now
     //Called when USB packet is actually sent out
-    println!("| Net: Send");
+    // println!("| Net: Send");
 }
 
 pub fn NetReceive(buffer: *mut u8, buffer_length: u32) {
     println!("| Net: Receive");
 
-    for i in 0..20 {
-        let byte = unsafe { *buffer.add(i as usize) };
-        print!("{:02X} ", byte);
-    }
+    use crate::device::mailbox::HexDisplay;
+    println!("{:x}", HexDisplay(unsafe { core::slice::from_raw_parts(buffer, 40) }));
 
     println!();
 
@@ -195,6 +193,10 @@ pub fn NetReceive(buffer: *mut u8, buffer_length: u32) {
             println!("| Net: No callback for receive.");
         }
     }
+
+    let mut device = unsafe { &mut *NET_DEVICE.device.unwrap() };
+    let b = Box::new([0u8; 1]);
+    NetInitiateReceive(device,b, 1);
 }
 
 pub fn RegisterNetReceiveCallback(callback: fn(*mut u8, u32)) {

@@ -226,7 +226,7 @@ define_property!(0x00038009 => struct PropSetTurbo {
 #[derive(Debug)]
 pub struct MailboxError;
 
-struct HexDisplay<'a, T>(&'a [T]);
+pub struct HexDisplay<'a, T>(pub &'a [T]);
 
 impl<T: core::fmt::LowerHex> core::fmt::LowerHex for HexDisplay<'_, T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
