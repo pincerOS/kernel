@@ -562,7 +562,7 @@ pub fn ax88179_disable_eee(dev: &mut UsbDevice) {
 pub fn mii_nway_restart(dev: &mut UsbDevice) {
     println!("| AX88179: Restarting MII");
     let mut bmcr = ax88179_mdio_read(dev, MII_BMCR);
-
+    println!("| AX88179: BMCR: {:#x}", bmcr);
     if bmcr & 0x1000 == 0 {
         bmcr |= 0x0200;
         ax88179_mdio_write(dev, MII_BMCR, bmcr);

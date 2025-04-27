@@ -1271,29 +1271,7 @@ pub unsafe fn HcdSubmitControlMessage(
             PacketId::Data0
         };
 
-        //print out the request in terms of bytes and print out the first 16 bytes of the data buffer
-        unsafe {
-            println!(
-                "| HCD: Control message to device {}: {:#x} {:#x} {:#x} {:#x} {:#x} {:#x} {:#x} {:#x}",
-                pipe.device,
-                *((request_buffer as *const u8).offset(0)),
-                *((request_buffer as *const u8).offset(1)),
-                *((request_buffer as *const u8).offset(2)),
-                *((request_buffer as *const u8).offset(3)),
-                *((request_buffer as *const u8).offset(4)),
-                *((request_buffer as *const u8).offset(5)),
-                *((request_buffer as *const u8).offset(6)),
-                *((request_buffer as *const u8).offset(7))
-            );
-            //print the first 16 bytes of the data buffer
-            for i in 0..buffer_length {
-                print!(
-                    "{:#x} ",
-                    *((data_buffer as *const u8).offset(i as isize))
-                );
-            }
-            println!()
-        }
+        
 
         is_data1 = !is_data1;
         result = HcdChannelSendWait(
@@ -1339,6 +1317,30 @@ pub unsafe fn HcdSubmitControlMessage(
             }
         } else {
             device.last_transfer = buffer_length;
+        }
+
+        //print out the request in terms of bytes and print out the first 16 bytes of the data buffer
+        unsafe {
+            println!(
+                "| HCD: Control message to device {}: {:#x} {:#x} {:#x} {:#x} {:#x} {:#x} {:#x} {:#x}",
+                pipe.device,
+                *((request_buffer as *const u8).offset(0)),
+                *((request_buffer as *const u8).offset(1)),
+                *((request_buffer as *const u8).offset(2)),
+                *((request_buffer as *const u8).offset(3)),
+                *((request_buffer as *const u8).offset(4)),
+                *((request_buffer as *const u8).offset(5)),
+                *((request_buffer as *const u8).offset(6)),
+                *((request_buffer as *const u8).offset(7))
+            );
+            //print the first 16 bytes of the data buffer
+            for i in 0..buffer_length {
+                print!(
+                    "{:#x} ",
+                    *((data_buffer as *const u8).offset(i as isize))
+                );
+            }
+            println!()
         }
     }
 

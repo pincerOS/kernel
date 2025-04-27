@@ -231,10 +231,11 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint: 
         endpoint_device.endpoint_pid[endpoint.device_endpoint_number as usize] += 1;
 
         if device.last_transfer == 0 {
-            if endpoint.buffer_length == 0 && transfer_size == 0 {
-                buffer_length = 8;
-                println!("| Endpoint {}: ACK received, but endpoint buffer is 0, weird.", channel);
-            }
+            // if endpoint.buffer_length == 0 && transfer_size == 0 {
+            buffer_length = 8;
+            println!("| Endpoint {}: ACK received, but endpoint buffer is 0, weird. buffer len {} transfer siz {}", channel, endpoint.buffer_length, transfer_size);
+            
+            // }
         }
     }
 
