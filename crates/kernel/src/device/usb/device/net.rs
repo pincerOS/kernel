@@ -34,6 +34,7 @@ pub static mut NET_DEVICE: NetDevice = NetDevice {
     device: None,
     net_send: None,
     net_receive: None,
+    truncation: 0,
 };
 
 pub static mut INTERFACE: Option<Interface> = None;
@@ -69,6 +70,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         unsafe {
             NET_DEVICE.net_send = Some(axge_send_packet);
             NET_DEVICE.net_receive = Some(axge_receive_packet);
+            NET_DEVICE.truncation = 8;
         }
 
     } else {
@@ -78,6 +80,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         unsafe {
             NET_DEVICE.net_send = Some(rndis_send_packet);
             NET_DEVICE.net_receive = Some(rndis_receive_packet);
+            NET_DEVICE.truncation = 44;
         }
     }
 
@@ -98,21 +101,21 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     //     device.endpoints[interface_number as usize][0 as usize].interval
     // );
 
-    // register_interrupt_endpoint(
-    //     device,
-    //     device.endpoints[interface_number as usize][0 as usize].interval as u32,
-    //     endpoint_address_to_num(
-    //         device.endpoints[interface_number as usize][0 as usize].endpoint_address,
-    //     ),
-    //     UsbDirection::In,
-    //     size_from_number(
-    //         device.endpoints[interface_number as usize][0 as usize]
-    //             .packet
-    //             .MaxSize as u32,
-    //     ),
-    //     0,
-    //     10,
-    // );
+    register_interrupt_endpoint(
+        device,
+        device.endpoints[interface_number as usize][0 as usize].interval as u32,
+        endpoint_address_to_num(
+            device.endpoints[interface_number as usize][0 as usize].endpoint_address,
+        ),
+        UsbDirection::In,
+        size_from_number(
+            device.endpoints[interface_number as usize][0 as usize]
+                .packet
+                .MaxSize as u32,
+        ),
+        0,
+        10,
+    );
 
     micro_delay(ms_to_micro(1500)); // Wait for 1.5 seconds
     // We currently have this 1.5 second delay to wait for the device to be ready
@@ -173,10 +176,8 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 
     // begin receieve series, this queues a receive to be ran which will eventually propogate back
     // to us through the rgistered `recv` function which then queues another receive
-    let buf = vec![0u8; 1600];
-    unsafe {
-        NetInitiateReceive(buf.into_boxed_slice(), 1500); // TODO: ask aaron if I need to use another function?
-    }
+    let buf = vec![0u8; 1]; //TODO: Technically, the buffer doesn't matter anymore
+    NetInitiateReceive(buf.into_boxed_slice(), 1500); // TODO: ask aaron if I need to use another function?
 
     // start dhcp
     unsafe {
@@ -191,6 +192,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 }
 
 pub fn NetInitiateReceive(buffer: Box<[u8]>, buffer_length: u32) {
+    println!("| Net: Initiate Receive");
     unsafe {
         if let Some(receive_func) = NET_DEVICE.net_receive {
             let device = NET_DEVICE.device.unwrap();
@@ -219,7 +221,8 @@ pub unsafe fn recv(buf: *mut u8, buf_len: u32) {
     let slice: &[u8] = unsafe { slice::from_raw_parts(buf, buf_len as usize) };
 
     let interface = get_interface_mut();
-    let _ = ethernet::recv_ethernet_frame(interface, slice, buf_len);
+    let truncation = unsafe { NET_DEVICE.truncation };
+    let _ = ethernet::recv_ethernet_frame(interface, slice, buf_len, truncation);
 }
 
 pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
@@ -272,6 +275,7 @@ pub struct NetDevice {
     pub device: Option<*mut UsbDevice>,
     pub net_send: Option<unsafe fn(&mut UsbDevice, *mut u8, u32) -> ResultCode>,
     pub net_receive: Option<unsafe fn(&mut UsbDevice, Box<[u8]>, u32) -> ResultCode>,
+    pub truncation: usize,
 }
 
 #[repr(u32)]
