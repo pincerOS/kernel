@@ -141,6 +141,8 @@ impl UARTInner {
         //         console.render();
         //     }
         //     drop(console);
+        use crate::sync::spin_sleep;
+
         spin_sleep(3000);
         // }
     }
