@@ -228,44 +228,40 @@ impl TcpSocket {
 
         println!("[!] sent syn");
         
-        let _ = self.recv().await;
-
-        self.seq_number += 1;
-
-        let flags = TCP_FLAG_SYN & TCP_FLAG_ACK;
-        tcp::send_tcp_packet(
-            interface,
-            self.binding.port,
-            saddr.port,
-            self.seq_number,
-            self.ack_number, 
-            flags,
-            self.window_size,
-            saddr.addr,
-            Vec::new(), 
-        );
-
-        self.state = TcpState::Established;
+        let _ = self.recv().await?;
 
         Ok(())
     }
 
-    pub fn send_enqueue(&mut self, payload: Vec<u8>, dest: SocketAddr) -> Result<()> {
+    pub async fn send_enqueue(&mut self, payload: Vec<u8>, dest: SocketAddr) -> Result<()> {
         if self.state != TcpState::Established {
             return Err(Error::NotConnected);
         }
 
         // verify the destination matches the connected remote address
-        if let Some(remote) = self.remote_addr {
-            if remote != dest {
-                return Err(Error::NotConnected);
-            }
-        } else {
-            return Err(Error::NotConnected);
-        }
+        // if let Some(remote) = self.remote_addr {
+        //     if remote != dest {
+        //         return Err(Error::NotConnected);
+        //     }
+        // } else {
+        //     return Err(Error::NotConnected);
+        // }
 
+        println!("\tCOWS! sending a packet");
         let interface = get_interface_mut();
-        tcp::send_tcp_packet(interface, self.binding.port, dest.port, self.seq_number, self.ack_number, self.flags, self.window_size, dest.addr, payload)
+        tcp::send_tcp_packet(
+            interface, 
+            self.binding.port, 
+            dest.port, 
+            self.seq_number, 
+            self.ack_number, 
+            TCP_FLAG_PSH | TCP_FLAG_ACK, 
+            self.window_size, 
+            dest.addr, 
+            payload
+        );
+
+        Ok(())
     }
 
     pub async fn recv(&mut self) -> Result<(Vec<u8>, SocketAddr)> {
@@ -283,6 +279,29 @@ impl TcpSocket {
         payload.truncate(payload.len().saturating_sub(11)); // get rid of context bytes
         
         match self.state {
+            TcpState::SynSent => {
+                if flags & TCP_FLAG_RST != 0 {
+                    return Err(Error::Closed);
+                } else if flags & (TCP_FLAG_ACK | TCP_FLAG_SYN) != 0 {
+                    self.seq_number += 1;
+                    self.ack_number = seq_number + 1;
+
+                    tcp::send_tcp_packet(
+                        interface,
+                        self.binding.port,
+                        addr.port,
+                        self.seq_number,
+                        self.ack_number,
+                        TCP_FLAG_ACK,
+                        self.window_size,
+                        addr.addr,
+                        Vec::new(),
+                    )?;
+
+                    self.state = TcpState::Established;
+                }
+
+            }
             TcpState::FinWait1 => {
                 if flags & TCP_FLAG_ACK != 0 {
                     // Our FIN was acknowledged
@@ -403,82 +422,9 @@ impl TcpSocket {
         payload_with_context.push(flags);
         payload_with_context.extend_from_slice(&window_size.to_le_bytes());
         
-        // let packet = TcpPacket::new(sender.port, self.binding.port, seq_number, ack_number, flags, window_size, payload, sender.addr, self.binding.addr);
         self.recv_tx.send((payload_with_context, sender)).await;
         Ok(())
 
-        // if self.state == TcpState::SynSent {
-        //     // Check if this is a valid remote endpoint response
-        //     if let Some(remote) = self.remote_addr {
-        //         if remote == sender {
-        //             // This is a response to our SYN
-        //             if (flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) == (TCP_FLAG_SYN | TCP_FLAG_ACK) {
-        //                 // Received SYN-ACK, update ACK number
-        //                 self.ack_number = seq_number + 1;
-        //
-        //                 // Send ACK to complete three-way handshake
-        //                 tcp::send_tcp_packet(
-        //                     interface,
-        //                     self.binding.port,
-        //                     sender.port,
-        //                     self.seq_number + 1, // SYN consumes one sequence number
-        //                     self.ack_number,
-        //                     TCP_FLAG_ACK,
-        //                     self.window_size,
-        //                     sender.addr,
-        //                     Vec::new(),
-        //                 )?;
-        //
-        //                 // Update state and sequence number
-        //                 self.state = TcpState::Established;
-        //                 self.connected = true;
-        //                 self.seq_number += 1; // SYN consumes one sequence number
-        //
-        //                 return Ok(());
-        //             }
-        //         }
-        //     }
-        // } else if self.state == TcpState::Closed {
-        //     // Handle incoming SYN for passive open (if we're listening)
-        //     if flags & TCP_FLAG_SYN != 0 && flags & TCP_FLAG_ACK == 0 {
-        //         // This would be for a server socket - not handling passive open in this example
-        //         // But this is where you would handle it
-        //     }
-        // }
-        //
-        // // Process state transitions based on TCP flags
-        // self.process_tcp_state_transitions(interface, flags, seq_number, ack_number, sender)?;
-        //
-        // // Now that we've handled any state transitions, enqueue actual data for user
-        // // Only enqueue if we're in established state and there's actual data
-        // if self.state == TcpState::Established && (payload.len() > 0) {
-        //     // Only enqueue if there's actual data
-        //     self.recv_buffer.enqueue_maybe(|(buffer, addr)| {
-        //         *buffer = payload.clone();
-        //         *addr = sender;
-        //         Ok(())
-        //     })?;
-        //
-        //     // Update ACK number and send ACK for the data
-        //     self.ack_number = seq_number + payload.len() as u32;
-        //
-        //     // Send ACK for received data
-        //     if let Some(remote) = self.remote_addr {
-        //         tcp::send_tcp_packet(
-        //             interface,
-        //             self.binding.port,
-        //             remote.port,
-        //             self.seq_number,
-        //             self.ack_number,
-        //             TCP_FLAG_ACK,
-        //             self.window_size,
-        //             remote.addr,
-        //             Vec::new(),
-        //         )?;
-        //     }
-        // }
-
-        // Ok(())
     }
 
     // Returns the number of packets enqueued for sending.

@@ -37,7 +37,7 @@ impl TaggedSocket {
         match self {
             // TaggedSocket::Raw(socket) => socket.queue_send(payload, saddr),
             TaggedSocket::Udp(socket) => socket.send_enqueue(payload, saddr).await,
-            TaggedSocket::Tcp(socket) => socket.send_enqueue(payload, saddr),
+            TaggedSocket::Tcp(socket) => socket.send_enqueue(payload, saddr).await,
         }
     }
 
