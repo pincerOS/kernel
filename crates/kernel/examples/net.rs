@@ -49,7 +49,7 @@ async fn main() {
     // println!("udp listening test");
     // let s = UdpSocket::new();
     //
-    // bind(s, 2222);
+    // bind(s, 53);
     //
     // for i in 0..5 {
     //     println!("listening for packets");
@@ -82,19 +82,19 @@ async fn main() {
 
 
     // [tcp recv test]
-    let s = TcpSocket::new();
-
-    bind(s, 1337);
-    listen(s, 1); // has a timeout, we will wait for 5 seconds
-
-    let clientfd = accept(s).await;
-
-    for i in 0..5 {
-        let recv = recv_from(*clientfd.as_ref().unwrap()).await;
-        if let Ok((payload, senderaddr)) = recv {
-            println!("got message: {:x?}", payload);
-        }
-    }
+    // let s = TcpSocket::new();
+    //
+    // bind(s, 1337);
+    // listen(s, 1); // has a timeout, we will wait for 5 seconds
+    //
+    // let clientfd = accept(s).await;
+    //
+    // for i in 0..5 {
+    //     let recv = recv_from(*clientfd.as_ref().unwrap()).await;
+    //     if let Ok((payload, senderaddr)) = recv {
+    //         println!("got message: {:x?}", payload);
+    //     }
+    // }
 
     // there is a delay when calling NetSend on a packet, this loop is to allow all the packets to
     // drain out

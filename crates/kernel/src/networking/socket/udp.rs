@@ -47,6 +47,7 @@ impl UdpSocket {
     }
 
     pub fn binding_equals(&self, saddr: SocketAddr) -> bool {
+        println!("binding port {} provided port {}", self.binding.port, saddr.port);
         self.binding.port == saddr.port
     }
 
