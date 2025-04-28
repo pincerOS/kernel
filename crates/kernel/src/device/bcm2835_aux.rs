@@ -223,7 +223,7 @@ impl MiniUart {
         //         console.render();
         //     }
         //     drop(console);
-        //     crate::sync::spin_sleep(3000);
+        crate::sync::spin_sleep(3000);
         // }
     }
 }
