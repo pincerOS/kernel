@@ -238,7 +238,6 @@ impl TcpSocket {
             return Err(Error::NotConnected);
         }
 
-        // verify the destination matches the connected remote address
         // if let Some(remote) = self.remote_addr {
         //     if remote != dest {
         //         return Err(Error::NotConnected);
@@ -247,7 +246,6 @@ impl TcpSocket {
         //     return Err(Error::NotConnected);
         // }
 
-        println!("\tCOWS! sending a packet");
         let interface = get_interface_mut();
         tcp::send_tcp_packet(
             interface, 
@@ -255,11 +253,14 @@ impl TcpSocket {
             dest.port, 
             self.seq_number, 
             self.ack_number, 
-            TCP_FLAG_PSH | TCP_FLAG_ACK, 
+            // TCP_FLAG_PSH | TCP_FLAG_ACK, 
+            TCP_FLAG_ACK, 
             self.window_size, 
             dest.addr, 
             payload
         );
+
+        self.recv().await;
 
         Ok(())
     }
@@ -380,19 +381,25 @@ impl TcpSocket {
                     return Err(Error::Closed);
                 }
 
-                self.ack_number += payload.len() as u32;
-                self.seq_number += 1;
-                tcp::send_tcp_packet(
-                    interface, 
-                    self.binding.port, 
-                    addr.port, 
-                    self.seq_number, 
-                    self.ack_number, 
-                    TCP_FLAG_ACK, 
-                    self.window_size, 
-                    addr.addr, 
-                    Vec::new()
-                );
+                if payload.len() > 0 {
+                    self.ack_number += payload.len() as u32;
+                    self.seq_number += 1;
+                    tcp::send_tcp_packet(
+                        interface, 
+                        self.binding.port, 
+                        addr.port, 
+                        self.seq_number, 
+                        self.ack_number, 
+                        TCP_FLAG_ACK, 
+                        self.window_size, 
+                        addr.addr, 
+                        Vec::new()
+                    );
+                } else {
+                    let old_seq = self.seq_number;
+                    self.seq_number = ack_number;
+                    self.ack_number = old_seq + payload.len() as u32;
+                }
             },
             _ => {},
         }
