@@ -88,7 +88,7 @@ pub unsafe fn axge_receive_packet(
     buffer: Box<[u8]>,
     buffer_length: u32,
 ) -> ResultCode {
-    println!("| AXGE: Receiving packet");
+    // println!("| AXGE: Receiving packet");
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
     let pid = if endpoint_device.endpoint_pid[2] % 2 == 0 {
         PacketId::Data0

@@ -38,7 +38,7 @@ pub static NEXT_FRAME_CS: SpinLock<u32> = SpinLock::new(0);
 
 pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u32, channel: u8, _split_control: DWCSplitControlState) -> bool {
     let device = unsafe { &mut *endpoint.device };
-
+    let last_transfer;
     let transfer_size = HcdUpdateTransferSize(device, channel);
     if transfer_size > endpoint.buffer_length {
         println!(
@@ -50,9 +50,11 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
             "| Endpoint {}: hctsiz {:x} hcint {:x}",
             channel, hctsiz, hcint
         );
+        last_transfer = transfer_size;
+    } else {
+        last_transfer = endpoint.buffer_length - transfer_size;
     }
 
-    let last_transfer = transfer_size;
 
     // let last_transfer = endpoint.buffer_length - transfer_size;
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();

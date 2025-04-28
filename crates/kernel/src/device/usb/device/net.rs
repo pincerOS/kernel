@@ -67,21 +67,21 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     endpoint_device.endpoints[1] = Some(NetSend);
     endpoint_device.endpoints[2] = Some(NetReceive);
 
-    // register_interrupt_endpoint(
-    //     device,
-    //     device.endpoints[interface_number as usize][0 as usize].interval as u32,
-    //     endpoint_address_to_num(
-    //         device.endpoints[interface_number as usize][0 as usize].endpoint_address,
-    //     ),
-    //     UsbDirection::In,
-    //     size_from_number(
-    //         device.endpoints[interface_number as usize][0 as usize]
-    //             .packet
-    //             .MaxSize as u32,
-    //     ),
-    //     0,
-    //     10,
-    // );
+    register_interrupt_endpoint(
+        device,
+        device.endpoints[interface_number as usize][0 as usize].interval as u32,
+        endpoint_address_to_num(
+            device.endpoints[interface_number as usize][0 as usize].endpoint_address,
+        ),
+        UsbDirection::In,
+        size_from_number(
+            device.endpoints[interface_number as usize][0 as usize]
+                .packet
+                .MaxSize as u32,
+        ),
+        0,
+        10,
+    );
 
     let mut buffer = [0u8; 64];
     // Ethernet Frame
@@ -121,7 +121,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // }
     unsafe {
         let receive_buffer = Box::new([0u8; 512]);
-        NetInitiateReceive(device, receive_buffer, 0x10);
+        NetInitiateReceive(device, receive_buffer, 1500);
     }
     unsafe {
         for i in 0..10 {
@@ -196,7 +196,7 @@ pub fn NetReceive(buffer: *mut u8, buffer_length: u32) {
 
     let mut device = unsafe { &mut *NET_DEVICE.device.unwrap() };
     let b = Box::new([0u8; 1]);
-    NetInitiateReceive(device,b, 1);
+    NetInitiateReceive(device,b, 1500);
 }
 
 pub fn RegisterNetReceiveCallback(callback: fn(*mut u8, u32)) {
