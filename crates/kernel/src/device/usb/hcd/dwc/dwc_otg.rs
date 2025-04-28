@@ -16,6 +16,7 @@
 use core::time;
 
 use crate::device::usb::hcd::dwc::dwc_otgreg::*;
+use crate::device::usb::usbd::endpoint::SPLIT_CONTROL_IN_PROGRESS;
 use crate::device::usb::hcd::dwc::roothub::*;
 use crate::device::usb::types::*;
 use crate::device::usb::usbd::device::*;
@@ -57,32 +58,79 @@ pub fn dwc_otg_register_interrupt_handler() {
 fn schedule_next_transfer(channel: u8) {
     // println!("| DWC: Scheduling next transfer on channel {}", channel);
     //Check if another transfer is pending
-    if let Some(transfer) = USB_TRANSFER_QUEUE.get_transfer() {
-        //Enable transfer, keep holding channel
+    // if let Some(transfer) = USB_TRANSFER_QUEUE.get_transfer() {
+    //     //Enable transfer, keep holding channel
 
-        let endpoint = &transfer.endpoint_descriptor;
-        let device = unsafe { &mut *endpoint.device };
+    //     let endpoint = &transfer.endpoint_descriptor;
+    //     let device = unsafe { &mut *endpoint.device };
 
-        //check if the transfer is a bulk transfer or endpoint transfer
-        match transfer.as_ref().endpoint_descriptor.endpoint_type {
-            //TODO: Kinda cursed, maybe make cleaner
-            UsbTransfer::Bulk => unsafe {
-                // println!("| DWC: Bulk transfer on channel {}", channel);
-                UsbBulkMessage(device, transfer, channel);
-            },
-            UsbTransfer::Interrupt => unsafe {
-                // println!("| DWC: Interrupt transfer on channel {}", channel);
-                UsbInterruptMessage(device, transfer, channel);
-            },
-            _ => {
-                //Really should not be here
-                panic!("DWC: Interrupt Handler Unsupported transfer type");
+    //     //check if the transfer is a bulk transfer or endpoint transfer
+    //     match transfer.as_ref().endpoint_descriptor.endpoint_type {
+    //         //TODO: Kinda cursed, maybe make cleaner
+    //         UsbTransfer::Bulk => unsafe {
+    //             // println!("| DWC: Bulk transfer on channel {}", channel);
+    //             UsbBulkMessage(device, transfer, channel);
+    //         },
+    //         UsbTransfer::Interrupt => unsafe {
+    //             // println!("| DWC: Interrupt transfer on channel {}", channel);
+    //             UsbInterruptMessage(device, transfer, channel);
+    //         },
+    //         _ => {
+    //             //Really should not be here
+    //             panic!("DWC: Interrupt Handler Unsupported transfer type");
+    //         }
+    //     }
+    // } else {
+    //     // println!("| DWC: No more transfers pending on channel {}", channel);
+    //     //Don't need the occupy channel anymore
+    //     dwc_otg_free_channel(channel as u32);
+    // }
+
+
+    if dwc_otg_is_interrupt_channel(channel) {
+        if let Some(transfer) = USB_TRANSFER_QUEUE.get_interrupt_transfer() {
+            //Enable transfer, keep holding channel
+            let endpoint = &transfer.endpoint_descriptor;
+            let device = unsafe { &mut *endpoint.device };
+
+            //check if the transfer is a bulk transfer or endpoint transfer
+            match transfer.as_ref().endpoint_descriptor.endpoint_type {
+                UsbTransfer::Interrupt => unsafe {
+                    // println!("| DWC: Interrupt transfer on channel {}", channel);
+                    UsbInterruptMessage(device, transfer, channel);
+                },
+                _ => {
+                    //Really should not be here
+                    panic!("DWC: Interrupt Handler INTERRUPT only SHOULD NOT BE BULK Unsupported transfer type");
+                }
             }
+        } else {
+            // println!("| DWC: No more transfers pending on channel {}", channel);
+            //Don't need the occupy channel anymore
+            dwc_otg_free_channel(channel as u32);
         }
     } else {
-        // println!("| DWC: No more transfers pending on channel {}", channel);
-        //Don't need the occupy channel anymore
-        dwc_otg_free_channel(channel as u32);
+        if let Some(transfer) = USB_TRANSFER_QUEUE.get_bulk_transfer() {
+            //Enable transfer, keep holding channel
+            let endpoint = &transfer.endpoint_descriptor;
+            let device = unsafe { &mut *endpoint.device };
+
+            //check if the transfer is a bulk transfer or endpoint transfer
+            match transfer.as_ref().endpoint_descriptor.endpoint_type {
+                UsbTransfer::Bulk => unsafe {
+                    // println!("| DWC: Bulk transfer on channel {}", channel);
+                    UsbBulkMessage(device, transfer, channel);
+                },
+                _ => {
+                    //Really should not be here
+                    panic!("DWC: Interrupt Handler BULK only SHOULD NOT BE INTERRUPT Unsupported transfer type");
+                }
+            }
+        } else {
+            // println!("| DWC: No more transfers pending on channel {}", channel);
+            //Don't need the occupy channel anymore
+            dwc_otg_free_channel(channel as u32);
+        }
     }
 }
 
@@ -288,6 +336,7 @@ fn HcdPrepareChannel(
         dwc_sc.channel[channel as usize].split_control.PortAddress = device.port_number + 1;
 
         unsafe { 
+            *SPLIT_CONTROL_IN_PROGRESS.lock() = true;
             DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state = DWCSplitStateMachine::SSPLIT; 
             DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].ss_hfnum = read_volatile(DOTG_HFNUM);
         }
@@ -926,7 +975,26 @@ fn HcdTransmitChannelNoWait(device: &UsbDevice, channel: u8, buffer: *mut u8) {
             }
 
             DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].ss_hfnum = hfnum;
-        } //TODO: temporary
+        } else if dwc_sc.channel[channel as usize].characteristics.Type == UsbTransfer::Bulk {
+            //if bulk transfer
+
+            let mut flag = true;
+
+            while flag {
+                let split_active = {
+                    let guard = SPLIT_CONTROL_IN_PROGRESS.lock();
+                    *guard
+                };
+
+                if split_active == false {
+                    flag = false;
+                } else {
+                    // crate::event::thread::yield_();
+                    micro_delay(10);
+                }
+
+            }
+        }
 
         write_volatile(
             DOTG_HCCHAR(channel as usize),
@@ -1073,76 +1141,76 @@ pub unsafe fn HcdSubmitBulkMessage(
     return ResultCode::OK;
 }
 
-pub unsafe fn HcdSubmitInterruptMessage2(
-    device: &mut UsbDevice,
-    channel: u8,
-    pipe: UsbPipeAddress,
-    buffer: *mut u8,
-    buffer_length: u32,
-    packet_id: PacketId,
-) -> ResultCode {
-    let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
-    device.error = UsbTransferError::Processing;
-    device.last_transfer = 0;
+// pub unsafe fn HcdSubmitInterruptMessage2(
+//     device: &mut UsbDevice,
+//     channel: u8,
+//     pipe: UsbPipeAddress,
+//     buffer: *mut u8,
+//     buffer_length: u32,
+//     packet_id: PacketId,
+// ) -> ResultCode {
+//     let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
+//     device.error = UsbTransferError::Processing;
+//     device.last_transfer = 0;
 
-    let mut tempPipe = UsbPipeAddress {
-        max_size: pipe.max_size,
-        speed: pipe.speed,
-        end_point: pipe.end_point,
-        device: pipe.device,
-        transfer_type: UsbTransfer::Interrupt,
-        direction: UsbDirection::In,
-        _reserved: 0,
-    };
-    let result = HcdChannelSendWait(
-        device,
-        &mut tempPipe,
-        channel,
-        buffer,
-        buffer_length,
-        &mut UsbDeviceRequest { request_type: 0, request: crate::device::usb::usbd::request::UsbDeviceRequestRequest::ClearFeature, value: 0, index: 0, length: 0 },
-        packet_id,
-    );
+//     let mut tempPipe = UsbPipeAddress {
+//         max_size: pipe.max_size,
+//         speed: pipe.speed,
+//         end_point: pipe.end_point,
+//         device: pipe.device,
+//         transfer_type: UsbTransfer::Interrupt,
+//         direction: UsbDirection::In,
+//         _reserved: 0,
+//     };
+//     let result = HcdChannelSendWait(
+//         device,
+//         &mut tempPipe,
+//         channel,
+//         buffer,
+//         buffer_length,
+//         &mut UsbDeviceRequest { request_type: 0, request: crate::device::usb::usbd::request::UsbDeviceRequestRequest::ClearFeature, value: 0, index: 0, length: 0 },
+//         packet_id,
+//     );
 
-    if pipe.direction == UsbDirection::In {
-        // Read the data from the device.
-        let hctsiz = read_volatile(DOTG_HCTSIZ(0));
-        // dwc_sc.channel[0].transfer_size.TransferSize = hctsiz & 0x7ffff;
-        convert_into_host_transfer_size(hctsiz, &mut dwc_sc.channel[0].transfer_size);
-        if dwc_sc.channel[0].transfer_size.TransferSize <= buffer_length {
-            device.last_transfer = buffer_length - dwc_sc.channel[0].transfer_size.TransferSize;
-        } else {
-            println!("| HCD: Weird transfer size\n");
-            device.last_transfer = buffer_length;
-        }
-        use crate::device::usb::usbd::endpoint::UsbEndpointDevice;
-        let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
-        endpoint_device.endpoint_pid[0] += 1;
-        endpoint_device.endpoint_pid[1] += 1;
-        endpoint_device.endpoint_pid[2] += 1;
-        endpoint_device.endpoint_pid[3] += 1;
-        endpoint_device.endpoint_pid[4] += 1;
+//     if pipe.direction == UsbDirection::In {
+//         // Read the data from the device.
+//         let hctsiz = read_volatile(DOTG_HCTSIZ(0));
+//         // dwc_sc.channel[0].transfer_size.TransferSize = hctsiz & 0x7ffff;
+//         convert_into_host_transfer_size(hctsiz, &mut dwc_sc.channel[0].transfer_size);
+//         if dwc_sc.channel[0].transfer_size.TransferSize <= buffer_length {
+//             device.last_transfer = buffer_length - dwc_sc.channel[0].transfer_size.TransferSize;
+//         } else {
+//             println!("| HCD: Weird transfer size\n");
+//             device.last_transfer = buffer_length;
+//         }
+//         use crate::device::usb::usbd::endpoint::UsbEndpointDevice;
+//         let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
+//         endpoint_device.endpoint_pid[0] += 1;
+//         endpoint_device.endpoint_pid[1] += 1;
+//         endpoint_device.endpoint_pid[2] += 1;
+//         endpoint_device.endpoint_pid[3] += 1;
+//         endpoint_device.endpoint_pid[4] += 1;
         
-        unsafe {
-            memory_copy(
-                buffer,
-                dwc_sc.dma_addr[channel as usize] as *const u8,
-                device.last_transfer as usize,
-            );
-        }
+//         unsafe {
+//             memory_copy(
+//                 buffer,
+//                 dwc_sc.dma_addr[channel as usize] as *const u8,
+//                 device.last_transfer as usize,
+//             );
+//         }
 
-    }
+//     }
 
-    //transfer data cout
+//     //transfer data cout
 
-    dwc_otg_free_channel(channel as u32);
-    if result != ResultCode::OK {
-        println!("| HCD: Failed to send interrupt message to device.\n");
-        return result;
-    }
+//     dwc_otg_free_channel(channel as u32);
+//     if result != ResultCode::OK {
+//         println!("| HCD: Failed to send interrupt message to device.\n");
+//         return result;
+//     }
 
-    return ResultCode::OK;
-}
+//     return ResultCode::OK;
+// }
 
 pub unsafe fn HcdSubmitInterruptMessage(
     device: &mut UsbDevice,
@@ -2054,9 +2122,40 @@ impl DwcChannelActive {
     }
 }
 
-pub fn dwc_otg_get_active_channel() -> u8 {
+// pub fn dwc_otg_get_active_channel() -> u8 {
+//     let mut dwc_channels = DWC_CHANNEL_ACTIVE.lock();
+//     for i in 1..ChannelCount {
+//         if dwc_channels.channel[i] == 0 {
+//             dwc_channels.channel[i] = 1;
+//             return i as u8;
+//         }
+//     }
+//     return ChannelCount as u8;
+// }
+
+pub const INTERRUPT_CHANNELS: usize = 6;
+
+pub fn dwc_otg_is_interrupt_channel(channel: u8) -> bool {
+    if channel < INTERRUPT_CHANNELS as u8 {
+        return true;
+    }
+    return false;
+}
+
+pub fn dwc_otg_get_interrupt_channel() -> u8 {
     let mut dwc_channels = DWC_CHANNEL_ACTIVE.lock();
-    for i in 1..ChannelCount {
+    for i in 1..INTERRUPT_CHANNELS {
+        if dwc_channels.channel[i] == 0 {
+            dwc_channels.channel[i] = 1;
+            return i as u8;
+        }
+    }
+    return ChannelCount as u8;
+}
+
+pub fn dwc_otg_get_bulk_channel() -> u8 {
+    let mut dwc_channels = DWC_CHANNEL_ACTIVE.lock();
+    for i in INTERRUPT_CHANNELS..ChannelCount {
         if dwc_channels.channel[i] == 0 {
             dwc_channels.channel[i] = 1;
             return i as u8;
@@ -2066,14 +2165,14 @@ pub fn dwc_otg_get_active_channel() -> u8 {
 }
 
 //TODO: Make this a mutex
-pub fn dwc_otg_get_control_channel() -> u32 {
-    let mut dwc_channels = DWC_CHANNEL_ACTIVE.lock();
-    if dwc_channels.channel[0] == 0 {
-        dwc_channels.channel[0] = 1;
-        return 0 as u32;
-    }
-    return ChannelCount as u32;
-}
+// pub fn dwc_otg_get_control_channel() -> u32 {
+//     let mut dwc_channels = DWC_CHANNEL_ACTIVE.lock();
+//     if dwc_channels.channel[0] == 0 {
+//         dwc_channels.channel[0] = 1;
+//         return 0 as u32;
+//     }
+//     return ChannelCount as u32;
+// }
 
 pub fn dwc_otg_free_channel(channel: u32) {
     let mut dwc_channels = DWC_CHANNEL_ACTIVE.lock();

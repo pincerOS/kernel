@@ -125,14 +125,15 @@ pub unsafe fn UsbSendBulkMessage(
         panic!("| USBD: Failed to add transfer to queue");
     }
 
-    let available_channel = dwc_otg_get_active_channel();
+    // let available_channel = dwc_otg_get_active_channel();
+    let available_channel = dwc_otg_get_bulk_channel();
     if available_channel == ChannelCount as u8 {
         //no available channel at the moment
         return ResultCode::OK;
     }
 
     unsafe {
-        let transfer = USB_TRANSFER_QUEUE.get_transfer();
+        let transfer = USB_TRANSFER_QUEUE.get_bulk_transfer();
 
         if transfer.is_none() {
             dwc_otg_free_channel(available_channel as u32);
@@ -197,14 +198,15 @@ pub unsafe fn UsbSendInterruptMessage(
         panic!("| USBD: Failed to add transfer to queue");
     }
 
-    let available_channel = dwc_otg_get_active_channel();
+    // let available_channel = dwc_otg_get_active_channel();
+    let available_channel = dwc_otg_get_interrupt_channel();
     if available_channel == ChannelCount as u8 {
         //no available channel at the moment
         return ResultCode::OK;
     }
 
     unsafe {
-        let transfer = USB_TRANSFER_QUEUE.get_transfer();
+        let transfer = USB_TRANSFER_QUEUE.get_interrupt_transfer();
 
         if transfer.is_none() {
             dwc_otg_free_channel(available_channel as u32);

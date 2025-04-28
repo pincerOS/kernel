@@ -52,17 +52,25 @@ impl UsbTransferQueue {
         transfer_result
     }
 
-    pub fn get_transfer(&self) -> Option<Box<UsbXfer>> {
-        let mut transfer_result;
-        unsafe {
-            transfer_result = self.interrupt_queue.lock().try_recv();
-        }
-        if transfer_result.is_none() {
-            unsafe {
-                transfer_result = self.bulk_queue.lock().try_recv();
-            }
-        }
-        transfer_result
+    // pub fn get_transfer(&self) -> Option<Box<UsbXfer>> {
+    //     let mut transfer_result;
+    //     unsafe {
+    //         transfer_result = self.interrupt_queue.lock().try_recv();
+    //     }
+    //     if transfer_result.is_none() {
+    //         unsafe {
+    //             transfer_result = self.bulk_queue.lock().try_recv();
+    //         }
+    //     }
+    //     transfer_result
+    // }
+
+    pub fn get_interrupt_transfer(&self) -> Option<Box<UsbXfer>> {
+        unsafe { self.interrupt_queue.lock().try_recv() }
+    }
+
+    pub fn get_bulk_transfer(&self) -> Option<Box<UsbXfer>> {
+        unsafe { self.bulk_queue.lock().try_recv() }
     }
 }
 

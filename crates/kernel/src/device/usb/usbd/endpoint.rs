@@ -35,6 +35,7 @@ use crate::SpinLock;
 use alloc::boxed::Box;
 
 pub static NEXT_FRAME_CS: SpinLock<u32> = SpinLock::new(0);
+pub static SPLIT_CONTROL_IN_PROGRESS: SpinLock<bool> = SpinLock::new(false);
 
 pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u32, channel: u8, _split_control: DWCSplitControlState) -> bool {
     let device = unsafe { &mut *endpoint.device };
@@ -237,6 +238,10 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
     } else if split_control_state == DWCSplitStateMachine::CSPLIT {
         if hcint & HCINT_NAK != 0 {
             // println!("| Endpoint CSPLIT {}: NAK received hcint {:x}", channel, hcint);
+            unsafe {
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state = DWCSplitStateMachine::NONE;
+            }
+            *SPLIT_CONTROL_IN_PROGRESS.lock() = false;
         } else if hcint & HCINT_FRMOVRUN != 0 {
             println!("| Endpoint CSPLIT {}: Frame overrun hcint {:x}", channel, hcint);
             UpdateDwcOddFrame(channel);
@@ -250,11 +255,13 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
 
             if DwcFrameDifference(cur_frame, ss_hfnum) >= 8 {
                 // println!("| Endpoint CSPLIT {} has exceeded 8 frames, cur_frame: {} ss_hfnum: {} giving up tries {}", channel, cur_frame, ss_hfnum, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries });
+                *SPLIT_CONTROL_IN_PROGRESS.lock() = false;
                 return true;
             }
 
             if unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries >= 3} {
                 let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
+                *SPLIT_CONTROL_IN_PROGRESS.lock() = false;
                 // println!("| Endpoint CSPLIT {} has exceeded 3 tries, giving up hctsiz {:x} last transfer {:x} state {:?}", channel, hctsiz, last_transfer, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] });
                 return true;
             }
@@ -299,7 +306,8 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
             unsafe {
                 DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state = DWCSplitStateMachine::NONE;
             }
-
+            
+            *SPLIT_CONTROL_IN_PROGRESS.lock() = false;
             if hcint & HCINT_ACK == 0 {
                 let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
                 println!("| Endpoint CSPLIT {}: hcint {:x} last transfer {:x} hctisiz {:x}", channel, hcint, last_transfer, hctsiz);
