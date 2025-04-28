@@ -1,5 +1,6 @@
 use crate::device::usb::device::net::get_interface_mut;
 use crate::networking::iface::{tcp, Interface};
+use crate::networking::repr::TcpPacket;
 use crate::networking::socket::bindings::{NEXT_EPHEMERAL, NEXT_SOCKETFD};
 use crate::networking::socket::tagged::{TaggedSocket, BUFFER_LEN};
 use crate::networking::socket::{SocketAddr, SockType};
@@ -86,7 +87,7 @@ impl TcpSocket {
             state: TcpState::Closed,
             remote_addr: None,
             seq_number: INITIAL_SEQ_NUMBER,
-            ack_number: 0,
+            ack_number: 1,
             flags: 0,
             window_size: DEFAULT_WINDOW_SIZE,
         };
@@ -148,10 +149,10 @@ impl TcpSocket {
         let last = &payload[payload.len() - 2..payload.len()];
         self.window_size = u16::from_le_bytes([last[0], last[1]]);
         self.flags = payload[payload.len() - 3];
-        let last = &payload[payload.len() - 7..payload.len() - 3];
-        self.ack_number = u32::from_le_bytes([last[0], last[1], last[2], last[3]]);
+        // let last = &payload[payload.len() - 7..payload.len() - 3];
+        // self.ack_number = u32::from_le_bytes([last[0], last[1], last[2], last[3]]);
         let last = &payload[payload.len() - 11..payload.len() - 7];
-        self.seq_number = u32::from_le_bytes([last[0], last[1], last[2], last[3]]);
+        self.ack_number = u32::from_le_bytes([last[0], last[1], last[2], last[3]]);
 
         self.pending_conn.push(sender);
 
@@ -164,12 +165,16 @@ impl TcpSocket {
             return Err(Error::NotConnected);
         }
 
+        println!("here");
         let addr = match self.pending_conn.pop() {
             Some(addr) => addr,
             None => return Err(Error::Exhausted),
         };
 
         let interface = get_interface_mut();
+
+        self.ack_number += 1;
+        println!("ack number {}", self.ack_number);
 
         tcp::send_tcp_packet(
             interface,
@@ -184,6 +189,8 @@ impl TcpSocket {
         );
 
         self.recv().await;
+
+        self.state = TcpState::Established;
 
         Ok(addr)
     }
@@ -264,6 +271,32 @@ impl TcpSocket {
     pub async fn recv(&mut self) -> Result<(Vec<u8>, SocketAddr)> {
         let (mut payload, addr) = self.recv_rx.recv().await;
         payload.truncate(payload.len().saturating_sub(11)); // get rid of context bytes
+        let last = &payload[payload.len() - 2..payload.len()];
+        self.window_size = u16::from_le_bytes([last[0], last[1]]);
+        self.flags = payload[payload.len() - 3];
+        // let last = &payload[payload.len() - 7..payload.len() - 3];
+        // self.ack_number = u32::from_le_bytes([last[0], last[1], last[2], last[3]]);
+        let last = &payload[payload.len() - 11..payload.len() - 7];
+        self.ack_number = u32::from_le_bytes([last[0], last[1], last[2], last[3]]);
+        
+        if self.state == TcpState::Established {
+            let interface = get_interface_mut();
+            self.ack_number += payload.len() as u32;
+            self.seq_number += 1;
+            println!("sending ack to a received packet");
+            tcp::send_tcp_packet(
+                interface, 
+                self.binding.port, 
+                addr.port, 
+                self.seq_number, 
+                self.ack_number, 
+                TCP_FLAG_ACK, 
+                self.window_size, 
+                addr.addr, 
+                Vec::new()
+            );
+        }
+
         Ok((payload, addr))
     }
 

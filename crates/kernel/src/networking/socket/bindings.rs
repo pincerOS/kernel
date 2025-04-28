@@ -64,25 +64,20 @@ pub async fn send_to(socketfd: u16, payload: Vec<u8>, saddr: SocketAddr) -> Resu
 
 pub async fn recv_from(socketfd: u16) -> Result<(Vec<u8>, SocketAddr)> {
     let interface = get_interface_mut();
-    let (_stype, mut rx) = {
-        // let mut sockets = interface.sockets.lock();
 
-        // 1. check if a socketfd is valid if not return error
-        let tagged_socket = interface.sockets
-            .get_mut(&socketfd)
-            .ok_or(Error::InvalidSocket(socketfd))?;
+    // 1. check if a socketfd is valid if not return error
+    let tagged_socket = interface.sockets
+        .get_mut(&socketfd)
+        .ok_or(Error::InvalidSocket(socketfd))?;
 
-        // 2. if socket not bound, return error
-        if !tagged_socket.is_bound() {
-            return Err(Error::InvalidSocket(socketfd));
-        }
+    // 2. if socket not bound, return error
+    if !tagged_socket.is_bound() {
+        return Err(Error::InvalidSocket(socketfd));
+    }
 
-        // 3. blocking recv from socket recv queue
-        tagged_socket.get_recv_ref()
-    };
+    // 3. blocking recv from socket recv queue
     
-   let (payload, addr) = rx.recv().await;
-   Ok((payload, addr))
+    tagged_socket.recv().await
 }
 
 pub async fn connect(socketfd: u16, saddr: SocketAddr) -> Result<()> {

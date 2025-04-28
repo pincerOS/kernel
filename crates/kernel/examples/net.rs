@@ -89,10 +89,12 @@ async fn main() {
 
     let clientfd = accept(s).await;
 
-    for i in 0..5 {
-        let recv = recv_from(*clientfd.as_ref().unwrap()).await;
+
+    while let recv = recv_from(*clientfd.as_ref().unwrap()).await {
         if let Ok((payload, senderaddr)) = recv {
             println!("got message: {:x?}", payload);
+        } else {
+            break;
         }
     }
 
