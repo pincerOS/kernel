@@ -1,6 +1,5 @@
 use crate::device::usb::device::net::get_interface_mut;
 use crate::networking::iface::{tcp, Interface};
-use crate::networking::repr::TcpPacket;
 use crate::networking::socket::bindings::{NEXT_EPHEMERAL, NEXT_SOCKETFD};
 use crate::networking::socket::tagged::{TaggedSocket, BUFFER_LEN};
 use crate::networking::socket::{SocketAddr, SockType};
@@ -137,7 +136,7 @@ impl TcpSocket {
         Ok(())
     }
 
-    pub fn accept(&mut self) -> Result<SocketAddr> {
+    pub async fn accept(&mut self) -> Result<SocketAddr> {
         if !self.is_listener {
             return Err(Error::NotConnected);
         }

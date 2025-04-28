@@ -194,7 +194,7 @@ pub fn NetSend(_buffer: *mut u8, _buffer_length: u32) {
 }
 
 pub unsafe fn NetReceive(buffer: *mut u8, buffer_length: u32) {
-    println!("| Net: Receive");
+    // println!("| Net: Receive");
 
     unsafe {
         if let Some(callback) = NET_DEVICE.receive_callback {

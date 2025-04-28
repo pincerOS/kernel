@@ -4,11 +4,13 @@
 extern crate alloc;
 extern crate kernel;
 
-use kernel::{ringbuffer, event::{task, thread}, device::usb::device::net::get_dhcpd_mut, networking::repr::Ipv4Address};
+use core::net::Ipv4Addr;
+
+use kernel::{device::usb::device::net::get_dhcpd_mut, event::{task, thread}, networking::{iface::icmp, repr::{IcmpPacket, Ipv4Address}, socket::RawSocket}, ringbuffer};
 
 #[allow(unused_imports)]
 use kernel::networking::socket::{
-    bind, connect, recv_from, send_to, SocketAddr, TcpSocket, UdpSocket,
+    bind, accept, listen, connect, recv_from, send_to, SocketAddr, TcpSocket, UdpSocket,
 };
 use kernel::networking::Result;
 use kernel::*;
@@ -44,20 +46,21 @@ async fn main() {
 
 
     // [udp listening test]
-    println!("udp listening test");
-    let s = UdpSocket::new();
+    // println!("udp listening test");
+    // let s = UdpSocket::new();
+    //
+    // bind(s, 2222);
+    //
+    // for i in 0..5 {
+    //     println!("listening for packets");
+    //     let recv = recv_from(s).await;
+    //     if let Ok((payload, senderaddr)) = recv {
+    //         println!("got message: {:x?}", payload);
+    //     }
+    // }
+    //
+    // println!("end udp listening test");
 
-    bind(s, 2222);
-
-    for i in 0..5 {
-        println!("listening for packets");
-        let recv = recv_from(s).await;
-        if let Ok((payload, senderaddr)) = recv {
-            println!("got message: {:x?}", payload);
-        }
-    }
-
-    println!("end udp listening test");
 
     // [tcp send test]
     // println!("tcp send test");
@@ -77,20 +80,28 @@ async fn main() {
     // }
     // println!("tcp send test end");
 
+
     // [tcp recv test]
-    // let s = TcpSocket::new();
-    //
-    // bind(s, 2222);
-    // listen(s); // has a timeout, we will wait for 5 seconds
-    //
-    // let clientfd = accept(s);
-    //
-    // for i in 0..5 {
-    //     let recv = recv_from(cliendfd).await;
-    //     if let Ok((payload, senderaddr)) = recv {
-    //         println!("got message: {:x?}", payload);
-    //     }
-    // }
+    let s = TcpSocket::new();
+
+    bind(s, 1337);
+    listen(s, 1); // has a timeout, we will wait for 5 seconds
+
+    let clientfd = accept(s).await;
+
+    for i in 0..5 {
+        let recv = recv_from(*clientfd.as_ref().unwrap()).await;
+        if let Ok((payload, senderaddr)) = recv {
+            println!("got message: {:x?}", payload);
+        }
+    }
+
+    // there is a delay when calling NetSend on a packet, this loop is to allow all the packets to
+    // drain out
+    for i in 0..32 {
+        sync::spin_sleep(500_000);
+    }
+
 
     shutdown();
 }

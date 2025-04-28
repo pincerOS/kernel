@@ -34,7 +34,8 @@ impl Display for SocketAddr {
 #[derive(Debug, Eq, PartialEq)]
 pub enum SockType {
     UDP,
-    TCP
+    TCP,
+    Raw
 }
 
 // TODO: these technically runs out eventually lol need wrap around
@@ -113,7 +114,7 @@ pub fn listen(socketfd: u16, num_requests: usize) -> Result<()> {
     tagged_socket.listen(num_requests)
 }
 
-pub fn accept(socketfd: u16) -> Result<u16> {
+pub async fn accept(socketfd: u16) -> Result<u16> {
     let interface = get_interface_mut();
     // 1. if listener not started, error
     let mut sockets = interface.sockets.lock();
@@ -123,7 +124,7 @@ pub fn accept(socketfd: u16) -> Result<u16> {
         .ok_or(Error::InvalidSocket(socketfd))?;
 
     // 2. accept 1 connection, error if no pending connections
-    tagged_socket.accept();
+    tagged_socket.accept().await;
     Ok(socketfd)
 }
 
