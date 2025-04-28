@@ -1,9 +1,11 @@
 use crate::networking::iface::*;
 use crate::networking::repr::*;
 use crate::networking::socket::SocketAddr;
-use crate::networking::Result;
+use crate::networking::socket::SockType;
+use crate::networking::{Error, Result};
 
 use alloc::vec::Vec;
+use crate::event::task;
 
 pub fn send_tcp_packet(
     interface: &mut Interface,
@@ -58,14 +60,21 @@ pub fn recv_tcp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Re
     // let mut sockets = interface.sockets.lock();
     for (_, socket) in interface.sockets.iter_mut() {
         if socket.binding_equals(local_socket_addr) {
-            let _ = socket.recv_enqueue(
-                tcp_packet.seq_number,
-                tcp_packet.ack_number,
-                tcp_packet.flags,
-                tcp_packet.window_size,
-                tcp_packet.payload.clone(),
-                sender_socket_addr,
-            );
+            let (stype, mut tx) = socket.get_send_ref();
+
+            if stype != SockType::TCP {
+                return Err(Error::Unsupported);
+            }
+            
+            let mut payload = tcp_packet.payload.clone();
+            payload.extend_from_slice(&tcp_packet.seq_number.to_le_bytes());
+            payload.extend_from_slice(&tcp_packet.ack_number.to_le_bytes());
+            payload.push(tcp_packet.flags);
+            payload.extend_from_slice(&tcp_packet.window_size.to_le_bytes());
+
+            task::spawn_async(async move {
+            let _ = tx.send((payload, sender_socket_addr)).await;
+            });
         }
     }
 

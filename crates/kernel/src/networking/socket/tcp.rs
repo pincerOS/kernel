@@ -159,6 +159,7 @@ impl TcpSocket {
     }
 
     pub async fn accept(&mut self) -> Result<SocketAddr> {
+        println!("in accept");
         if !self.is_listener {
             return Err(Error::NotConnected);
         }
@@ -176,7 +177,7 @@ impl TcpSocket {
             addr.port,
             self.seq_number,
             self.ack_number, 
-            TCP_FLAG_ACK & TCP_FLAG_SYN,
+            TCP_FLAG_ACK | TCP_FLAG_SYN,
             self.window_size,
             addr.addr,
             Vec::new(), 

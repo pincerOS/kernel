@@ -57,7 +57,6 @@ pub fn recv_ip_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Re
         return Err(Error::Ignored);
     }
 
-    println!("past filter");
 
     // update arp cache for immediate ICMP echo replies, errors, etc.
     if eth_frame.src.is_unicast() {
