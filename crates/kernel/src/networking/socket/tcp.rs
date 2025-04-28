@@ -445,10 +445,12 @@ impl TcpSocket {
     }
 
     // Close the connection gracefully
-    pub fn close(&mut self, interface: &mut Interface) -> Result<()> {
+    pub async fn close(&mut self) -> Result<()> {
+        let interface = get_interface_mut();
         match self.state {
             TcpState::Established => {
                 // Send FIN packet
+                println!("sending a close");
                 if let Some(remote) = self.remote_addr {
                     tcp::send_tcp_packet(
                         interface,
@@ -465,6 +467,13 @@ impl TcpSocket {
                     self.seq_number += 1; // FIN consumes a sequence number
                     self.state = TcpState::FinWait1;
                 }
+
+                self.recv().await;
+
+                if self.state == TcpState::FinWait2 {
+                    self.recv().await;
+                }
+
                 Ok(())
             }
             TcpState::CloseWait => {

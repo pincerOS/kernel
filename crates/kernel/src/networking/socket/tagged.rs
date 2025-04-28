@@ -109,6 +109,14 @@ impl TaggedSocket {
         }
     }
 
+    pub async fn close(&mut self) -> Result<()> {
+        match self {
+            // TaggedSocket::Raw(socket) => socket.recv(),
+            TaggedSocket::Udp(_socket) => Err(Error::Ignored),
+            TaggedSocket::Tcp(socket) => socket.close().await,
+        }
+    }
+
     pub async fn accept(&mut self) -> Result<SocketAddr> {
         match self {
             // TaggedSocket::Raw(socket) => socket.recv(),

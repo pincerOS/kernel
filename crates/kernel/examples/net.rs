@@ -10,7 +10,7 @@ use kernel::{device::usb::device::net::get_dhcpd_mut, event::{task, thread}, net
 
 #[allow(unused_imports)]
 use kernel::networking::socket::{
-    bind, accept, listen, connect, recv_from, send_to, SocketAddr, TcpSocket, UdpSocket,
+    bind, close, accept, listen, connect, recv_from, send_to, SocketAddr, TcpSocket, UdpSocket,
 };
 use kernel::networking::Result;
 use kernel::*;
@@ -78,6 +78,8 @@ async fn main() {
     for _i in 0..5 {
         let _ = send_to(s, "hello everynyan".as_bytes().to_vec(), saddr).await;
     }
+
+    close(s).await;
     println!("tcp send test end");
 
 
