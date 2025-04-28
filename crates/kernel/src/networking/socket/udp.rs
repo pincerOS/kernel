@@ -40,8 +40,8 @@ impl UdpSocket {
         };
 
         let socketfd = NEXT_SOCKETFD.fetch_add(1, Ordering::SeqCst);
-        let mut sockets = interface.sockets.lock();
-        sockets.insert(socketfd, TaggedSocket::Udp(socket));
+        // let mut sockets = interface.sockets.lock();
+        interface.sockets.insert(socketfd, TaggedSocket::Udp(socket));
 
         socketfd
     }

@@ -55,8 +55,8 @@ pub fn recv_tcp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Re
         port: tcp_packet.src_port,
     };
 
-    let mut sockets = interface.sockets.lock();
-    for (_, socket) in sockets.iter_mut() {
+    // let mut sockets = interface.sockets.lock();
+    for (_, socket) in interface.sockets.iter_mut() {
         if socket.binding_equals(local_socket_addr) {
             let _ = socket.recv_enqueue(
                 tcp_packet.seq_number,

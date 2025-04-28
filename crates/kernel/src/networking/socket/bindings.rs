@@ -44,10 +44,10 @@ pub static NEXT_SOCKETFD: AtomicU16 = AtomicU16::new(1);
 
 pub async fn send_to(socketfd: u16, payload: Vec<u8>, saddr: SocketAddr) -> Result<()> {
     let interface = get_interface_mut();
-    let mut sockets = interface.sockets.lock();
+    // let mut sockets = interface.sockets.lock();
 
     // 1. check if socket fd is valid if not return error
-    let tagged_socket = sockets
+    let tagged_socket = interface.sockets
         .get_mut(&socketfd)
         .ok_or(Error::InvalidSocket(socketfd))?;
 
@@ -64,11 +64,11 @@ pub async fn send_to(socketfd: u16, payload: Vec<u8>, saddr: SocketAddr) -> Resu
 
 pub async fn recv_from(socketfd: u16) -> Result<(Vec<u8>, SocketAddr)> {
     let interface = get_interface_mut();
-    let (stype, mut rx) = {
-        let mut sockets = interface.sockets.lock();
+    let (_stype, mut rx) = {
+        // let mut sockets = interface.sockets.lock();
 
         // 1. check if a socketfd is valid if not return error
-        let tagged_socket = sockets
+        let tagged_socket = interface.sockets
             .get_mut(&socketfd)
             .ok_or(Error::InvalidSocket(socketfd))?;
 
@@ -87,10 +87,10 @@ pub async fn recv_from(socketfd: u16) -> Result<(Vec<u8>, SocketAddr)> {
 
 pub async fn connect(socketfd: u16, saddr: SocketAddr) -> Result<()> {
     let interface = get_interface_mut();
-    let mut sockets = interface.sockets.lock();
+    // let mut sockets = interface.sockets.lock();
 
     // 1. check if a socketfd is valid if not return error
-    let tagged_socket = sockets
+    let tagged_socket = interface.sockets
         .get_mut(&socketfd)
         .ok_or(Error::InvalidSocket(socketfd))?;
 
@@ -100,9 +100,9 @@ pub async fn connect(socketfd: u16, saddr: SocketAddr) -> Result<()> {
 pub async fn listen(socketfd: u16, num_requests: usize) -> Result<()> {
     let interface = get_interface_mut();
     // 1.check if binded, if not error
-    let mut sockets = interface.sockets.lock();
+    // let mut sockets = interface.sockets.lock();
 
-    let tagged_socket = sockets
+    let tagged_socket = interface.sockets
         .get_mut(&socketfd)
         .ok_or(Error::InvalidSocket(socketfd))?;
 
@@ -117,9 +117,9 @@ pub async fn listen(socketfd: u16, num_requests: usize) -> Result<()> {
 pub async fn accept(socketfd: u16) -> Result<u16> {
     let interface = get_interface_mut();
     // 1. if listener not started, error
-    let mut sockets = interface.sockets.lock();
+    // let mut sockets = interface.sockets.lock();
 
-    let tagged_socket = sockets
+    let tagged_socket = interface.sockets
         .get_mut(&socketfd)
         .ok_or(Error::InvalidSocket(socketfd))?;
 
@@ -135,15 +135,15 @@ pub fn bind(socketfd: u16, port: u16) -> Result<()> {
         addr: *interface.ipv4_addr,
         port,
     };
-    let mut sockets = interface.sockets.lock();
-    for (_, socket) in sockets.iter_mut() {
+    // let mut sockets = interface.sockets.lock();
+    for (_, socket) in interface.sockets.iter_mut() {
         if socket.binding_equals(bind_addr) {
             return Err(Error::BindingInUse(bind_addr));
         }
     }
 
     // 2. check if this is a valid socketfd
-    let tagged_socket = sockets
+    let tagged_socket = interface.sockets
         .get_mut(&socketfd)
         .ok_or(Error::InvalidSocket(socketfd))?;
 

@@ -40,7 +40,7 @@ pub struct Interface {
     pub ipv4_addr: Ipv4Cidr,
     pub default_gateway: Ipv4Address,
 
-    pub sockets: BTreeMap<u16, Arc<TaggedSocket>>,
+    pub sockets: BTreeMap<u16, TaggedSocket>,
 }
 
 impl Interface {
