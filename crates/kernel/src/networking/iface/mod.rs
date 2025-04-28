@@ -14,6 +14,7 @@ use crate::networking::socket::TaggedSocket;
 use crate::networking::utils::arp_cache::ArpCache;
 
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 use alloc::collections::btree_map::BTreeMap;
 
 pub mod arp;
@@ -39,7 +40,7 @@ pub struct Interface {
     pub ipv4_addr: Ipv4Cidr,
     pub default_gateway: Ipv4Address,
 
-    pub sockets: SpinLock<BTreeMap<u16, TaggedSocket>>,
+    pub sockets: BTreeMap<u16, Arc<TaggedSocket>>,
 }
 
 impl Interface {
@@ -51,7 +52,7 @@ impl Interface {
             ipv4_addr: Ipv4Cidr::empty(),
             default_gateway: Ipv4Address::empty(),
 
-            sockets: SpinLock::new(BTreeMap::new()),
+            sockets: BTreeMap::new(),
         }
     }
 }
