@@ -4,6 +4,7 @@ use crate::networking::{Error, Result};
 
 use crate::device::usb::device::net::{get_dhcpd_mut, get_interface_mut};
 use crate::event::thread;
+use crate::sync;
 
 use alloc::vec::Vec;
 
@@ -28,8 +29,9 @@ pub fn send_ipv4_packet(
             )
         }
         Err(e) => {
-            // println!("failed to resolve ip, queuing another send, waiting for ARP");
+            println!("failed to resolve ip, queuing another send, waiting for ARP");
             thread::thread(move || {
+                sync::spin_sleep(100_000);
                 let interface = get_interface_mut();
                 let _ = send_ipv4_packet(interface, payload, protocol, dst_addr);
             });

@@ -168,6 +168,7 @@ impl TcpSocket {
         self.remote_addr = Some(saddr);
 
         let flags = TCP_FLAG_SYN;
+        println!("[!] meow");
         tcp::send_tcp_packet(
             interface,
             self.binding.port,
@@ -178,7 +179,7 @@ impl TcpSocket {
             self.window_size,
             saddr.addr,
             Vec::new(), // no payload
-        )?;
+        );
 
         self.state = TcpState::SynSent;
 
@@ -199,7 +200,7 @@ impl TcpSocket {
             self.window_size,
             saddr.addr,
             Vec::new(), 
-        )?;
+        );
 
         self.state = TcpState::Established;
 
