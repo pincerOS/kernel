@@ -55,7 +55,7 @@ pub fn dwc_otg_register_interrupt_handler() {
 }
 
 fn schedule_next_transfer(channel: u8) {
-    println!("| DWC: Scheduling next transfer on channel {}", channel);
+    // println!("| DWC: Scheduling next transfer on channel {}", channel);
     //Check if another transfer is pending
     if let Some(transfer) = USB_TRANSFER_QUEUE.get_transfer() {
         //Enable transfer, keep holding channel
@@ -67,11 +67,11 @@ fn schedule_next_transfer(channel: u8) {
         match transfer.as_ref().endpoint_descriptor.endpoint_type {
             //TODO: Kinda cursed, maybe make cleaner
             UsbTransfer::Bulk => unsafe {
-                println!("| DWC: Bulk transfer on channel {}", channel);
+                // println!("| DWC: Bulk transfer on channel {}", channel);
                 UsbBulkMessage(device, transfer, channel);
             },
             UsbTransfer::Interrupt => unsafe {
-                println!("| DWC: Interrupt transfer on channel {}", channel);
+                // println!("| DWC: Interrupt transfer on channel {}", channel);
                 UsbInterruptMessage(device, transfer, channel);
             },
             _ => {
@@ -80,7 +80,7 @@ fn schedule_next_transfer(channel: u8) {
             }
         }
     } else {
-        println!("| DWC: No more transfers pending on channel {}", channel);
+        // println!("| DWC: No more transfers pending on channel {}", channel);
         //Don't need the occupy channel anymore
         dwc_otg_free_channel(channel as u32);
     }

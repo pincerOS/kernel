@@ -175,23 +175,24 @@ pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
     }
 
     if buffer_length > 0 {
-        println!("| NET: analyze {:x}", HexDisplay(unsafe { core::slice::from_raw_parts(buffer, buffer_length as usize) }));
+        // println!("| NET: analyze {:x}", HexDisplay(unsafe { core::slice::from_raw_parts(buffer, buffer_length as usize) }));
+        // TODO:
     }
 }
 
 pub fn NetSend(_buffer: *mut u8, _buffer_length: u32) {
     //Do nothing for now
     //Called when USB packet is actually sent out
-    println!("| Net: Sent of length {}", _buffer_length);
+    // println!("| Net: Sent of length {}", _buffer_length);
 }
 
 pub fn NetReceive(buffer: *mut u8, buffer_length: u32) {
-    println!("| Net: Receive");
+    // println!("| Net: Receive");
 
     
-    println!("{:x}", HexDisplay(unsafe { core::slice::from_raw_parts(buffer, 40) }));
+    // println!("{:x}", HexDisplay(unsafe { core::slice::from_raw_parts(buffer, 40) }));
 
-    println!();
+    // println!();
 
     unsafe {
         if let Some(callback) = NET_DEVICE.receive_callback {
