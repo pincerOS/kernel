@@ -14,10 +14,8 @@ impl CDCECM {
     }
 
     pub fn send(&mut self, buffer: &mut [u8], buffer_len: u32) {
-        unsafe {
-            println!("| NET: Send packet of size {}", buffer_len);
-            NetSendPacket(buffer.as_mut_ptr(), buffer_len);
-        }
+        println!("| NET: Send packet of size {}", buffer_len);
+        NetSendPacket(buffer.as_mut_ptr(), buffer_len);
     }
 
     // TODO: fn recv(&mut self, buffer: &mut [u8], buffer_len: u32) -> Result<usize> {
@@ -35,10 +33,8 @@ impl CDCECM {
 impl Device for CDCECM {
     // TODO: fn send(&mut self, buffer: &[u8], buffer_len: u32) -> Result<()> {
     fn send(&mut self, buffer: &mut [u8], buffer_len: u32) {
-        unsafe {
-            println!("| NET: Send packet of size {}", buffer_len);
-            NetSendPacket(buffer.as_mut_ptr(), buffer_len);
-        }
+        println!("| NET: Send packet of size {}", buffer_len);
+        NetSendPacket(buffer.as_mut_ptr(), buffer_len);
     }
 
     // TODO: fn recv(&mut self, buffer: &mut [u8], buffer_len: u32) -> Result<usize> {

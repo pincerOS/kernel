@@ -213,7 +213,10 @@ pub unsafe fn UsbInterruptMessage(
     }
 
     if usb_xfer.buffer_length != 8 {
-        println!("| USBD: Buffer length is at {} bytes", usb_xfer.buffer_length);
+        println!(
+            "| USBD: Buffer length is at {} bytes",
+            usb_xfer.buffer_length
+        );
     }
 
     let result = unsafe {
@@ -317,7 +320,7 @@ pub unsafe fn UsbGetDescriptor(
             "| USBD: Descriptor too short {} {}",
             device.last_transfer, minimumLength
         );
-        printDWCErrors(0);
+        // printDWCErrors(0);
         return ResultCode::ErrorDevice;
     }
 
@@ -524,7 +527,10 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         return result;
     }
 
-    println!("| USBD: Configuration descriptor: {:?}", device.configuration);
+    println!(
+        "| USBD: Configuration descriptor: {:?}",
+        device.configuration
+    );
 
     // let configuration_dev = &mut device.configuration;
     // println!(
@@ -560,7 +566,10 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
         return result;
     }
 
-    println!("| USBD: Full configuration descriptor: {:?}", fullDescriptor as *mut UsbConfigurationDescriptor);
+    println!(
+        "| USBD: Full configuration descriptor: {:?}",
+        fullDescriptor as *mut UsbConfigurationDescriptor
+    );
 
     device.configuration_index = configuration;
     configuration_val = device.configuration.configuration_value;
@@ -586,7 +595,10 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
                             interface as *const u8,
                             size_of::<UsbInterfaceDescriptor>(),
                         );
-                        println!("| USBD: Interface descriptor: {:?}", device.interfaces[last_interface]);
+                        println!(
+                            "| USBD: Interface descriptor: {:?}",
+                            device.interfaces[last_interface]
+                        );
                         last_endpoint = 0;
                         is_alternate = false;
                     } else {
@@ -606,14 +618,18 @@ fn UsbConfigure(device: &mut UsbDevice, configuration: u8) -> ResultCode {
                             return ResultCode::ErrorDevice;
                         }
                         let endpoint = header as *mut UsbEndpointDescriptor;
-                        
+
                         memory_copy(
                             &mut device.endpoints[last_interface][last_endpoint]
-                                as *mut UsbEndpointDescriptor as *mut u8,
+                                as *mut UsbEndpointDescriptor
+                                as *mut u8,
                             endpoint as *const u8,
                             size_of::<UsbEndpointDescriptor>(),
                         );
-                        println!("| USBD: Endpoint descriptor: {:?}", device.endpoints[last_interface][last_endpoint]);
+                        println!(
+                            "| USBD: Endpoint descriptor: {:?}",
+                            device.endpoints[last_interface][last_endpoint]
+                        );
                         last_endpoint += 1;
                     }
                 }
@@ -734,14 +750,14 @@ pub fn UsbAttachDevice(device: &mut UsbDevice) -> ResultCode {
 
         if device.descriptor.vendor_id == 0xB95 && device.descriptor.product_id == 0x1790 {
             println!("| USBD: Net: AX88179 Detected");
-            let class_attach = bus.interface_class_attach[InterfaceClass::InterfaceClassCommunications as usize];
+            let class_attach =
+                bus.interface_class_attach[InterfaceClass::InterfaceClassCommunications as usize];
             let result = class_attach.unwrap()(device, 0);
             if result != ResultCode::OK {
                 println!("| USBD: Class attach handler failed");
                 return result;
             }
         }
-
     } else {
         println!("| USBD: Invalid interface class");
     }

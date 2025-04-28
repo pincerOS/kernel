@@ -8,23 +8,20 @@ use super::super::usbd::device::*;
  */
 use core::slice;
 
-use crate::device::usb;
 use crate::networking::iface::*;
 use crate::networking::repr::*;
 
+use crate::device::mailbox::HexDisplay;
 use crate::device::system_timer::micro_delay;
 use crate::device::usb::hcd::dwc::dwc_otg::ms_to_micro;
 use crate::device::usb::types::*;
-use crate::device::usb::usbd::endpoint::register_interrupt_endpoint;
 use crate::device::usb::usbd::endpoint::*;
 use crate::device::usb::usbd::request::*;
-use crate::device::mailbox::HexDisplay;
-use crate::shutdown;
 
-use alloc::boxed::Box;
-use crate::device::usb::device::ax88179::axge_send_packet;
 use crate::device::usb::device::ax88179::axge_init;
 use crate::device::usb::device::ax88179::axge_receive_packet;
+use crate::device::usb::device::ax88179::axge_send_packet;
+use alloc::boxed::Box;
 use alloc::vec;
 
 use super::rndis::*;
@@ -55,7 +52,7 @@ pub fn NetLoad(bus: &mut UsbBus) {
         Some(NetAttach);
 }
 
-pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
+pub fn NetAttach(device: &mut UsbDevice, _interface_number: u32) -> ResultCode {
     // println!(
     //     "| Net: Subclass: {:x}, Protocol: {:x}",
     //     device.interfaces[interface_number as usize].subclass,
@@ -72,7 +69,6 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
             NET_DEVICE.net_receive = Some(axge_receive_packet);
             NET_DEVICE.truncation = 8;
         }
-
     } else {
         println!("| Net: RNDIS Device Detected");
         rndis_init(device);
@@ -101,26 +97,26 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     //     device.endpoints[interface_number as usize][0 as usize].interval
     // );
 
-    register_interrupt_endpoint(
-        device,
-        device.endpoints[interface_number as usize][0 as usize].interval as u32,
-        endpoint_address_to_num(
-            device.endpoints[interface_number as usize][0 as usize].endpoint_address,
-        ),
-        UsbDirection::In,
-        size_from_number(
-            device.endpoints[interface_number as usize][0 as usize]
-                .packet
-                .MaxSize as u32,
-        ),
-        0,
-        10,
-    );
+    // register_interrupt_endpoint(
+    //     device,
+    //     device.endpoints[interface_number as usize][0 as usize].interval as u32,
+    //     endpoint_address_to_num(
+    //         device.endpoints[interface_number as usize][0 as usize].endpoint_address,
+    //     ),
+    //     UsbDirection::In,
+    //     size_from_number(
+    //         device.endpoints[interface_number as usize][0 as usize]
+    //             .packet
+    //             .MaxSize as u32,
+    //     ),
+    //     0,
+    //     10,
+    // );
 
     micro_delay(ms_to_micro(1500)); // Wait for 1.5 seconds
-    // We currently have this 1.5 second delay to wait for the device to be ready
-    // technically, we can wait for the interrupt in endpoint to tell us
-    // but laking ax88179 documentaiton, not sure which bits, so wait for now.
+                                    // We currently have this 1.5 second delay to wait for the device to be ready
+                                    // technically, we can wait for the interrupt in endpoint to tell us
+                                    // but laking ax88179 documentaiton, not sure which bits, so wait for now.
 
     // 1. new network interface
     // 2. initialize mac address
@@ -140,12 +136,13 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     } else {
         unsafe {
             let mut b = vec![0u8; 30];
-            let query = rndis_query_msg(device, OID::OID_802_3_PERMANENT_ADDRESS, b.as_mut_ptr(), 30);
-    
+            let query =
+                rndis_query_msg(device, OID::OID_802_3_PERMANENT_ADDRESS, b.as_mut_ptr(), 30);
+
             if query.0 != ResultCode::OK {
                 panic!("| Net: Error getting MAC address {:#?}", query.0);
             }
-    
+
             let b_offset = query.1;
             let b_len = query.2;
             if b_len != 6 {
@@ -177,7 +174,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // begin receieve series, this queues a receive to be ran which will eventually propogate back
     // to us through the rgistered `recv` function which then queues another receive
     let buf = vec![0u8; 1]; //TODO: Technically, the buffer doesn't matter anymore
-    NetInitiateReceive(buf.into_boxed_slice(), 1500); // TODO: ask aaron if I need to use another function?
+    NetInitiateReceive(buf.into_boxed_slice(), 1518); // TODO: ask aaron if I need to use another function?
 
     // start dhcp
     unsafe {
@@ -192,7 +189,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 }
 
 pub fn NetInitiateReceive(buffer: Box<[u8]>, buffer_length: u32) {
-    println!("| Net: Initiate Receive");
+    // println!("| Net: Initiate Receive");
     unsafe {
         if let Some(receive_func) = NET_DEVICE.net_receive {
             let device = NET_DEVICE.device.unwrap();
@@ -232,7 +229,10 @@ pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
     }
 
     if buffer_length > 0 {
-        println!("| NET: analyze {:x}", HexDisplay(unsafe { core::slice::from_raw_parts(buffer, buffer_length as usize) }));
+        println!(
+            "| NET: analyze {:x}",
+            HexDisplay(unsafe { core::slice::from_raw_parts(buffer, buffer_length as usize) })
+        );
         // TODO:
     }
 }
@@ -256,10 +256,7 @@ pub unsafe fn NetReceive(buffer: *mut u8, buffer_length: u32) {
     }
 
     let buf = vec![0u8; 1];
-    unsafe {
-        let device = &mut *NET_DEVICE.device.unwrap();
-        rndis_receive_packet(device, buf.into_boxed_slice(), 1600);
-    }
+    NetInitiateReceive(buf.into_boxed_slice(), 1600);
 }
 
 pub fn RegisterNetReceiveCallback(callback: unsafe fn(*mut u8, u32)) {
@@ -267,7 +264,6 @@ pub fn RegisterNetReceiveCallback(callback: unsafe fn(*mut u8, u32)) {
         NET_DEVICE.receive_callback = Some(callback);
     }
 }
-
 
 pub struct NetDevice {
     pub receive_callback: Option<unsafe fn(*mut u8, u32)>,

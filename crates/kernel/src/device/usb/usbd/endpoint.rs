@@ -10,21 +10,23 @@ use crate::device::system_timer::{get_time, micro_delay};
 use crate::device::usb;
 
 // use crate::device::system_timer::micro_delay;
+use crate::device::usb::device::net::NET_DEVICE;
 use crate::device::usb::hcd::dwc::dwc_otg;
 use crate::device::usb::hcd::dwc::dwc_otg::DwcActivateChannel;
-use crate::device::usb::hcd::dwc::dwc_otg::{printDWCErrors, read_volatile, DWCSplitControlState, DWCSplitStateMachine, DwcEnableChannel, UpdateDwcOddFrame, DWC_CHANNEL_CALLBACK};
-use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCINT;
-use crate::device::usb::hcd::dwc::dwc_otgreg::{DOTG_HCTSIZ, DOTG_HFNUM, HCINT_FRMOVRUN, HCINT_NYET, HCINT_XACTERR, HFNUM_FRNUM_MASK};
-use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCSPLT;
+use crate::device::usb::hcd::dwc::dwc_otg::{
+    DWCSplitControlState, DWCSplitStateMachine, DwcEnableChannel, UpdateDwcOddFrame,
+    DWC_CHANNEL_CALLBACK,
+};
 use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCCHAR;
-use crate::device::usb::DwcDisableChannel;
+use crate::device::usb::hcd::dwc::dwc_otgreg::{
+    DOTG_HCTSIZ, DOTG_HFNUM, HCINT_FRMOVRUN, HCINT_NYET, HCINT_XACTERR, HFNUM_FRNUM_MASK,
+};
 // use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCINT;
 use crate::device::usb::DwcFrameDifference;
 // use crate::device::usb::hcd::dwc::dwc_otg;
 use crate::device::usb::DwcActivateCsplit;
 // use crate::device::usb::DwcDisableChannel;
 use crate::device::usb::UsbSendInterruptMessage;
-use crate::sync::{LockGuard, SpinLockInner};
 use usb::dwc_hub;
 use usb::hcd::dwc::dwc_otg::HcdUpdateTransferSize;
 use usb::hcd::dwc::dwc_otgreg::{HCINT_ACK, HCINT_CHHLTD, HCINT_NAK, HCINT_XFERCOMPL};
@@ -32,7 +34,6 @@ use usb::types::*;
 use usb::usbd::device::*;
 use usb::usbd::pipe::*;
 use usb::PacketId;
-
 
 use crate::event::task::spawn_async_rt;
 use crate::sync::time::{interval, MissedTicks};
@@ -44,8 +45,14 @@ static mut NET_BUFFER_LEN: u32 = 0;
 static mut NET_BUFFER_ACTIVE: bool = false;
 
 pub static NEXT_FRAME_CS: SpinLock<u32> = SpinLock::new(0);
+pub static SSPLIT_FRAME: SpinLock<u32> = SpinLock::new(0);
 
-pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u32, channel: u8, _split_control: DWCSplitControlState) -> bool {
+pub fn finish_bulk_endpoint_callback_in(
+    endpoint: endpoint_descriptor,
+    hcint: u32,
+    channel: u8,
+    _split_control: DWCSplitControlState,
+) -> bool {
     let device = unsafe { &mut *endpoint.device };
     let mut last_transfer;
     let transfer_size = HcdUpdateTransferSize(device, channel);
@@ -64,7 +71,6 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
         last_transfer = endpoint.buffer_length - transfer_size;
     }
 
-
     // let last_transfer = endpoint.buffer_length - transfer_size;
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
@@ -74,10 +80,11 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
             channel, hcint
         );
     } else if hcint & HCINT_XFERCOMPL == 0 {
-        panic!(
+        println!(
             "| Endpoint {} in: HCINT_XFERCOMPL not set, aborting. {:x}",
             channel, hcint
         );
+        last_transfer = 0;
     }
 
     // println!("| Endpoint BULK RECEIVED {}: hcint {:x} len {}", channel, hcint, last_transfer);
@@ -85,48 +92,49 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
     let dwc_sc = unsafe { &mut *(device.soft_sc as *mut dwc_hub) };
     let dma_addr = dwc_sc.dma_addr[channel as usize];
 
-
     // let buffer = endpoint.buffer;
     // let buffer_length = device.last_transfer;
     // unsafe {
     //     core::ptr::copy_nonoverlapping(dma_addr as *const u8, buffer, buffer_length as usize);
     // }
 
-    //assume rndis net bulk in
+    //assume rndis net bulk in: TODO: FIX
     unsafe {
-        if !NET_BUFFER_ACTIVE {
-            use alloc::slice;
-            // let slice: &[u8] = unsafe { slice::from_raw_parts(dma_addr as *const u8, 16 as usize) };
-            let slice32: &[u32] = slice::from_raw_parts(dma_addr as *const u32, 4 as usize);
-            //print slice
-            // println!("| Net buffer: {:?}", slice);
-            // println!("| Net buffer 32: {:?}", slice32);
-            let _buffer32 = dma_addr as *const u32;
+        if NET_DEVICE.truncation == 44 {
+            if !NET_BUFFER_ACTIVE {
+                use alloc::slice;
+                // let slice: &[u8] = unsafe { slice::from_raw_parts(dma_addr as *const u8, 16 as usize) };
+                let slice32: &[u32] = slice::from_raw_parts(dma_addr as *const u32, 4 as usize);
+                //print slice
+                // println!("| Net buffer: {:?}", slice);
+                // println!("| Net buffer 32: {:?}", slice32);
+                let _buffer32 = dma_addr as *const u32;
 
-            let rndis_len = slice32[3];
-            // let part1 = unsafe { buffer32.offset(0) } as u32;
-            // println!("| rndis 1 {}", part1);
-            // println!(
-            //     "| Net buffer length: {} rndis_len: {}",
-            //     last_transfer, rndis_len
-            // );
-            if rndis_len > last_transfer - 44 {
-                NET_BUFFER_ACTIVE = true;
-                NET_BUFFER_LEN = rndis_len;
-                //reenable channel
-                DwcActivateChannel(channel);
-                return false;
-            }
-            // println!("| NEt continue");
-        } else {
-            if last_transfer >= NET_BUFFER_LEN {
-                // println!("| NEt buffer finished length: {} NETBUFFER {}", last_transfer, NET_BUFFER_LEN);
-                NET_BUFFER_ACTIVE = false;
-                last_transfer = NET_BUFFER_LEN;
+                let rndis_len = slice32[3];
+                // let part1 = unsafe { buffer32.offset(0) } as u32;
+                // println!("| rndis 1 {}", part1);
+                // println!(
+                //     "| Net buffer length: {} rndis_len: {}",
+                //     last_transfer, rndis_len
+                // );
+                if rndis_len > last_transfer - 44 {
+                    NET_BUFFER_ACTIVE = true;
+                    NET_BUFFER_LEN = rndis_len;
+                    //reenable channel
+                    DwcActivateChannel(channel);
+                    return false;
+                }
+                // println!("| NEt continue");
             } else {
-                // println!("| Net buffer not yet active length: {} NETBUFFER {}", last_transfer, NET_BUFFER_LEN);
-                DwcActivateChannel(channel);
-                return false;
+                if last_transfer >= NET_BUFFER_LEN {
+                    // println!("| NEt buffer finished length: {} NETBUFFER {}", last_transfer, NET_BUFFER_LEN);
+                    NET_BUFFER_ACTIVE = false;
+                    last_transfer = NET_BUFFER_LEN;
+                } else {
+                    // println!("| Net buffer not yet active length: {} NETBUFFER {}", last_transfer, NET_BUFFER_LEN);
+                    DwcActivateChannel(channel);
+                    return false;
+                }
             }
         }
     }
@@ -146,7 +154,12 @@ pub fn finish_bulk_endpoint_callback_in(endpoint: endpoint_descriptor, hcint: u3
     return true;
 }
 
-pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u32, channel: u8, _split_control: DWCSplitControlState) -> bool {
+pub fn finish_bulk_endpoint_callback_out(
+    endpoint: endpoint_descriptor,
+    hcint: u32,
+    channel: u8,
+    _split_control: DWCSplitControlState,
+) -> bool {
     let device = unsafe { &mut *endpoint.device };
     let transfer_size = HcdUpdateTransferSize(device, channel);
     if transfer_size > endpoint.buffer_length {
@@ -155,12 +168,12 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
             channel, transfer_size, endpoint.buffer_length
         );
     }
-    let last_transfer = endpoint.buffer_length - transfer_size; 
+    let last_transfer = endpoint.buffer_length - transfer_size;
 
-    println!(
-        "Bulk out transfer hcint {:x} , last transfer: {} ",
-        hcint, last_transfer
-    );
+    // println!(
+    //     "Bulk out transfer hcint {:x} , last transfer: {} ",
+    //     hcint, last_transfer
+    // );
     if hcint & HCINT_CHHLTD == 0 {
         panic!(
             "| Endpoint {}: HCINT_CHHLTD not set, aborting. bulk out hcint {:x}",
@@ -190,7 +203,12 @@ pub fn finish_bulk_endpoint_callback_out(endpoint: endpoint_descriptor, hcint: u
     return true;
 }
 
-pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_: u32, channel: u8, split_control: DWCSplitControlState) -> bool {
+pub fn finish_interrupt_endpoint_callback(
+    endpoint: endpoint_descriptor,
+    hcint_: u32,
+    channel: u8,
+    split_control: DWCSplitControlState,
+) -> bool {
     let hcint = hcint_;
     let device = unsafe { &mut *endpoint.device };
     let transfer_size = HcdUpdateTransferSize(device, channel);
@@ -209,30 +227,30 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
             "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x} hcchar: {:x} finish_interrupt_endpoint_callback",
             channel, hcint, hcchar
         );
-        let mut i = 0;
-        let mut hcint_nochhltd = 0;
-        while i < 50 {
-            let hcint_nochhltd = dwc_otg::read_volatile(DOTG_HCINT(channel as usize));
-            if hcint_nochhltd & HCINT_CHHLTD != 0 {
-                break;
-            }
-            i += 1;
-            micro_delay(10);
-        }
+        // let mut i = 0;
+        // let mut hcint_nochhltd = 0;
+        // while i < 50 {
+        //     let hcint_nochhltd = dwc_otg::read_volatile(DOTG_HCINT(channel as usize));
+        //     if hcint_nochhltd & HCINT_CHHLTD != 0 {
+        //         break;
+        //     }
+        //     i += 1;
+        //     micro_delay(10);
+        // }
 
-        if hcint_nochhltd & HCINT_CHHLTD == 0 {
-            // println!(
-            //     "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x} hcint2: {:x}",
-            //     channel, hcint, hcint_nochhltd
-            // );
-            DwcDisableChannel(channel);
-            hcint_nochhltd = dwc_otg::read_volatile(DOTG_HCINT(channel as usize));
-            // return true;
-        }
+        // if hcint_nochhltd & HCINT_CHHLTD == 0 {
+        //     // println!(
+        //     //     "| Endpoint {}: HCINT_CHHLTD not set, aborting. hcint: {:x} hcint2: {:x}",
+        //     //     channel, hcint, hcint_nochhltd
+        //     // );
+        //     DwcDisableChannel(channel);
+        //     // hcint_nochhltd = dwc_otg::read_volatile(DOTG_HCINT(channel as usize));
+        //     // return true;
+        // }
 
-        hcint |= hcint_nochhltd;
+        // // hcint |= hcint_nochhltd;
 
-        return true;
+        // return true;
     }
 
     let split_control_state = split_control.state;
@@ -240,47 +258,55 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
 
     if split_control_state == DWCSplitStateMachine::SSPLIT {
         if hcint & HCINT_NAK != 0 {
-            println!("| Endpoint SSPLIT {}: NAK received hcint {:x}", channel, hcint);
+            println!(
+                "| Endpoint SSPLIT {}: NAK received hcint {:x}",
+                channel, hcint
+            );
             DwcEnableChannel(channel);
             return false;
         } else if hcint & HCINT_FRMOVRUN != 0 {
-            println!("| Endpoint SSPLIT {}: Frame overrun hcint {:x}", channel, hcint);
+            println!(
+                "| Endpoint SSPLIT {}: Frame overrun hcint {:x}",
+                channel, hcint
+            );
             UpdateDwcOddFrame(channel);
             return false;
         } else if hcint & HCINT_XACTERR != 0 {
-            println!("| Endpoint SSPLIT {}: XACTERR received hcint {:x}", channel, hcint);
+            println!(
+                "| Endpoint SSPLIT {}: XACTERR received hcint {:x}",
+                channel, hcint
+            );
             DwcEnableChannel(channel);
             return false;
         } else if hcint & HCINT_ACK != 0 {
             //ACK received
             unsafe {
-                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state = DWCSplitStateMachine::CSPLIT;
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state =
+                    DWCSplitStateMachine::CSPLIT;
             }
             let mut cur_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
             let mut succeed = false;
-            
+
             while !succeed {
                 while DwcFrameDifference(cur_frame, ss_hfnum) < 2 {
                     cur_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
                     micro_delay(10);
                 }
 
-                unsafe {
-                    let mut frame_val = NEXT_FRAME_CS.lock();
-                    let current_current_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
-                    if *frame_val == current_current_frame {
-                        //not succeed
-                    } else {
-                        succeed = true;
-                        *frame_val = current_current_frame;
-                    }
+                let mut frame_val = NEXT_FRAME_CS.lock();
+                let current_current_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+                if *frame_val == current_current_frame {
+                    //not succeed
+                } else {
+                    succeed = true;
+                    *frame_val = current_current_frame;
                 }
                 micro_delay(10);
             }
             let frame = DwcActivateCsplit(channel);
             unsafe {
                 DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].mr_cs_hfnum = frame;
-                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries = 1;
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries += 1;
             }
             return false;
         } else {
@@ -290,14 +316,27 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
     } else if split_control_state == DWCSplitStateMachine::CSPLIT {
         if hcint & HCINT_NAK != 0 {
             // println!("| Endpoint CSPLIT {}: NAK received hcint {:x}", channel, hcint);
+            unsafe {
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state =
+                    DWCSplitStateMachine::NONE;
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries = 0;
+            }
         } else if hcint & HCINT_FRMOVRUN != 0 {
-            println!("| Endpoint CSPLIT {}: Frame overrun hcint {:x}", channel, hcint);
+            println!(
+                "| Endpoint CSPLIT {}: Frame overrun hcint {:x}",
+                channel, hcint
+            );
             UpdateDwcOddFrame(channel);
             return false;
         } else if hcint & HCINT_XACTERR != 0 {
-            println!("| Endpoint CSPLIT {}: XACTERR received hcint {:x}", channel, hcint);
-            DwcEnableChannel(channel);
-            return false;
+            println!(
+                "| Endpoint CSPLIT {}: XACTERR received hcint {:x}",
+                channel, hcint
+            );
+            // DwcEnableChannel(channel);
+            // return false;
+
+            return true;
         } else if hcint & HCINT_NYET != 0 {
             let mut cur_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
 
@@ -306,33 +345,30 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
                 return true;
             }
 
-            if unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries >= 3} {
-                let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
+            if unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries >= 3 } {
+                // let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
                 // println!("| Endpoint CSPLIT {} has exceeded 3 tries, giving up hctsiz {:x} last transfer {:x} state {:?}", channel, hctsiz, last_transfer, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize] });
                 return true;
             }
 
-            let mr_cs_hfnum = unsafe {
-                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].mr_cs_hfnum
-            };
+            let mr_cs_hfnum =
+                unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].mr_cs_hfnum };
 
             let mut succeed = false;
-            
+
             while !succeed {
                 while cur_frame == mr_cs_hfnum {
                     cur_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
                     micro_delay(10);
                 }
 
-                unsafe {
-                    let mut frame_val = NEXT_FRAME_CS.lock();
-                    let current_current_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
-                    if *frame_val == current_current_frame {
-                        //not succeed
-                    } else {
-                        succeed = true;
-                        *frame_val = current_current_frame;
-                    }
+                let mut frame_val = NEXT_FRAME_CS.lock();
+                let current_current_frame = dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK;
+                if *frame_val == current_current_frame {
+                    //not succeed
+                } else {
+                    succeed = true;
+                    *frame_val = current_current_frame;
                 }
                 micro_delay(10);
             }
@@ -341,7 +377,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
                 println!("| Endpoint CSPLIT {} has exceeded 8 frames (2), cur_frame: {} ss_hfnum: {} giving up tries {}", channel, cur_frame, ss_hfnum, unsafe { DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries });
                 return true;
             }
-            
+
             let frame = DwcEnableChannel(channel);
             unsafe {
                 DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].mr_cs_hfnum = frame;
@@ -350,13 +386,18 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
             return false;
         } else {
             unsafe {
-                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state = DWCSplitStateMachine::NONE;
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].state =
+                    DWCSplitStateMachine::NONE;
+                DWC_CHANNEL_CALLBACK.split_control_state[channel as usize].tries = 0;
             }
 
             if hcint & HCINT_ACK == 0 {
                 let hctsiz = dwc_otg::read_volatile(DOTG_HCTSIZ(channel as usize));
-                println!("| Endpoint CSPLIT {}: hcint {:x} last transfer {:x} hctisiz {:x}", channel, hcint, last_transfer, hctsiz);
-    
+                println!(
+                    "| Endpoint CSPLIT {}: hcint {:x} last transfer {:x} hctisiz {:x}",
+                    channel, hcint, last_transfer, hctsiz
+                );
+
                 // use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_GINTSTS;
                 // let gintsts = read_volatile(DOTG_GINTSTS);
                 // use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCINT;
@@ -364,7 +405,7 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
                 // use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCCHAR;
                 // let hcchar = read_volatile(DOTG_HCCHAR(channel as usize));
                 // let hctsiz = read_volatile(DOTG_HCTSIZ(channel as usize));
-    
+
                 // println!("| HCD gintsts: {:#x}", gintsts);
                 // println!("| HCD hcint: {:#x}", hcint);
                 // println!("| HCD hcchar: {:#x}", hcchar);
@@ -375,19 +416,19 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
     }
 
     let mut buffer_length = last_transfer.clamp(0, 8);
-    
+
     if hcint & HCINT_ACK != 0 {
         endpoint_device.endpoint_pid[endpoint.device_endpoint_number as usize] += 1;
-        
+
         if last_transfer == 0 {
             // if endpoint.buffer_length == 0 && transfer_size == 0 {
             buffer_length = 8;
             println!("| Endpoint {}: ACK received, but endpoint buffer is 0, weird. buffer len {} transfer siz {}", channel, endpoint.buffer_length, transfer_size);
-            
+
             // }
         }
     }
-        
+
     let mut buffer = Box::new_uninit_slice(buffer_length as usize);
     if hcint & HCINT_NAK != 0 {
         //NAK received, do nothing
@@ -408,7 +449,10 @@ pub fn finish_interrupt_endpoint_callback(endpoint: endpoint_descriptor, hcint_:
 
         return false;
     } else {
-        println!("| Endpoint {}: Unknown interrupt, ignoring {:x} state {:#?}. Letting run for now...", channel, hcint, split_control);
+        println!(
+            "| Endpoint {}: Unknown interrupt, ignoring {:x} state {:#?}. Letting run for now...",
+            channel, hcint, split_control
+        );
         // return true;
     }
 
@@ -445,7 +489,7 @@ pub fn interrupt_endpoint_callback(endpoint: endpoint_descriptor) {
     } else {
         PacketId::Data1
     };
-    
+
     let result = unsafe {
         UsbSendInterruptMessage(
             device,
@@ -491,33 +535,10 @@ pub fn register_interrupt_endpoint(
         let mut interval = interval(μs).with_missed_tick_behavior(MissedTicks::Skip);
         println!("| USB: Starting interrupt endpoint with interval {} μs", μs);
 
-        let hf1 = unsafe { dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK };
-        let hf1_time = get_time();
-        let mut hf2 = unsafe { dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK };
-        let mut hf2_time = get_time();
-        while hf1 == hf2 {
-            hf2 = unsafe { dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK };
-            hf2_time = get_time();
-        }
-        let mut hf3 = unsafe { dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK };
-        let mut hf3_time = get_time();
-        while hf2 == hf3 {
-            hf3 = unsafe { dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK };
-            hf3_time = get_time();
-        }
-        let mut hf4 = unsafe { dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK };
-        let mut hf4_time = get_time();
-        while hf3 == hf4 {
-            hf4 = unsafe { dwc_otg::read_volatile(DOTG_HFNUM) & HFNUM_FRNUM_MASK };
-            hf4_time = get_time();
-        }
-        println!("| USB: HFNUM: {} {} {} {} {} {} {} {}", hf1, hf1_time, hf2, hf2_time, hf3, hf3_time, hf4, hf4_time);
-
         let mut prev_time = get_time();
         while interval.tick().await {
             let cur_time = get_time();
             if cur_time - prev_time < μs {
-
             } else {
                 interrupt_endpoint_callback(endpoint);
             }
