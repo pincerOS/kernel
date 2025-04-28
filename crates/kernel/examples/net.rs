@@ -6,7 +6,7 @@ extern crate kernel;
 
 use core::net::Ipv4Addr;
 
-use kernel::{device::usb::device::net::get_dhcpd_mut, event::{task, thread}, networking::{iface::icmp, repr::{IcmpPacket, Ipv4Address}, socket::RawSocket}, ringbuffer};
+use kernel::{device::usb::device::net::get_dhcpd_mut, event::{task, thread}, networking::{iface::icmp, repr::{HttpPacket, HttpMethod, IcmpPacket, Ipv4Address}, socket::RawSocket}, ringbuffer};
 
 #[allow(unused_imports)]
 use kernel::networking::socket::{
@@ -14,6 +14,8 @@ use kernel::networking::socket::{
 };
 use kernel::networking::Result;
 use kernel::*;
+
+use alloc::string::String;
 
 #[no_mangle]
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
@@ -32,7 +34,7 @@ async fn main() {
 
     println!("out of dhcpd");
 
-    // [udp send test]
+    // // [udp send test]
     // println!("udp send test");
     // let s = UdpSocket::new();
     // let saddr = SocketAddr {
@@ -40,9 +42,13 @@ async fn main() {
     //     port: 1337,
     // };
     // for _i in 0..5 {
-    //     let _ = send_to(s, "hello everynyan".as_bytes().to_vec(), saddr).await;
+    //     let _ = send_to(s, "hello everynyan\n".as_bytes().to_vec(), saddr).await;
     // }
     // println!("end udp send test");
+
+    // for _i in 0..5 {
+    //     sync::spin_sleep(500_000);
+    // }
 
 
     // [udp listening test]
@@ -75,8 +81,8 @@ async fn main() {
         Err(_) => println!("couldn't connect"),
     };
 
-    for _i in 0..5 {
-        let _ = send_to(s, "hello everynyan".as_bytes().to_vec(), saddr).await;
+    for _i in 0..100 {
+        let _ = send_to(s, "hello everynyan\n".as_bytes().to_vec(), saddr).await;
     }
 
     close(s).await;
@@ -91,22 +97,45 @@ async fn main() {
     //
     // let clientfd = accept(s).await;
     //
+    // let mut tot = 0;
     // while let recv = recv_from(*clientfd.as_ref().unwrap()).await {
     //     if let Ok((payload, senderaddr)) = recv {
     //         println!("got message: {:x?}", payload);
+    //         tot += payload.len()
     //     } else {
     //         println!("\t[!] got a fin, ended");
     //         break;
     //     }
     // }
+    //
+    // println!("got {} bytes", tot);
 
-    // let usb packets drain
-    for _i in 0..32 {
-        sync::spin_sleep(10000_00);
-    }
-
-    println!("here");
-
+    // [http request test]
+    // println!("http send test");
+    // // let host = "http.badssl.com";
+    // let host = "http-textarea.badssl.com";
+    // // let host = "example.com";
+    // let saddr = SocketAddr::resolve(host, 80).await;
+    //
+    // let s = TcpSocket::new();
+    // match connect(s, saddr).await {
+    //     Ok(_) => (),
+    //     Err(_) => println!("couldn't connect"),
+    // };
+    //
+    // let path = "/";
+    // let http_req = HttpPacket::new(HttpMethod::Get, host, path);
+    // let _ = send_to(s, http_req.serialize(), saddr).await;
+    //
+    // let (resp, _) = recv_from(s).await.unwrap();
+    // 
+    //
+    // close(s).await;
+    //
+    // println!("response:\n{:?}", resp);
+    // println!("response:\n{:?}", String::from_utf8(resp));
+    // println!("http send test end");
+    
 
     shutdown();
 }

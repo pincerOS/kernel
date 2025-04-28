@@ -99,7 +99,7 @@ impl TcpSocket {
     }
 
     pub fn binding_equals(&self, saddr: SocketAddr) -> bool {
-        println!("binding port {} provided port {}", self.binding.port, saddr.port);
+        // println!("binding port {} provided port {}", self.binding.port, saddr.port);
         self.binding == saddr
     }
 
@@ -450,7 +450,7 @@ impl TcpSocket {
         match self.state {
             TcpState::Established => {
                 // Send FIN packet
-                println!("sending a close");
+                // println!("sending a close");
                 if let Some(remote) = self.remote_addr {
                     tcp::send_tcp_packet(
                         interface,

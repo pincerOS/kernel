@@ -4,11 +4,13 @@ use core::sync::atomic::{AtomicU16, Ordering};
 
 use alloc::vec::Vec;
 
-use crate::networking::repr::Ipv4Address;
+use crate::networking::repr::{DhcpPacket, DnsPacket, Ipv4Address};
 use crate::networking::{Error, Result};
 
-use crate::device::usb::device::net::get_interface_mut;
+use crate::device::usb::device::net::{get_dhcpd_mut, get_interface_mut};
 use crate::event::task::spawn_async;
+
+use super::UdpSocket;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SocketAddr {
@@ -21,6 +23,29 @@ impl SocketAddr {
         SocketAddr {
             addr: Ipv4Address::new([0, 0, 0, 0]),
             port: 0,
+        }
+    }
+    
+    pub async fn resolve(host: &str, port: u16) -> Self {
+        let dhcp = get_dhcpd_mut();
+        let dns_socket = UdpSocket::new();
+        let _ = bind(dns_socket, 53);
+
+        let dns_req = DnsPacket::create_dns_query(host);
+
+        let saddr = SocketAddr {
+            addr: dhcp.dns_servers[0],
+            port: 53,
+        };
+
+        send_to(dns_socket, dns_req.serialize(), saddr).await;
+
+        let (resp, _) = recv_from(dns_socket).await.unwrap();
+        let dhcp_resp = DnsPacket::deserialize(&resp).unwrap();
+
+        SocketAddr {
+            addr: dhcp_resp.extract_ip_address().unwrap(),
+            port
         }
     }
 }

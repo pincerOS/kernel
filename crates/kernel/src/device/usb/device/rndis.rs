@@ -29,7 +29,8 @@ pub fn rndis_initialize_msg(device: &mut UsbDevice) -> ResultCode {
         request_id: 0,
         major_version: 1,
         minor_version: 0,
-        max_transfer_size: 0x4000,
+        // max_transfer_size: 0x4000,
+        max_transfer_size: 1540,
     };
 
     let mut buffer_req = [0u8; 52];

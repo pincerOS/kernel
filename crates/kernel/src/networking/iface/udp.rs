@@ -31,7 +31,7 @@ pub fn send_udp_packet(
 }
 
 pub fn recv_udp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Result<()> {
-    println!("\t received udp packet");
+    // println!("\t received udp packet");
     let udp_packet = UdpPacket::deserialize(ipv4_packet.payload.as_slice())?;
 
     let local_socket_addr = SocketAddr {
