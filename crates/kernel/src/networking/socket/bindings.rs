@@ -4,7 +4,7 @@ use core::sync::atomic::{AtomicU16, Ordering};
 
 use alloc::vec::Vec;
 
-use crate::networking::repr::Ipv4Address;
+use crate::networking::repr::{DnsPacket, Ipv4Address};
 use crate::networking::{Error, Result};
 
 use crate::device::usb::device::net::get_interface_mut;
@@ -23,6 +23,7 @@ impl SocketAddr {
             port: 0,
         }
     }
+
 }
 
 impl Display for SocketAddr {

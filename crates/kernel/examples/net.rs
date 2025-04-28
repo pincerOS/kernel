@@ -6,7 +6,7 @@ extern crate kernel;
 
 use core::net::Ipv4Addr;
 
-use kernel::{device::usb::device::net::get_dhcpd_mut, event::{task, thread}, networking::{iface::icmp, repr::{IcmpPacket, Ipv4Address}, socket::RawSocket}, ringbuffer};
+use kernel::{device::usb::device::net::get_dhcpd_mut, event::{task, thread}, networking::{iface::icmp, repr::{HttpPacket, HttpMethod, IcmpPacket, Ipv4Address}, socket::RawSocket}, ringbuffer};
 
 #[allow(unused_imports)]
 use kernel::networking::socket::{
@@ -91,22 +91,42 @@ async fn main() {
     //
     // let clientfd = accept(s).await;
     //
+    // let mut tot = 0;
     // while let recv = recv_from(*clientfd.as_ref().unwrap()).await {
     //     if let Ok((payload, senderaddr)) = recv {
     //         println!("got message: {:x?}", payload);
+    //         tot += payload.len()
     //     } else {
     //         println!("\t[!] got a fin, ended");
     //         break;
     //     }
     // }
+    //
+    // println!("got {} bytes", tot);
 
-    // let usb packets drain
-    for _i in 0..32 {
-        sync::spin_sleep(10000_00);
-    }
-
-    println!("here");
-
+    // [http request test]
+    // println!("http send test");
+    // // let host = "api.ipfy.org";
+    // //
+    // // let saddr = SocketAddr::resolve("host", 80);
+    // let saddr = SocketAddr {
+    //     addr: Ipv4Address::new([173, 194, 208, 100]),
+    //     port: 80,
+    // };
+    //
+    // let s = TcpSocket::new();
+    // match connect(s, saddr).await {
+    //     Ok(_) => (),
+    //     Err(_) => println!("couldn't connect"),
+    // };
+    //
+    // let path = "/";
+    // let http_req = HttpPacket::new(HttpMethod::Get, host, path);
+    // let _ = send_to(s, http_req.serialize(), saddr).await;
+    // 
+    // close(s).await;
+    // println!("http send test end");
+    
 
     shutdown();
 }
