@@ -108,7 +108,8 @@ async fn main() {
 
     // [http request test]
     println!("http send test");
-    let host = "http.badssl.com";
+    // let host = "http.badssl.com";
+    let host = "example.com";
     let saddr = SocketAddr::resolve(host, 80).await;
 
     // let saddr = SocketAddr {
@@ -125,10 +126,13 @@ async fn main() {
 
     let path = "/";
     let http_req = HttpPacket::new(HttpMethod::Get, host, path);
-    println!("{}",String::from_utf8(http_req.serialize()).unwrap());
     let _ = send_to(s, http_req.serialize(), saddr).await;
 
+    let (resp, _) = recv_from(s).await.unwrap();
+    
+
     close(s).await;
+    println!("response:\n{:?}", String::from_utf8(resp));
     println!("http send test end");
     
 
