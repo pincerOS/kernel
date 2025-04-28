@@ -123,6 +123,19 @@ pub async fn accept(socketfd: u16) -> Result<u16> {
     Ok(socketfd)
 }
 
+pub async fn close(socketfd: u16) -> Result<()> {
+    let interface = get_interface_mut();
+    // 1. if listener not started, error
+    // let mut sockets = interface.sockets.lock();
+
+    let tagged_socket = interface.sockets
+        .get_mut(&socketfd)
+        .ok_or(Error::InvalidSocket(socketfd))?;
+
+    // 2. accept 1 connection, error if no pending connections
+    tagged_socket.close().await
+}
+
 pub fn bind(socketfd: u16, port: u16) -> Result<()> {
     let interface = get_interface_mut();
     // 1. check if binding is already in use by another socket

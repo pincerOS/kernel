@@ -37,7 +37,7 @@ impl TaggedSocket {
         match self {
             // TaggedSocket::Raw(socket) => socket.queue_send(payload, saddr),
             TaggedSocket::Udp(socket) => socket.send_enqueue(payload, saddr).await,
-            TaggedSocket::Tcp(socket) => socket.send_enqueue(payload, saddr),
+            TaggedSocket::Tcp(socket) => socket.send_enqueue(payload, saddr).await,
         }
     }
 
@@ -106,6 +106,14 @@ impl TaggedSocket {
             // TaggedSocket::Raw(socket) => socket.recv(),
             TaggedSocket::Udp(_socket) => Err(Error::Ignored),
             TaggedSocket::Tcp(socket) => socket.listen(interface, num_req).await,
+        }
+    }
+
+    pub async fn close(&mut self) -> Result<()> {
+        match self {
+            // TaggedSocket::Raw(socket) => socket.recv(),
+            TaggedSocket::Udp(_socket) => Err(Error::Ignored),
+            TaggedSocket::Tcp(socket) => socket.close().await,
         }
     }
 
