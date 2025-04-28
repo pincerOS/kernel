@@ -285,10 +285,12 @@ pub unsafe fn HcdProcessRootHubMessage(
 
                             micro_delay(ms_to_micro(63));
 
-                            write_volatile(DOTG_HPRT, hprt);
+                            let hprt = read_volatile(DOTG_HPRT);
+                            write_volatile(DOTG_HPRT, hprt & !HPRT_PRTRST);
+                            // write_volatile(DOTG_HPRT, hprt);
                             micro_delay(ms_to_micro(63));
 
-                            init_fifo();
+                            // init_fifo();
                             // //FeatureReset
                             // let mut pwr = read_volatile(DOTG_PCGCCTL);
                             // pwr &= !(1 << 5);

@@ -9,7 +9,6 @@ pub mod usbd;
 pub use device::hid::keyboard;
 pub use device::hid::mouse;
 
-use device::net::NetSendPacket;
 use device::net::RegisterNetReceiveCallback;
 
 use alloc::boxed::Box;

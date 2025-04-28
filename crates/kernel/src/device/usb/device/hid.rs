@@ -84,6 +84,7 @@ fn HidSetProtocol(device: &mut UsbDevice, interface: u8, protocol: u16) -> Resul
     return ResultCode::OK;
 }
 
+#[allow(dead_code)]
 fn HidGetReport(
     device: &mut UsbDevice,
     report_type: HidReportType,

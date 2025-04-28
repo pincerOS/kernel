@@ -9,9 +9,9 @@ use crate::device::usb::types::UsbTransfer;
  *
  */
 use crate::device::usb::usbd::pipe::UsbPipeAddress;
+use crate::device::usb::DWCSplitControlState;
 use crate::ringbuffer::SpscRingBuffer;
 use crate::sync::InterruptSpinLock;
-use crate::device::usb::DWCSplitControlState;
 use alloc::boxed::Box;
 
 use super::endpoint::*;

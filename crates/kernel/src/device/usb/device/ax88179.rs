@@ -1,16 +1,13 @@
-use core::result;
-
 use crate::device::system_timer::micro_delay;
 use crate::device::usb::hcd::dwc::dwc_otg::ms_to_micro;
 use crate::device::usb::types::*;
 use crate::device::usb::usbd::device::*;
+use crate::device::usb::usbd::endpoint::UsbEndpointDevice;
 use crate::device::usb::usbd::pipe::*;
 use crate::device::usb::usbd::request::*;
 use crate::device::usb::usbd::usbd::UsbSendBulkMessage;
-use crate::device::usb::UsbControlMessage;
-use crate::device::usb::usbd::endpoint::UsbEndpointDevice;
-use crate::device::usb::device::net::*;
 use crate::device::usb::PacketId;
+use crate::device::usb::UsbControlMessage;
 use alloc::boxed::Box;
 use alloc::vec;
 
@@ -19,10 +16,10 @@ use alloc::vec;
  * usb/device/ax88179.rs
  *  By Aaron Lo
  *   Based off the freeBSD driver if_axge.c
- */ 
+ */
 //https://elixir.bootlin.com/freebsd/v14.2/source/sys/dev/usb/net/if_axge.c
 
-const MAC_ADDRESS: [u8; 6] = [0x54, 0x52, 0x00, 0x12, 0x34, 0x56]; // TODO: TBD / make this dynamic
+// const MAC_ADDRESS: [u8; 6] = [0x54, 0x52, 0x00, 0x12, 0x34, 0x56]; // TODO: TBD / make this dynamic
 
 pub unsafe fn axge_send_packet(
     device: &mut UsbDevice,
@@ -32,16 +29,15 @@ pub unsafe fn axge_send_packet(
     let size = 8 + buffer_length;
 
     let mut buf = vec![0u8; size as usize];
-    
-    let mut tx_hdr1 = buffer_length as u32;
-    let mut tx_hdr2 = 0u32;
+
+    let tx_hdr1 = buffer_length as u32;
+    let tx_hdr2 = 0u32;
 
     // if (tx_hdr1 //don't need padding
     let b1 = tx_hdr1.to_le_bytes();
     let b2 = tx_hdr2.to_le_bytes();
     buf[0..4].copy_from_slice(&b1);
     buf[4..8].copy_from_slice(&b2);
-
 
     unsafe {
         core::ptr::copy_nonoverlapping(buffer, buf.as_mut_ptr().add(8), buffer_length as usize);
@@ -72,7 +68,7 @@ pub unsafe fn axge_send_packet(
             size,
             pid,
             1, //TODO: Check this
-            10
+            10,
         )
     };
 
@@ -128,42 +124,53 @@ pub unsafe fn axge_receive_packet(
 }
 
 pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
-
     axge_stop(device);
 
-	axge_reset(device);
+    axge_reset(device);
 
     println!("| AXGE: Initializing device");
-    axge_write_mem(device, AXGE_ACCESS_MAC, ETHER_ADDR_LEN as u16, AXGE_NIDR as u16,
-	    MAC_ADDRESS.as_mut_ptr(), ETHER_ADDR_LEN as u32);
+    let mut MAC_ADDRESS: [u8; 6] = [0x54, 0x52, 0x00, 0x12, 0x34, 0x56]; // TODO: TBD / make this dynamic
+    axge_write_mem(
+        device,
+        AXGE_ACCESS_MAC,
+        ETHER_ADDR_LEN as u16,
+        AXGE_NIDR as u16,
+        MAC_ADDRESS.as_mut_ptr(),
+        ETHER_ADDR_LEN as u32,
+    );
 
-	axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_PWLLR, 0x34);
-	axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_PWLHR, 0x52);
+    axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_PWLLR, 0x34);
+    axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_PWLHR, 0x52);
 
     axge_csum_cfg(device);
     axge_rxfilter(device);
 
     /*
-	 * XXX
-	 * Controller supports wakeup on link change detection,
-	 * magic packet and wakeup frame recpetion.  But it seems
-	 * there is no framework for USB ethernet suspend/wakeup.
-	 * Disable all wakeup functions.
-	 */
+     * XXX
+     * Controller supports wakeup on link change detection,
+     * magic packet and wakeup frame recpetion.  But it seems
+     * there is no framework for USB ethernet suspend/wakeup.
+     * Disable all wakeup functions.
+     */
     println!("| AXGE: Disabling wakeup functions");
-	axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_MMSR as u16, 0);
-	axge_read_cmd_1(device, AXGE_ACCESS_MAC, AXGE_MMSR as u16);
+    axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_MMSR as u16, 0);
+    axge_read_cmd_1(device, AXGE_ACCESS_MAC, AXGE_MMSR as u16);
 
-	/* Configure default medium type. */
+    /* Configure default medium type. */
     println!("| AXGE: Configuring default medium type");
-	axge_write_cmd_2(device, AXGE_ACCESS_MAC, 2, AXGE_MSR, MSR_GM | MSR_FD |
-	    MSR_RFC | MSR_TFC | MSR_RE);
+    axge_write_cmd_2(
+        device,
+        AXGE_ACCESS_MAC,
+        2,
+        AXGE_MSR,
+        MSR_GM | MSR_FD | MSR_RFC | MSR_TFC | MSR_RE,
+    );
 
     //     usbd_xfer_set_stall(sc->sc_xfer[AXGE_BULK_DT_WR]);
 
-	// if_setdrvflagbits(ifp, IFF_DRV_RUNNING, 0);
-	// /* Switch to selected media. */
-	// axge_ifmedia_upd(ifp);
+    // if_setdrvflagbits(ifp, IFF_DRV_RUNNING, 0);
+    // /* Switch to selected media. */
+    // axge_ifmedia_upd(ifp);
     // TODO: This is reseting the phy -> need to look into if thigns go wrong WARNING
     //This is my attempt at htis from gpt code -> no clue if it works
 
@@ -172,7 +179,7 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
 
     println!("| AXGE: Resetting PHY");
     // axge_write_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR, BMCR_RESET);
-    
+
     // let mut val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
     // while val & BMCR_RESET != 0 {
     //     micro_delay(ms_to_micro(10));
@@ -181,18 +188,17 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
 
     // axge_write_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR, BMCR_RESET);
 
-    
     // let mut val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
     // while val & BMCR_RESET != 0 {
     //     micro_delay(ms_to_micro(10));
-        // val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
+    // val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, 2, PHY_BMCR);
     // }
 
     // let mut reg = BMCR_RESET;
 
     // axge_miibus_writereg(device, 3, MII_BMCR, reg);
 
-    // //wait 100 ms for it t ocomplete 
+    // //wait 100 ms for it t ocomplete
     // for _ in 0..100 {
     //     reg = axge_miibus_readreg(device, 3, MII_BMCR);
     //     if reg & BMCR_RESET == 0 {
@@ -210,8 +216,14 @@ pub fn axge_init(device: &mut UsbDevice) -> ResultCode {
     println!("| AXGE: PHY reset complete");
 
     let mut rxctl = (AX_RX_CTL_START | AX_RX_CTL_AB | AX_RX_CTL_IPE) | AX_RX_CTL_PRO;
-    ax88179_write_cmd(device, AX_ACCESS_MAC, AX_RX_CTL,
-        2, 2, &mut rxctl as *mut u16 as *mut u8);
+    ax88179_write_cmd(
+        device,
+        AX_ACCESS_MAC,
+        AX_RX_CTL,
+        2,
+        2,
+        &mut rxctl as *mut u16 as *mut u8,
+    );
 
     println!("| AXGE: multicast mode set");
 
@@ -228,7 +240,7 @@ pub fn ax88179_led_setting(device: &mut UsbDevice) {
     println!("| AXGE: Setting LED settings");
     // ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
     //     GMII_PHY_PAGE_SELECT, 2, &tmp);
-    axge_write_cmd_2(device, AXGE_ACCESS_PHY, GMII_PHY_PGSEL_EXT,3, tmp);
+    axge_write_cmd_2(device, AXGE_ACCESS_PHY, GMII_PHY_PGSEL_EXT, 3, tmp);
     tmp = 0x2c;
 
     axge_write_cmd_2(device, AXGE_ACCESS_PHY, GMII_PHYPAGE as u16, 3, tmp);
@@ -237,7 +249,7 @@ pub fn ax88179_led_setting(device: &mut UsbDevice) {
     let mut ledlink = axge_read_cmd_2(device, AXGE_ACCESS_PHY, GMII_LED_LINK as u16, 3);
 
     ledact &= GMII_LED_ACTIVE_MASK;
-	ledlink &= GMII_LED_LINK_MASK;
+    ledlink &= GMII_LED_LINK_MASK;
 
     ledact |= GMII_LED0_ACTIVE | GMII_LED1_ACTIVE | GMII_LED2_ACTIVE;
     ledlink |= GMII_LED0_LINK_10 | GMII_LED1_LINK_100 | GMII_LED2_LINK_1000;
@@ -255,7 +267,6 @@ pub fn ax88179_led_setting(device: &mut UsbDevice) {
     println!("| AXGE: LED settings complete");
 }
 
-
 pub fn axge_miibus_readreg(device: &mut UsbDevice, phy: u16, reg: u16) -> u16 {
     let val = axge_read_cmd_2(device, AXGE_ACCESS_PHY, reg, phy);
     return val;
@@ -268,8 +279,18 @@ pub fn axge_miibus_writereg(device: &mut UsbDevice, phy: u16, reg: u16, val: u16
 pub fn axge_csum_cfg(device: &mut UsbDevice) {
     // Enable checksum offload
     println!("| AXGE: Enabling checksum offload");
-    axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_CRCR as u16, CRCR_IP | CRCR_TCP | CRCR_UDP);
-    axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_CTCR as u16, CRCR_IP | CRCR_TCP | CRCR_UDP);
+    axge_write_cmd_1(
+        device,
+        AXGE_ACCESS_MAC,
+        AXGE_CRCR as u16,
+        CRCR_IP | CRCR_TCP | CRCR_UDP,
+    );
+    axge_write_cmd_1(
+        device,
+        AXGE_ACCESS_MAC,
+        AXGE_CTCR as u16,
+        CRCR_IP | CRCR_TCP | CRCR_UDP,
+    );
 }
 
 pub fn axge_rxfilter(debice: &mut UsbDevice) {
@@ -280,13 +301,17 @@ pub fn axge_rxfilter(debice: &mut UsbDevice) {
 }
 
 pub fn axge_chip_init(device: &mut UsbDevice) {
-    
     //power up ethernet phy
     axge_write_cmd_2(device, AXGE_ACCESS_MAC, 2, AXGE_EPPRCR, 0);
     axge_write_cmd_2(device, AXGE_ACCESS_MAC, 2, AXGE_EPPRCR, EPPRCR_IPRL);
 
     micro_delay(ms_to_micro(250));
-    axge_write_cmd_1(device, AXGE_ACCESS_MAC, AXGE_CLK_SELECT as u16, AXGE_CLK_SELECT_ACS | AXGE_CLK_SELECT_BCS);
+    axge_write_cmd_1(
+        device,
+        AXGE_ACCESS_MAC,
+        AXGE_CLK_SELECT as u16,
+        AXGE_CLK_SELECT_ACS | AXGE_CLK_SELECT_BCS,
+    );
     micro_delay(ms_to_micro(100));
 
     axge_write_cmd_1(device, AXGE_FW_MODE, AXGE_FW_MODE_178A179, 0);
@@ -328,8 +353,14 @@ fn axge_write_cmd_2(device: &mut UsbDevice, cmd: u8, index: u16, reg: u16, val: 
     axge_write_mem(device, cmd, index, reg, &val as *const u16 as *mut u8, 2);
 }
 
-fn axge_read_mem(device: &mut UsbDevice, cmd: u8, index: u16, val: u16, buf: *mut u8, len: u32) -> ResultCode {
-
+fn axge_read_mem(
+    device: &mut UsbDevice,
+    cmd: u8,
+    index: u16,
+    val: u16,
+    buf: *mut u8,
+    len: u32,
+) -> ResultCode {
     let result = unsafe {
         UsbControlMessage(
             device,
@@ -363,9 +394,14 @@ fn axge_read_mem(device: &mut UsbDevice, cmd: u8, index: u16, val: u16, buf: *mu
     return ResultCode::OK;
 }
 
-
-fn axge_write_mem(device: &mut UsbDevice, cmd: u8, index: u16, val: u16, buf: *mut u8, len: u32) -> ResultCode {
-
+fn axge_write_mem(
+    device: &mut UsbDevice,
+    cmd: u8,
+    index: u16,
+    val: u16,
+    buf: *mut u8,
+    len: u32,
+) -> ResultCode {
     let result = unsafe {
         UsbControlMessage(
             device,
@@ -401,43 +437,79 @@ fn axge_write_mem(device: &mut UsbDevice, cmd: u8, index: u16, val: u16, buf: *m
 
 pub fn ax88179_auto_detach(dev: &mut UsbDevice) {
     let mut tmp16: u16 = 0;
-	let mut tmp8: u8 = 0;
+    let mut tmp8: u8 = 0;
 
-	// if ax88179_read_cmd(dev, AX_ACCESS_EEPROM, 0x43, 1, 2, &mut tmp16  as *mut u16 as *mut u8) < 0 {
-	// 	return;
+    // if ax88179_read_cmd(dev, AX_ACCESS_EEPROM, 0x43, 1, 2, &mut tmp16  as *mut u16 as *mut u8) < 0 {
+    // 	return;
     // }
 
-	if ((tmp16 == 0xFFFF) || ((tmp16 & 0x0100) == 0)) {
-		return;
+    if (tmp16 == 0xFFFF) || ((tmp16 & 0x0100) == 0) {
+        return;
     }
-    unsafe {
-        /* Enable Auto Detach bit */
-        tmp8 = 0;
-        ax88179_read_cmd(dev, AX_ACCESS_MAC, AX_CLK_SELECT as u16, 1, 1, &mut tmp8 as *mut u8);
-        tmp8 |= AX_CLK_SELECT_ULR;
-        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_CLK_SELECT as u16, 1, 1, &mut tmp8 as *mut u8);
+    /* Enable Auto Detach bit */
+    ax88179_read_cmd(
+        dev,
+        AX_ACCESS_MAC,
+        AX_CLK_SELECT as u16,
+        1,
+        1,
+        &mut tmp8 as *mut u8,
+    );
+    tmp8 |= AX_CLK_SELECT_ULR;
+    ax88179_write_cmd(
+        dev,
+        AX_ACCESS_MAC,
+        AX_CLK_SELECT as u16,
+        1,
+        1,
+        &mut tmp8 as *mut u8,
+    );
 
-        ax88179_read_cmd(dev, AX_ACCESS_MAC, AX_PHYPWR_RSTCTL as u16, 2, 2, &mut tmp16 as *mut u16 as *mut u8);
-        tmp16 |= AX_PHYPWR_RSTCTL_AT;
-        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_PHYPWR_RSTCTL as u16, 2, 2, &mut tmp16 as *mut u16 as *mut u8);
-    }
+    ax88179_read_cmd(
+        dev,
+        AX_ACCESS_MAC,
+        AX_PHYPWR_RSTCTL as u16,
+        2,
+        2,
+        &mut tmp16 as *mut u16 as *mut u8,
+    );
+    tmp16 |= AX_PHYPWR_RSTCTL_AT;
+    ax88179_write_cmd(
+        dev,
+        AX_ACCESS_MAC,
+        AX_PHYPWR_RSTCTL as u16,
+        2,
+        2,
+        &mut tmp16 as *mut u16 as *mut u8,
+    );
 }
 
 pub fn ax88179_reset(dev: &mut UsbDevice) {
-
     let mut buf = [0u8; 6];
-    let mut tmp16 = buf.as_mut_ptr() as *mut u16;
-    let mut tmp = buf.as_mut_ptr() as *mut u8;
+    let tmp16 = buf.as_mut_ptr() as *mut u16;
+    let tmp = buf.as_mut_ptr() as *mut u8;
 
-
-
-	/* Power up ethernet PHY */
+    /* Power up ethernet PHY */
     unsafe {
         *tmp16 = 0;
-        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_PHYPWR_RSTCTL as u16, 2, 2, tmp16 as *mut u8);
+        ax88179_write_cmd(
+            dev,
+            AX_ACCESS_MAC,
+            AX_PHYPWR_RSTCTL as u16,
+            2,
+            2,
+            tmp16 as *mut u8,
+        );
 
         *tmp16 = AX_PHYPWR_RSTCTL_IPRL;
-        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_PHYPWR_RSTCTL  as u16, 2, 2, tmp16 as *mut u8);
+        ax88179_write_cmd(
+            dev,
+            AX_ACCESS_MAC,
+            AX_PHYPWR_RSTCTL as u16,
+            2,
+            2,
+            tmp16 as *mut u8,
+        );
         micro_delay(500);
 
         *tmp = AX_CLK_SELECT_ACS | AX_CLK_SELECT_BCS;
@@ -450,13 +522,29 @@ pub fn ax88179_reset(dev: &mut UsbDevice) {
         /* Read MAC address from DTB or asix chip */
         // ax88179_get_mac_addr(dev);
         // memcpy(dev->net->perm_addr, dev->net->dev_addr, ETH_ALEN);
-        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_NODE_ID as u16, 6, 6,
-            unsafe { MAC_ADDRESS.as_mut_ptr() });
+        let mut MAC_ADDRESS: [u8; 6] = [0x54, 0x52, 0x00, 0x12, 0x34, 0x56]; // TODO: TBD / make this dynamic
+        ax88179_write_cmd(
+            dev,
+            AX_ACCESS_MAC,
+            AX_NODE_ID as u16,
+            6,
+            6,
+            MAC_ADDRESS.as_mut_ptr(),
+        );
 
         /* RX bulk configuration */
         // memcpy(tmp, &AX88179_BULKIN_SIZE[0], 5);
-        let mut buf_tmp:[u8; 5] = [7, 0x4f, 0,	0x12, 0xff];
-        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_RX_BULKIN_QCTRL as u16, 5, 5, buf_tmp.as_mut_ptr());
+        //{7, 0xae, 7,	0x18, 0xff}
+        // {7, 0xcc, 0x4c, 0x18, 8}
+        let mut buf_tmp: [u8; 5] = [7, 0xae, 7, 0x18, 0xff];
+        ax88179_write_cmd(
+            dev,
+            AX_ACCESS_MAC,
+            AX_RX_BULKIN_QCTRL as u16,
+            5,
+            5,
+            buf_tmp.as_mut_ptr(),
+        );
 
         // dev->rx_urb_size = 1024 * 20;
 
@@ -464,42 +552,49 @@ pub fn ax88179_reset(dev: &mut UsbDevice) {
         ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_PAUSE_WATERLVL_LOW as u16, 1, 1, tmp);
 
         *tmp = 0x52;
-        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_PAUSE_WATERLVL_HIGH as u16,
-                1, 1, tmp);
+        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_PAUSE_WATERLVL_HIGH as u16, 1, 1, tmp);
 
         /* Enable checksum offload */
-        *tmp = AX_RXCOE_IP | AX_RXCOE_TCP | AX_RXCOE_UDP |
-            AX_RXCOE_TCPV6 | AX_RXCOE_UDPV6;
+        *tmp = AX_RXCOE_IP | AX_RXCOE_TCP | AX_RXCOE_UDP | AX_RXCOE_TCPV6 | AX_RXCOE_UDPV6;
         ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_RXCOE_CTL as u16, 1, 1, tmp);
 
-        *tmp = AX_TXCOE_IP | AX_TXCOE_TCP | AX_TXCOE_UDP |
-            AX_TXCOE_TCPV6 | AX_TXCOE_UDPV6;
+        *tmp = AX_TXCOE_IP | AX_TXCOE_TCP | AX_TXCOE_UDP | AX_TXCOE_TCPV6 | AX_TXCOE_UDPV6;
         ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_TXCOE_CTL as u16, 1, 1, tmp);
 
         /* Configure RX control register => start operation */
         // *tmp16 = AX_RX_CTL_DROPCRCERR | AX_RX_CTL_IPE | AX_RX_CTL_START |
         //     AX_RX_CTL_AP | AX_RX_CTL_AMALL | AX_RX_CTL_AB;
-        *tmp16 = AX_RX_CTL_START | AX_RX_CTL_AB | AX_RX_CTL_IPE |
-            AX_RX_CTL_PRO | AX_RX_CTL_AMALL | AX_RX_CTL_AP;
+        *tmp16 = AX_RX_CTL_START
+            | AX_RX_CTL_AB
+            | AX_RX_CTL_IPE
+            | AX_RX_CTL_PRO
+            | AX_RX_CTL_AMALL
+            | AX_RX_CTL_AP;
         ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_RX_CTL as u16, 2, 2, tmp16 as *mut u8);
 
-        *tmp = AX_MONITOR_MODE_PMETYPE | AX_MONITOR_MODE_PMEPOL |
-            AX_MONITOR_MODE_RWMP;
+        *tmp = AX_MONITOR_MODE_PMETYPE | AX_MONITOR_MODE_PMEPOL | AX_MONITOR_MODE_RWMP;
         ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_MONITOR_MOD as u16, 1, 1, tmp);
 
         /* Configure default medium type => giga */
-        *tmp16 = AX_MEDIUM_RECEIVE_EN | AX_MEDIUM_TXFLOW_CTRLEN |
-            AX_MEDIUM_RXFLOW_CTRLEN | AX_MEDIUM_FULL_DUPLEX |
-            AX_MEDIUM_GIGAMODE;
-        ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_MEDIUM_STATUS_MODE as u16, 2, 2, tmp16 as *mut u8);
+        *tmp16 = AX_MEDIUM_RECEIVE_EN
+            | AX_MEDIUM_TXFLOW_CTRLEN
+            | AX_MEDIUM_RXFLOW_CTRLEN
+            | AX_MEDIUM_FULL_DUPLEX; //|
+                                     // AX_MEDIUM_GIGAMODE;
+        ax88179_write_cmd(
+            dev,
+            AX_ACCESS_MAC,
+            AX_MEDIUM_STATUS_MODE as u16,
+            2,
+            2,
+            tmp16 as *mut u8,
+        );
     }
 
     ax88179_disable_eee(dev);
     ax88179_ethtool(dev);
     mii_nway_restart(dev);
-
 }
-
 
 pub fn ax88179_link_reset(dev: &mut UsbDevice) {
     println!("| AX88179: Resetting link");
@@ -508,17 +603,35 @@ pub fn ax88179_link_reset(dev: &mut UsbDevice) {
     use crate::sync::get_time;
     let timeout = get_time() / 1000 + 100;
     let mut mode: u16 = 0;
-    while tmp32 & 0x40000000 != 0{
-		ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_RX_CTL, 2, 2, &mut mode as *mut u16 as *mut u8);
+    while tmp32 & 0x40000000 != 0 {
+        ax88179_write_cmd(
+            dev,
+            AX_ACCESS_MAC,
+            AX_RX_CTL,
+            2,
+            2,
+            &mut mode as *mut u16 as *mut u8,
+        );
 
-        let mut temporary: u16 = AX_RX_CTL_DROPCRCERR | AX_RX_CTL_IPE | AX_RX_CTL_START |
-        AX_RX_CTL_AP | AX_RX_CTL_AMALL | AX_RX_CTL_AB;
-		ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_RX_CTL, 2, 2, &mut temporary as *mut u16 as *mut u8);
+        let mut temporary: u16 = AX_RX_CTL_DROPCRCERR
+            | AX_RX_CTL_IPE
+            | AX_RX_CTL_START
+            | AX_RX_CTL_AP
+            | AX_RX_CTL_AMALL
+            | AX_RX_CTL_AB;
+        ax88179_write_cmd(
+            dev,
+            AX_ACCESS_MAC,
+            AX_RX_CTL,
+            2,
+            2,
+            &mut temporary as *mut u16 as *mut u8,
+        );
 
         /* link up, check the usb device control TX FIFO full or empty*/
 
-		/*link up, check the usb device control TX FIFO full or empty*/
-		ax88179_read_cmd(dev, 0x81, 0x8c, 0, 4, &mut tmp32 as *mut u32 as *mut u8);
+        /*link up, check the usb device control TX FIFO full or empty*/
+        ax88179_read_cmd(dev, 0x81, 0x8c, 0, 4, &mut tmp32 as *mut u32 as *mut u8);
 
         if get_time() / 1000 > timeout {
             println!("| AX88179: Link reset timeout");
@@ -529,37 +642,70 @@ pub fn ax88179_link_reset(dev: &mut UsbDevice) {
     let mut link_sts: u8 = 0;
     let mut tmp16: u16 = 0;
 
-    mode = AX_MEDIUM_RECEIVE_EN | AX_MEDIUM_TXFLOW_CTRLEN |
-	       AX_MEDIUM_RXFLOW_CTRLEN;
+    mode = AX_MEDIUM_RECEIVE_EN | AX_MEDIUM_TXFLOW_CTRLEN | AX_MEDIUM_RXFLOW_CTRLEN;
 
-	ax88179_read_cmd(dev, AX_ACCESS_MAC, PHYSICAL_LINK_STATUS as u16,
-			 1, 1, &mut link_sts as *mut u8);
+    ax88179_read_cmd(
+        dev,
+        AX_ACCESS_MAC,
+        PHYSICAL_LINK_STATUS as u16,
+        1,
+        1,
+        &mut link_sts as *mut u8,
+    );
 
-	ax88179_read_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
-			 GMII_PHY_PHYSR, 2, &mut tmp16 as *mut u16 as *mut u8);
+    ax88179_read_cmd(
+        dev,
+        AX_ACCESS_PHY,
+        AX88179_PHY_ID,
+        GMII_PHY_PHYSR,
+        2,
+        &mut tmp16 as *mut u16 as *mut u8,
+    );
 
     if (tmp16 & GMII_PHY_PHYSR_FULL) != 0 {
         mode |= AX_MEDIUM_FULL_DUPLEX;
     }
-    ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_MEDIUM_STATUS_MODE as u16,
-            2, 2, &mut mode as *mut u16 as *mut u8);
+    ax88179_write_cmd(
+        dev,
+        AX_ACCESS_MAC,
+        AX_MEDIUM_STATUS_MODE as u16,
+        2,
+        2,
+        &mut mode as *mut u16 as *mut u8,
+    );
 }
 
 pub fn ax88179_disable_eee(dev: &mut UsbDevice) {
     println!("| AX88179: Disabling EEE");
     let mut tmp16 = GMII_PHY_PGSEL_PAGE3;
-    unsafe { 
-        ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID as u16,
-            GMII_PHY_PAGE_SELECT, 2, &mut tmp16 as *mut u16 as *mut u8);
-    
-        tmp16 = 0x3246;
-        ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
-                MII_PHYADDR, 2, &mut tmp16 as *mut u16 as *mut u8);
-    
-        tmp16 = GMII_PHY_PGSEL_PAGE0;
-        ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
-                GMII_PHY_PAGE_SELECT, 2, &mut tmp16 as *mut u16 as *mut u8);
-    }
+    ax88179_write_cmd(
+        dev,
+        AX_ACCESS_PHY,
+        AX88179_PHY_ID as u16,
+        GMII_PHY_PAGE_SELECT,
+        2,
+        &mut tmp16 as *mut u16 as *mut u8,
+    );
+
+    tmp16 = 0x3246;
+    ax88179_write_cmd(
+        dev,
+        AX_ACCESS_PHY,
+        AX88179_PHY_ID,
+        MII_PHYADDR,
+        2,
+        &mut tmp16 as *mut u16 as *mut u8,
+    );
+
+    tmp16 = GMII_PHY_PGSEL_PAGE0;
+    ax88179_write_cmd(
+        dev,
+        AX_ACCESS_PHY,
+        AX88179_PHY_ID,
+        GMII_PHY_PAGE_SELECT,
+        2,
+        &mut tmp16 as *mut u16 as *mut u8,
+    );
 }
 
 pub fn mii_nway_restart(dev: &mut UsbDevice) {
@@ -575,53 +721,60 @@ pub fn mii_nway_restart(dev: &mut UsbDevice) {
 pub fn ax88179_ethtool(dev: &mut UsbDevice) {
     println!("| AX88179: Setting ethtool settings");
 
-    let val = ax88179_phy_read_mmd_indirect(dev, MDIO_AN_EEE_ADV,
-        MDIO_MMD_AN);
+    let val = ax88179_phy_read_mmd_indirect(dev, MDIO_AN_EEE_ADV, MDIO_MMD_AN);
 
     let mut adv = 0;
     if val & MDIO_EEE_100TX != 0 {
-        adv |= MDIO_EEE_100TX;//1 << ETHTOOL_LINK_MODE_100baseT_Full_BIT;
+        adv |= MDIO_EEE_100TX; //1 << ETHTOOL_LINK_MODE_100baseT_Full_BIT;
     }
 
     if val & MDIO_EEE_1000T != 0 {
-        adv |= MDIO_EEE_1000T;//1 << ETHTOOL_LINK_MODE_1000baseT_Full_BIT;
+        adv |= MDIO_EEE_1000T; //1 << ETHTOOL_LINK_MODE_1000baseT_Full_BIT;
     }
 
-    if val &  MDIO_EEE_10GT != 0 {
-        adv |= MDIO_EEE_10GT;//1 << ETHTOOL_LINK_MODE_10000baseT_Full_BIT;
+    if val & MDIO_EEE_10GT != 0 {
+        adv |= MDIO_EEE_10GT; //1 << ETHTOOL_LINK_MODE_10000baseT_Full_BIT;
     }
 
     if val & MDIO_EEE_1000KX != 0 {
-        adv |= MDIO_EEE_1000KX;//1 << ETHTOOL_LINK_MODE_1000baseKX_Full_BIT;
+        adv |= MDIO_EEE_1000KX; //1 << ETHTOOL_LINK_MODE_1000baseKX_Full_BIT;
     }
 
     if val & MDIO_EEE_10GKX4 != 0 {
-        adv |= MDIO_EEE_10GKX4;//1 << ETHTOOL_LINK_MODE_10000baseKX4_Full_BIT;
+        adv |= MDIO_EEE_10GKX4; //1 << ETHTOOL_LINK_MODE_10000baseKX4_Full_BIT;
     }
 
     if val & MDIO_EEE_10GKR != 0 {
-        adv |= MDIO_EEE_10GKR;//1 << ETHTOOL_LINK_MODE_10000baseKR_Full_BIT;
+        adv |= MDIO_EEE_10GKR; //1 << ETHTOOL_LINK_MODE_10000baseKR_Full_BIT;
     }
 
-    ax88179_phy_write_mmd_indirect(dev, MDIO_AN_EEE_ADV,
-        MDIO_MMD_AN, adv);
-
+    ax88179_phy_write_mmd_indirect(dev, MDIO_AN_EEE_ADV, MDIO_MMD_AN, adv);
 }
 
-pub fn ax88179_phy_write_mmd_indirect(dev: &mut UsbDevice, prtad: u16, devad: u16, data: u16)
-{
+pub fn ax88179_phy_write_mmd_indirect(dev: &mut UsbDevice, prtad: u16, devad: u16, data: u16) {
     ax88179_phy_mmd_indirect(dev, prtad, devad);
     let mut tmp16 = data;
-    ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
-    MII_MMD_DATA, 2, &mut tmp16 as *mut u16 as *mut u8);
+    ax88179_write_cmd(
+        dev,
+        AX_ACCESS_PHY,
+        AX88179_PHY_ID,
+        MII_MMD_DATA,
+        2,
+        &mut tmp16 as *mut u16 as *mut u8,
+    );
 }
-
 
 pub fn ax88179_phy_read_mmd_indirect(dev: &mut UsbDevice, prtad: u16, devad: u16) -> u16 {
     ax88179_phy_mmd_indirect(dev, prtad, devad);
     let mut tmp16: u16 = 0;
-    ax88179_read_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
-        MII_MMD_DATA, 2, &mut tmp16 as *mut u16 as *mut u8);
+    ax88179_read_cmd(
+        dev,
+        AX_ACCESS_PHY,
+        AX88179_PHY_ID,
+        MII_MMD_DATA,
+        2,
+        &mut tmp16 as *mut u16 as *mut u8,
+    );
 
     return tmp16;
 }
@@ -629,44 +782,96 @@ pub fn ax88179_phy_read_mmd_indirect(dev: &mut UsbDevice, prtad: u16, devad: u16
 pub fn ax88179_phy_mmd_indirect(dev: &mut UsbDevice, prtad: u16, devad: u16) {
     let mut tmp16 = devad;
 
-    ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
-        MII_MMD_CTRL, 2, &mut tmp16 as *mut u16 as *mut u8);
+    ax88179_write_cmd(
+        dev,
+        AX_ACCESS_PHY,
+        AX88179_PHY_ID,
+        MII_MMD_CTRL,
+        2,
+        &mut tmp16 as *mut u16 as *mut u8,
+    );
 
     tmp16 = prtad;
-	ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
-				MII_MMD_DATA, 2, &mut tmp16 as *mut u16 as *mut u8);
+    ax88179_write_cmd(
+        dev,
+        AX_ACCESS_PHY,
+        AX88179_PHY_ID,
+        MII_MMD_DATA,
+        2,
+        &mut tmp16 as *mut u16 as *mut u8,
+    );
 
-	tmp16 = devad | MII_MMD_CTRL_NOINCR;
-	ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
-				MII_MMD_CTRL, 2, &mut tmp16 as *mut u16 as *mut u8);
+    tmp16 = devad | MII_MMD_CTRL_NOINCR;
+    ax88179_write_cmd(
+        dev,
+        AX_ACCESS_PHY,
+        AX88179_PHY_ID,
+        MII_MMD_CTRL,
+        2,
+        &mut tmp16 as *mut u16 as *mut u8,
+    );
 }
 
 pub fn ax88179_mdio_read(dev: &mut UsbDevice, loc: u16) -> u16 {
     let mut tmp16: u16 = 0;
 
     // Read MDIO register
-    ax88179_read_cmd(dev, AXGE_ACCESS_PHY, 3, loc, 2, &mut tmp16 as *mut u16 as *mut u8);
+    ax88179_read_cmd(
+        dev,
+        AXGE_ACCESS_PHY,
+        3,
+        loc,
+        2,
+        &mut tmp16 as *mut u16 as *mut u8,
+    );
     return tmp16;
 }
 
 pub fn ax88179_mdio_write(dev: &mut UsbDevice, loc: u16, val: u16) {
     let mut tmp16: u16 = val;
-    ax88179_write_cmd(dev, AXGE_ACCESS_PHY, 3, loc, 2, &mut tmp16 as *mut u16 as *mut u8);
+    ax88179_write_cmd(
+        dev,
+        AXGE_ACCESS_PHY,
+        3,
+        loc,
+        2,
+        &mut tmp16 as *mut u16 as *mut u8,
+    );
 }
 
-pub fn ax88179_read_cmd(device: &mut UsbDevice, cmd: u8, value: u16, index: u16, size: u16, data: *mut u8) {
+pub fn ax88179_read_cmd(
+    device: &mut UsbDevice,
+    cmd: u8,
+    value: u16,
+    index: u16,
+    size: u16,
+    data: *mut u8,
+) {
     if size == 2 {
-        let mut buf: u16 = 0;
-        __ax88179_read_cmd(device, cmd, value, index, size, &buf as *const u16 as *mut u8);
-        buf.to_le_bytes();
+        let buf: u16 = 0;
+        __ax88179_read_cmd(
+            device,
+            cmd,
+            value,
+            index,
+            size,
+            &buf as *const u16 as *mut u8,
+        );
+        let _ = buf.to_le_bytes();
         unsafe {
             *(data as *mut u16) = buf;
         }
-
     } else if size == 4 {
-        let mut buf: u32 = 0;
-        __ax88179_read_cmd(device, cmd, value, index, size, &buf as *const u32 as *mut u8);
-        buf.to_le_bytes();
+        let buf: u32 = 0;
+        __ax88179_read_cmd(
+            device,
+            cmd,
+            value,
+            index,
+            size,
+            &buf as *const u32 as *mut u8,
+        );
+        let _ = buf.to_le_bytes();
         unsafe {
             *(data as *mut u32) = buf;
         }
@@ -675,19 +880,40 @@ pub fn ax88179_read_cmd(device: &mut UsbDevice, cmd: u8, value: u16, index: u16,
     }
 }
 
-pub fn ax88179_write_cmd(device: &mut UsbDevice, cmd: u8, value: u16, index: u16, size: u16, data: *mut u8) {
+pub fn ax88179_write_cmd(
+    device: &mut UsbDevice,
+    cmd: u8,
+    value: u16,
+    index: u16,
+    size: u16,
+    data: *mut u8,
+) {
     if size == 2 {
-        let mut buf: u16;
+        let buf: u16;
         buf = unsafe { core::ptr::read(data as *const u16) };
-        buf.to_le_bytes();
+        let _ = buf.to_le_bytes();
 
-        __ax88179_write_cmd(device, cmd, value, index, size, &buf as *const u16 as *mut u8);
+        __ax88179_write_cmd(
+            device,
+            cmd,
+            value,
+            index,
+            size,
+            &buf as *const u16 as *mut u8,
+        );
     } else {
         __ax88179_write_cmd(device, cmd, value, index, size, data);
     }
 }
 
-pub fn __ax88179_read_cmd(device: &mut UsbDevice, cmd: u8, value: u16, index: u16, size: u16, data: *mut u8) -> ResultCode {
+pub fn __ax88179_read_cmd(
+    device: &mut UsbDevice,
+    cmd: u8,
+    value: u16,
+    index: u16,
+    size: u16,
+    data: *mut u8,
+) -> ResultCode {
     let result = unsafe {
         UsbControlMessage(
             device,
@@ -721,7 +947,14 @@ pub fn __ax88179_read_cmd(device: &mut UsbDevice, cmd: u8, value: u16, index: u1
     return result;
 }
 
-pub fn __ax88179_write_cmd(device: &mut UsbDevice, cmd: u8, value: u16, index: u16, size: u16, data: *mut u8) -> ResultCode {
+pub fn __ax88179_write_cmd(
+    device: &mut UsbDevice,
+    cmd: u8,
+    value: u16,
+    index: u16,
+    size: u16,
+    data: *mut u8,
+) -> ResultCode {
     let result = unsafe {
         UsbControlMessage(
             device,
@@ -755,115 +988,114 @@ pub fn __ax88179_write_cmd(device: &mut UsbDevice, cmd: u8, value: u16, index: u
     return result;
 }
 
-
 // MDIO Manageable Devices (MMDs)
-pub const MDIO_MMD_PMAPMD: u16 = 1;      // Physical Medium Attachment / Physical Medium Dependent
-pub const MDIO_MMD_WIS: u16 = 2;          // WAN Interface Sublayer
-pub const MDIO_MMD_PCS: u16 = 3;          // Physical Coding Sublayer
-pub const MDIO_MMD_PHYXS: u16 = 4;        // PHY Extender Sublayer
-pub const MDIO_MMD_DTEXS: u16 = 5;        // DTE Extender Sublayer
-pub const MDIO_MMD_TC: u16 = 6;           // Transmission Convergence
-pub const MDIO_MMD_AN: u16 = 7;           // Auto-Negotiation
-pub const MDIO_MMD_POWER_UNIT: u16 = 13;  // PHY Power Unit
-pub const MDIO_MMD_C22EXT: u16 = 29;      // Clause 22 extension
-pub const MDIO_MMD_VEND1: u16 = 30;       // Vendor specific 1
-pub const MDIO_MMD_VEND2: u16 = 31;       // Vendor specific 2
+pub const MDIO_MMD_PMAPMD: u16 = 1; // Physical Medium Attachment / Physical Medium Dependent
+pub const MDIO_MMD_WIS: u16 = 2; // WAN Interface Sublayer
+pub const MDIO_MMD_PCS: u16 = 3; // Physical Coding Sublayer
+pub const MDIO_MMD_PHYXS: u16 = 4; // PHY Extender Sublayer
+pub const MDIO_MMD_DTEXS: u16 = 5; // DTE Extender Sublayer
+pub const MDIO_MMD_TC: u16 = 6; // Transmission Convergence
+pub const MDIO_MMD_AN: u16 = 7; // Auto-Negotiation
+pub const MDIO_MMD_POWER_UNIT: u16 = 13; // PHY Power Unit
+pub const MDIO_MMD_C22EXT: u16 = 29; // Clause 22 extension
+pub const MDIO_MMD_VEND1: u16 = 30; // Vendor specific 1
+pub const MDIO_MMD_VEND2: u16 = 31; // Vendor specific 2
 
 // Generic MII register addresses
-pub const MII_BMCR: u16 = 0x00;         // Basic mode control register
-pub const MII_BMSR: u16 = 0x01;         // Basic mode status register
-pub const MII_PHYSID1: u16 = 0x02;      // PHYS ID 1
-pub const MII_PHYSID2: u16 = 0x03;      // PHYS ID 2
-pub const MII_ADVERTISE: u16 = 0x04;    // Advertisement control register
-pub const MII_LPA: u16 = 0x05;          // Link partner ability register
-pub const MII_EXPANSION: u16 = 0x06;    // Expansion register
-pub const MII_CTRL1000: u16 = 0x09;     // 1000BASE-T control
-pub const MII_STAT1000: u16 = 0x0a;     // 1000BASE-T status
-pub const MII_MMD_CTRL: u16 = 0x0d;     // MMD Access Control Register
-pub const MII_MMD_DATA: u16 = 0x0e;     // MMD Access Data Register
-pub const MII_ESTATUS: u16 = 0x0f;      // Extended Status
-pub const MII_DCOUNTER: u16 = 0x12;     // Disconnect counter
-pub const MII_FCSCOUNTER: u16 = 0x13;   // False carrier counter
-pub const MII_NWAYTEST: u16 = 0x14;     // N-way auto-negotiation test register
-pub const MII_RERRCOUNTER: u16 = 0x15;  // Receive error counter
-pub const MII_SREVISION: u16 = 0x16;    // Silicon revision
-pub const MII_RESV1: u16 = 0x17;        // Reserved
-pub const MII_LBRERROR: u16 = 0x18;     // Loopback, receive, bypass error
-pub const MII_PHYADDR: u16 = 0x19;      // PHY address
-pub const MII_RESV2: u16 = 0x1a;        // Reserved
-pub const MII_TPISTATUS: u16 = 0x1b;    // TPI status for 10 Mbps
-pub const MII_NCONFIG: u16 = 0x1c;      // Network interface config
+pub const MII_BMCR: u16 = 0x00; // Basic mode control register
+pub const MII_BMSR: u16 = 0x01; // Basic mode status register
+pub const MII_PHYSID1: u16 = 0x02; // PHYS ID 1
+pub const MII_PHYSID2: u16 = 0x03; // PHYS ID 2
+pub const MII_ADVERTISE: u16 = 0x04; // Advertisement control register
+pub const MII_LPA: u16 = 0x05; // Link partner ability register
+pub const MII_EXPANSION: u16 = 0x06; // Expansion register
+pub const MII_CTRL1000: u16 = 0x09; // 1000BASE-T control
+pub const MII_STAT1000: u16 = 0x0a; // 1000BASE-T status
+pub const MII_MMD_CTRL: u16 = 0x0d; // MMD Access Control Register
+pub const MII_MMD_DATA: u16 = 0x0e; // MMD Access Data Register
+pub const MII_ESTATUS: u16 = 0x0f; // Extended Status
+pub const MII_DCOUNTER: u16 = 0x12; // Disconnect counter
+pub const MII_FCSCOUNTER: u16 = 0x13; // False carrier counter
+pub const MII_NWAYTEST: u16 = 0x14; // N-way auto-negotiation test register
+pub const MII_RERRCOUNTER: u16 = 0x15; // Receive error counter
+pub const MII_SREVISION: u16 = 0x16; // Silicon revision
+pub const MII_RESV1: u16 = 0x17; // Reserved
+pub const MII_LBRERROR: u16 = 0x18; // Loopback, receive, bypass error
+pub const MII_PHYADDR: u16 = 0x19; // PHY address
+pub const MII_RESV2: u16 = 0x1a; // Reserved
+pub const MII_TPISTATUS: u16 = 0x1b; // TPI status for 10 Mbps
+pub const MII_NCONFIG: u16 = 0x1c; // Network interface config
 
 // Basic Mode Control Register (BMCR) bitfields
-pub const BMCR_RESV: u16 = 0x003f;         // Unused
-pub const BMCR_SPEED1000: u16 = 0x0040;     // MSB of speed (1000 Mbps)
-pub const BMCR_CTST: u16 = 0x0080;          // Collision test
-pub const BMCR_FULLDPLX: u16 = 0x0100;      // Full duplex
-pub const BMCR_ANRESTART: u16 = 0x0200;     // Auto-negotiation restart
-pub const BMCR_ISOLATE: u16 = 0x0400;       // Isolate data paths from MII
-pub const BMCR_PDOWN: u16 = 0x0800;         // Power down
-pub const BMCR_ANENABLE: u16 = 0x1000;      // Enable auto-negotiation
-pub const BMCR_SPEED100: u16 = 0x2000;      // Select 100 Mbps
-pub const BMCR_LOOPBACK: u16 = 0x4000;      // TXD loopback
-pub const BMCR_RESET: u16 = 0x8000;         // Reset to default
-pub const BMCR_SPEED10: u16 = 0x0000;       // Select 10 Mbps
+pub const BMCR_RESV: u16 = 0x003f; // Unused
+pub const BMCR_SPEED1000: u16 = 0x0040; // MSB of speed (1000 Mbps)
+pub const BMCR_CTST: u16 = 0x0080; // Collision test
+pub const BMCR_FULLDPLX: u16 = 0x0100; // Full duplex
+pub const BMCR_ANRESTART: u16 = 0x0200; // Auto-negotiation restart
+pub const BMCR_ISOLATE: u16 = 0x0400; // Isolate data paths from MII
+pub const BMCR_PDOWN: u16 = 0x0800; // Power down
+pub const BMCR_ANENABLE: u16 = 0x1000; // Enable auto-negotiation
+pub const BMCR_SPEED100: u16 = 0x2000; // Select 100 Mbps
+pub const BMCR_LOOPBACK: u16 = 0x4000; // TXD loopback
+pub const BMCR_RESET: u16 = 0x8000; // Reset to default
+pub const BMCR_SPEED10: u16 = 0x0000; // Select 10 Mbps
 
 // MMD Access Control register fields
-pub const MII_MMD_CTRL_DEVAD_MASK: u16 = 0x001f;   // Mask MMD DEVAD
-pub const MII_MMD_CTRL_ADDR: u16 = 0x0000;          // Address
-pub const MII_MMD_CTRL_NOINCR: u16 = 0x4000;        // No post increment
-pub const MII_MMD_CTRL_INCR_RDWT: u16 = 0x8000;     // Post increment on reads & writes
-pub const MII_MMD_CTRL_INCR_ON_WT: u16 = 0xC000;    // Post increment on writes only
+pub const MII_MMD_CTRL_DEVAD_MASK: u16 = 0x001f; // Mask MMD DEVAD
+pub const MII_MMD_CTRL_ADDR: u16 = 0x0000; // Address
+pub const MII_MMD_CTRL_NOINCR: u16 = 0x4000; // No post increment
+pub const MII_MMD_CTRL_INCR_RDWT: u16 = 0x8000; // Post increment on reads & writes
+pub const MII_MMD_CTRL_INCR_ON_WT: u16 = 0xC000; // Post increment on writes only
 
 // Generic MDIO register mappings (all as u16)
-pub const MDIO_CTRL1: u16 = MII_BMCR as u16;         // Basic Mode Control Register
-pub const MDIO_STAT1: u16 = MII_BMSR as u16;         // Basic Mode Status Register
-pub const MDIO_DEVID1: u16 = MII_PHYSID1 as u16;     // Device Identifier 1
-pub const MDIO_DEVID2: u16 = MII_PHYSID2 as u16;     // Device Identifier 2
+pub const MDIO_CTRL1: u16 = MII_BMCR as u16; // Basic Mode Control Register
+pub const MDIO_STAT1: u16 = MII_BMSR as u16; // Basic Mode Status Register
+pub const MDIO_DEVID1: u16 = MII_PHYSID1 as u16; // Device Identifier 1
+pub const MDIO_DEVID2: u16 = MII_PHYSID2 as u16; // Device Identifier 2
 
-pub const MDIO_SPEED: u16 = 4;                      // Speed ability
-pub const MDIO_DEVS1: u16 = 5;                      // Devices in package
+pub const MDIO_SPEED: u16 = 4; // Speed ability
+pub const MDIO_DEVS1: u16 = 5; // Devices in package
 pub const MDIO_DEVS2: u16 = 6;
-pub const MDIO_CTRL2: u16 = 7;                      // 10G control 2
-pub const MDIO_STAT2: u16 = 8;                      // 10G status 2
-pub const MDIO_PMA_TXDIS: u16 = 9;                  // 10G PMA/PMD transmit disable
-pub const MDIO_PMA_RXDET: u16 = 10;                 // 10G PMA/PMD receive signal detect
-pub const MDIO_PMA_EXTABLE: u16 = 11;               // 10G PMA/PMD extended ability
-pub const MDIO_PKGID1: u16 = 14;                    // Package identifier 1
-pub const MDIO_PKGID2: u16 = 15;                    // Package identifier 2
+pub const MDIO_CTRL2: u16 = 7; // 10G control 2
+pub const MDIO_STAT2: u16 = 8; // 10G status 2
+pub const MDIO_PMA_TXDIS: u16 = 9; // 10G PMA/PMD transmit disable
+pub const MDIO_PMA_RXDET: u16 = 10; // 10G PMA/PMD receive signal detect
+pub const MDIO_PMA_EXTABLE: u16 = 11; // 10G PMA/PMD extended ability
+pub const MDIO_PKGID1: u16 = 14; // Package identifier 1
+pub const MDIO_PKGID2: u16 = 15; // Package identifier 2
 
 // Auto-Negotiation (AN) related
-pub const MDIO_AN_ADVERTISE: u16 = 16;              // Auto-Negotiation advertisement (base page)
-pub const MDIO_AN_LPA: u16 = 19;                    // Auto-Negotiation link partner ability (base page)
-pub const MDIO_PCS_EEE_ABLE: u16 = 20;              // EEE Capability register
-pub const MDIO_PCS_EEE_ABLE2: u16 = 21;             // EEE Capability register 2
-pub const MDIO_PMA_NG_EXTABLE: u16 = 21;            // 2.5G/5G PMA/PMD extended ability
-pub const MDIO_PCS_EEE_WK_ERR: u16 = 22;            // EEE wake error counter
-pub const MDIO_PHYXS_LNSTAT: u16 = 24;              // PHY XGXS lane state
+pub const MDIO_AN_ADVERTISE: u16 = 16; // Auto-Negotiation advertisement (base page)
+pub const MDIO_AN_LPA: u16 = 19; // Auto-Negotiation link partner ability (base page)
+pub const MDIO_PCS_EEE_ABLE: u16 = 20; // EEE Capability register
+pub const MDIO_PCS_EEE_ABLE2: u16 = 21; // EEE Capability register 2
+pub const MDIO_PMA_NG_EXTABLE: u16 = 21; // 2.5G/5G PMA/PMD extended ability
+pub const MDIO_PCS_EEE_WK_ERR: u16 = 22; // EEE wake error counter
+pub const MDIO_PHYXS_LNSTAT: u16 = 24; // PHY XGXS lane state
 
-pub const MDIO_AN_EEE_ADV: u16 = 60;                // EEE advertisement
-pub const MDIO_AN_EEE_LPABLE: u16 = 61;             // EEE link partner ability
-pub const MDIO_AN_EEE_ADV2: u16 = 62;               // EEE advertisement 2
-pub const MDIO_AN_EEE_LPABLE2: u16 = 63;            // EEE link partner ability 2
+pub const MDIO_AN_EEE_ADV: u16 = 60; // EEE advertisement
+pub const MDIO_AN_EEE_LPABLE: u16 = 61; // EEE link partner ability
+pub const MDIO_AN_EEE_ADV2: u16 = 62; // EEE advertisement 2
+pub const MDIO_AN_EEE_LPABLE2: u16 = 63; // EEE link partner ability 2
 
-pub const MDIO_AN_CTRL2: u16 = 64;                  // Auto-Negotiation THP bypass request control
+pub const MDIO_AN_CTRL2: u16 = 64; // Auto-Negotiation THP bypass request control
 
 // EEE Supported / Advertisement / Link Partner Advertisement registers
 // (same bit masks used across multiple registers)
 
 // Old (user-visible) names
-pub const MDIO_AN_EEE_ADV_100TX: u16 = 0x0002;    // Advertise 100TX EEE cap
-pub const MDIO_AN_EEE_ADV_1000T: u16 = 0x0004;    // Advertise 1000T EEE cap
+pub const MDIO_AN_EEE_ADV_100TX: u16 = 0x0002; // Advertise 100TX EEE cap
+pub const MDIO_AN_EEE_ADV_1000T: u16 = 0x0004; // Advertise 1000T EEE cap
 
 // New generic names (aliasing old names)
-pub const MDIO_EEE_100TX: u16 = MDIO_AN_EEE_ADV_100TX;    // 100TX EEE cap
-pub const MDIO_EEE_1000T: u16 = MDIO_AN_EEE_ADV_1000T;    // 1000T EEE cap
+pub const MDIO_EEE_100TX: u16 = MDIO_AN_EEE_ADV_100TX; // 100TX EEE cap
+pub const MDIO_EEE_1000T: u16 = MDIO_AN_EEE_ADV_1000T; // 1000T EEE cap
 
 // Other EEE capabilities
-pub const MDIO_EEE_10GT: u16 = 0x0008;    // 10GBASE-T EEE cap
-pub const MDIO_EEE_1000KX: u16 = 0x0010;  // 1000BASE-KX EEE cap
-pub const MDIO_EEE_10GKX4: u16 = 0x0020;  // 10GBASE-KX4 EEE cap
-pub const MDIO_EEE_10GKR: u16 = 0x0040;   // 10GBASE-KR EEE cap
+pub const MDIO_EEE_10GT: u16 = 0x0008; // 10GBASE-T EEE cap
+pub const MDIO_EEE_1000KX: u16 = 0x0010; // 1000BASE-KX EEE cap
+pub const MDIO_EEE_10GKX4: u16 = 0x0020; // 10GBASE-KX4 EEE cap
+pub const MDIO_EEE_10GKR: u16 = 0x0040; // 10GBASE-KR EEE cap
 pub const MDIO_EEE_40GR_FW: u16 = 0x0100; // 40GBASE-R fast wake
 pub const MDIO_EEE_40GR_DS: u16 = 0x0200; // 40GBASE-R deep sleep
 pub const MDIO_EEE_100GR_FW: u16 = 0x1000; // 100GBASE-R fast wake
@@ -903,16 +1135,14 @@ pub const ETHTOOL_LINK_MODE_56000baseSR4_Full_BIT: u32 = 29;
 pub const ETHTOOL_LINK_MODE_56000baseLR4_Full_BIT: u32 = 30;
 pub const ETHTOOL_LINK_MODE_25000baseCR_Full_BIT: u32 = 31;
 
-
 // GMII PHY Specific Status Register (PHYSR)
 pub const GMII_PHY_PHYSR: u16 = 0x11;
 
-pub const GMII_PHY_PHYSR_SMASK: u16 = 0xc000;   // Speed mask
-pub const GMII_PHY_PHYSR_GIGA: u16 = 0x8000;     // 1000 Mbps
-pub const GMII_PHY_PHYSR_100: u16 = 0x4000;      // 100 Mbps
-pub const GMII_PHY_PHYSR_FULL: u16 = 0x2000;     // Full duplex
-pub const GMII_PHY_PHYSR_LINK: u16 = 0x0400;     // Link up
-
+pub const GMII_PHY_PHYSR_SMASK: u16 = 0xc000; // Speed mask
+pub const GMII_PHY_PHYSR_GIGA: u16 = 0x8000; // 1000 Mbps
+pub const GMII_PHY_PHYSR_100: u16 = 0x4000; // 100 Mbps
+pub const GMII_PHY_PHYSR_FULL: u16 = 0x2000; // Full duplex
+pub const GMII_PHY_PHYSR_LINK: u16 = 0x0400; // Link up
 
 // pub const BMCR_RESET: u16 = 0x8000;
 pub const BMCR_LOOP: u16 = 0x4000;
@@ -924,7 +1154,6 @@ pub const BMCR_STARTNEG: u16 = 0x0200;
 pub const BMCR_FDX: u16 = 0x0100;
 pub const BMCR_CTEST: u16 = 0x0080;
 pub const BMCR_SPEED1: u16 = 0x0040;
-
 
 pub const PHY_BMCR: u16 = 0x00; // Basic Mode Control Register
 
@@ -954,7 +1183,6 @@ pub const ETHER_VLAN_ENCAP_LEN: u8 = 4;
 
 // Mbuf adjust factor to force 32-bit alignment of IP header
 pub const ETHER_ALIGN: u8 = 2;
-
 
 // Access Registers
 pub const AXGE_ACCESS_MAC: u8 = 0x01;
@@ -1025,7 +1253,6 @@ pub const MMSR_PME_POL: u8 = 0x20;
 pub const MMSR_PME_TYPE: u8 = 0x40;
 pub const MMSR_PME_IND: u8 = 0x80;
 
-
 // Ethernet PHY power & reset control register
 pub const AXGE_EPPRCR: u16 = 0x26;
 pub const EPPRCR_BZ: u16 = 0x0010;
@@ -1073,8 +1300,6 @@ pub const AXGE_CONFIG_IDX: u16 = 0;
 
 // Interface index 0
 pub const AXGE_IFACE_IDX: u16 = 0;
-
-
 
 // Utility macro in C: #define BIT(x) (1 << (x))
 // In Rust (no_std), we just shift manually.
@@ -1128,9 +1353,6 @@ pub const GMII_PHY_PGSEL_EXT: u16 = 0x0007;
 pub const GMII_PHY_PGSEL_PAGE0: u16 = 0x0000;
 pub const GMII_PHY_PGSEL_PAGE3: u16 = 0x0003;
 pub const GMII_PHY_PGSEL_PAGE5: u16 = 0x0005;
-
-
-
 
 // PHY ID and EEPROM
 pub const AX88179_PHY_ID: u16 = 0x03;
@@ -1235,7 +1457,6 @@ pub const AX_CLK_SELECT: u8 = 0x33;
 pub const AX_CLK_SELECT_BCS: u8 = 1 << 0;
 pub const AX_CLK_SELECT_ACS: u8 = 1 << 1;
 pub const AX_CLK_SELECT_ULR: u8 = 1 << 3;
-
 
 // RX Checksum Offload Engine (COE) Control
 pub const AX_RXCOE_CTL: u8 = 0x34;

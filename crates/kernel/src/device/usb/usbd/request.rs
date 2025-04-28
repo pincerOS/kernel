@@ -66,9 +66,7 @@ pub enum UsbDeviceRequestRequest {
     Command129 = 129,
 }
 
-pub fn command_to_usb_device_request(
-    cmd: u8,
-) -> UsbDeviceRequestRequest {
+pub fn command_to_usb_device_request(cmd: u8) -> UsbDeviceRequestRequest {
     match cmd {
         0x00 => UsbDeviceRequestRequest::GetStatus,
         0x01 => UsbDeviceRequestRequest::ClearFeature,
