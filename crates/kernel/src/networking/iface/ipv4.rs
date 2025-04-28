@@ -46,16 +46,16 @@ pub fn recv_ip_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Re
     }
 
     let dhcpd = get_dhcpd_mut();
-    if dhcpd.is_transacting() {
-        return Err(Error::Ignored);
-    }
 
     if ipv4_packet.dst_addr != *interface.ipv4_addr
         && !interface.ipv4_addr.is_member(ipv4_packet.dst_addr)
         && !interface.ipv4_addr.is_broadcast(ipv4_packet.dst_addr)
+        && !dhcpd.is_transacting()
     {
         return Err(Error::Ignored);
     }
+
+    println!("past filter");
 
     // update arp cache for immediate ICMP echo replies, errors, etc.
     if eth_frame.src.is_unicast() {

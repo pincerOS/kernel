@@ -1,7 +1,10 @@
 use crate::networking::iface::*;
 use crate::networking::repr::*;
+use crate::networking::socket::SockType;
 use crate::networking::socket::SocketAddr;
-use crate::networking::Result;
+use crate::networking::{Result, Error};
+
+use crate::event::task;
 
 use alloc::vec::Vec;
 
@@ -42,9 +45,20 @@ pub fn recv_udp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Re
     };
 
     let mut sockets = interface.sockets.lock();
+    
     for (_, socket) in sockets.iter_mut() {
         if socket.binding_equals(local_socket_addr) {
-            let _ = socket.recv_enqueue(0, 0, 0, udp_packet.payload.clone(), sender_socket_addr);
+            let (stype, mut tx) = socket.get_send_ref();
+
+            if stype != SockType::UDP {
+                return Err(Error::Unsupported);
+            }
+
+            let payload = udp_packet.payload.clone();
+
+            task::spawn_async(async move {
+                let _ = tx.send((payload, sender_socket_addr)).await;
+            });
         }
     }
 

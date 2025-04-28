@@ -148,10 +148,6 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         NET_DEVICE.device = Some(device);
     }
 
-    // begin socket send loop, this iterates through all existing sockets, and attempts to send as
-    // many packets as possible from each socket
-    socket::socket_send_loop();
-
     // begin receieve series, this queues a receive to be ran which will eventually propogate back
     // to us through the rgistered `recv` function which then queues another receive
     let buf = vec![0u8; 1500];
@@ -163,8 +159,10 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     unsafe {
         DHCPD = Some(dhcp::Dhcpd::new());
     }
-    let dhcpd = get_dhcpd_mut();
-    let _ = dhcpd.start(interface);
+
+    // begin socket send loop, this iterates through all existing sockets, and attempts to send as
+    // many packets as possible from each socket
+    // socket::socket_send_loop();
 
     return ResultCode::OK;
 }
@@ -190,8 +188,9 @@ pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
 }
 
 pub fn NetSend(_buffer: *mut u8, _buffer_length: u32) {
-    //Do nothing for now
-    //Called when USB packet is actually sent out
+    // Do nothing for now
+    // Called when USB packet is actually sent out
+    println!("NetSend called");
 }
 
 pub unsafe fn NetReceive(buffer: *mut u8, buffer_length: u32) {

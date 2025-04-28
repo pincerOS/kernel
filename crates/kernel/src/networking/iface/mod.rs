@@ -31,7 +31,7 @@ use cdcecm::CDCECM;
 // WARN: for now, we assume that we will only ever set our ethernet_addr, ipv4_addr, and
 // default_gateway once when we first initialize
 pub struct Interface {
-    pub dev: Box<dyn Device>,
+    pub dev: CDCECM,
 
     pub arp_cache: SpinLock<ArpCache>,
     pub ethernet_addr: EthernetAddress,
@@ -45,7 +45,7 @@ pub struct Interface {
 impl Interface {
     pub fn new() -> Self {
         Interface {
-            dev: Box::new(CDCECM::new(1500)),
+            dev: CDCECM::new(1500),
             arp_cache: SpinLock::new(ArpCache::new(60, system_timer::get_time())),
             ethernet_addr: EthernetAddress::empty(),
             ipv4_addr: Ipv4Cidr::empty(),

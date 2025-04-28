@@ -5,7 +5,7 @@ pub mod tcp;
 pub mod udp;
 // pub mod unix;
 
-pub use self::bindings::{bind, connect, recv_from, send_to, SocketAddr};
+pub use self::bindings::{bind, connect, recv_from, send_to, SocketAddr, SockType};
 
 pub use self::tagged::TaggedSocket;
 

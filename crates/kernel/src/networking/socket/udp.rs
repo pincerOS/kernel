@@ -2,42 +2,41 @@ use crate::device::usb::device::net::get_interface_mut;
 use crate::networking::iface::udp;
 use crate::networking::iface::Interface;
 use crate::networking::socket::bindings::NEXT_SOCKETFD;
-use crate::networking::socket::tagged::TaggedSocket;
-use crate::networking::socket::SocketAddr;
-use crate::networking::utils::ring::Ring;
+use crate::networking::socket::tagged::{TaggedSocket, BUFFER_LEN};
+use crate::networking::socket::{SocketAddr, SockType};
+use crate::ringbuffer::{channel, Sender, Receiver};
 use crate::networking::{Error, Result};
 
-use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
-
-fn new_ring_packet_buffer(capacity: usize) -> Ring<(Vec<u8>, SocketAddr)> {
-    let default_entry = (Vec::new(), SocketAddr::default()); // or some placeholder address
-    let buffer = vec![default_entry; capacity];
-    Ring::from(buffer)
-}
-
-pub static UDP_BUFFER_LEN: usize = 128;
 
 // A UDP socket
 pub struct UdpSocket {
     binding: SocketAddr,
     is_bound: bool,
-    send_buffer: Ring<(Vec<u8>, SocketAddr)>,
-    recv_buffer: Ring<(Vec<u8>, SocketAddr)>,
+    // send_tx: Sender<UDP_BUFFER_LEN, (Vec<u8>, SocketAddr)>,
+    // send_rx: Receiver<UDP_BUFFER_LEN, (Vec<u8>, SocketAddr)>,
+    recv_tx: Sender<BUFFER_LEN, (Vec<u8>, SocketAddr)>,
+    recv_rx: Receiver<BUFFER_LEN, (Vec<u8>, SocketAddr)>,
 }
 
 impl UdpSocket {
     pub fn new() -> u16 {
         let interface = get_interface_mut();
+        
+        // let (send_tx, send_rx) = channel::<UDP_BUFFER_LEN, (Vec<u8>, SocketAddr)>();
+        let (recv_tx, recv_rx) = channel::<BUFFER_LEN, (Vec<u8>, SocketAddr)>();
+
         let socket = UdpSocket {
             binding: SocketAddr {
                 addr: *interface.ipv4_addr,
                 port: 0,
             },
             is_bound: false,
-            send_buffer: new_ring_packet_buffer(UDP_BUFFER_LEN),
-            recv_buffer: new_ring_packet_buffer(UDP_BUFFER_LEN),
+            // send_tx,
+            // send_rx,
+            recv_tx,
+            recv_rx,
         };
 
         let socketfd = NEXT_SOCKETFD.fetch_add(1, Ordering::SeqCst);
@@ -48,7 +47,7 @@ impl UdpSocket {
     }
 
     pub fn binding_equals(&self, saddr: SocketAddr) -> bool {
-        self.binding == saddr
+        self.binding.port == saddr.port
     }
 
     pub fn is_bound(&self) -> bool {
@@ -61,68 +60,47 @@ impl UdpSocket {
             addr: *interface.ipv4_addr,
             port,
         };
-
         self.binding = bind_addr;
     }
 
-    pub fn send_enqueue(&mut self, payload: Vec<u8>, dest: SocketAddr) -> Result<()> {
-        self.send_buffer.enqueue_maybe(|(buffer, addr)| {
-            *buffer = payload;
-            *addr = dest;
-            Ok(())
-        })
+    pub async fn send_enqueue(&mut self, payload: Vec<u8>, dest: SocketAddr) -> Result<()> {
+        println!("enqueud send");
+        let interface = get_interface_mut();
+
+        udp::send_udp_packet(interface, dest.addr, payload, self.binding.port, dest.port)
     }
 
-    pub fn send(&mut self, interface: &mut Interface) -> Result<()> {
-        loop {
-            match self.send_buffer.dequeue_with(|entry| {
-                let (payload, addr) = entry;
-                (payload.clone(), *addr)
-            }) {
-                Ok((payload, dest)) => {
-                    let _ = udp::send_udp_packet(
-                        interface,
-                        dest.addr,
-                        payload,
-                        self.binding.port,
-                        dest.port,
-                    );
-                }
-                Err(Error::Exhausted) => break,
-                Err(_) => break,
-            }
-        }
+    pub fn get_recv_ref(&mut self) -> (SockType, Receiver<BUFFER_LEN, (Vec<u8>, SocketAddr)>) {
+        (SockType::UDP, self.recv_rx.clone())
+    }
 
+    pub fn get_send_ref(&mut self) -> (SockType, Sender<BUFFER_LEN, (Vec<u8>, SocketAddr)>) {
+        (SockType::UDP, self.recv_tx.clone())
+    }
+
+    pub async fn recv(&mut self) -> Result<(Vec<u8>, SocketAddr)> {
+        let (payload, addr) = self.recv_rx.recv().await;
+        Ok((payload, addr))
+    }
+
+    pub fn try_recv(&mut self) -> Result<(Vec<u8>, SocketAddr)> {
+        match self.recv_rx.try_recv() {
+            Some((payload, addr)) => Ok((payload, addr)),
+            None => Err(Error::Exhausted),
+        }
+    }
+
+    pub async fn recv_enqueue(&mut self, payload: Vec<u8>, sender: SocketAddr) -> Result<()> {
+        println!("got a recv_enqueue");
+        self.recv_tx.send((payload, sender)).await;
         Ok(())
     }
 
-    // Dequeues a received packet along with it's source address from the
-    // socket.
-    // TODO: make blocking
-    pub fn recv(&mut self) -> Result<(Vec<u8>, SocketAddr)> {
-        self.recv_buffer
-            .dequeue_with(|entry: &mut (Vec<u8>, SocketAddr)| {
-                let (buffer, addr) = entry;
-                (buffer.clone(), addr.clone())
-            })
-    }
-
-    // Enqueues a packet for receiving.
-    pub fn recv_enqueue(&mut self, payload: Vec<u8>, sender: SocketAddr) -> Result<()> {
-        self.recv_buffer.enqueue_maybe(|(buffer, addr)| {
-            *buffer = payload;
-            *addr = sender;
-            Ok(())
-        })
-    }
-
-    // Returns the number of packets enqueued for sending.
     pub fn num_send_enqueued(&self) -> usize {
-        self.send_buffer.len()
+        0
     }
 
-    // Returns the number of packets enqueued for receiving.
     pub fn num_recv_enqueued(&self) -> usize {
-        self.recv_buffer.len()
+        0
     }
 }

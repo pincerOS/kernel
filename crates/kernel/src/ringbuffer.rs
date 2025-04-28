@@ -240,6 +240,13 @@ pub struct Receiver<const N: usize, T> {
     inner: Arc<ChannelInner<N, T>>,
 }
 
+impl<const N: usize, T> Clone for Sender<N, T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
 impl<const N: usize, T> Sender<N, T> {
     pub fn try_send(&mut self, event: T) -> Result<(), T> {
         let res = unsafe { self.inner.buf.try_send(event) };
@@ -276,6 +283,14 @@ impl<const N: usize, T> Sender<N, T> {
     }
 }
 
+impl<const N: usize, T> Clone for Receiver<N, T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 impl<const N: usize, T> Receiver<N, T> {
     pub fn try_recv(&mut self) -> Option<T> {
         let res = unsafe { self.inner.buf.try_recv() };
@@ -294,6 +309,23 @@ impl<const N: usize, T> Receiver<N, T> {
     pub async fn recv(&mut self) -> T {
         let mut guard = self.inner.len.lock();
         guard = self.inner.cond.wait_while(guard, |len| *len == 0).await;
+
+        let res = unsafe { self.inner.buf.try_recv() };
+        let res = res.unwrap();
+
+        let old_len = *guard;
+        *guard -= 1;
+        drop(guard);
+        if old_len == N - 1 {
+            self.inner.cond.notify_one();
+        }
+
+        res
+    }
+
+    pub fn recv_blocking(&mut self) -> T {
+        let mut guard = self.inner.len.lock();
+        guard = self.inner.cond.wait_while_blocking(guard, |len| *len == 0);
 
         let res = unsafe { self.inner.buf.try_recv() };
         let res = res.unwrap();
