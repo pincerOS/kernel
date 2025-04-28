@@ -121,12 +121,15 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // rndis_send_packet(device, buffer.as_mut_ptr(), 64);
     // rndis_receive_packet(device, Box::new(buffer), 64);
     // }
-    // unsafe {
-    //     let receive_buffer = Box::new([0u8; 512]);
-    //     NetInitiateReceive(device, receive_buffer, 1500);
-    // }
+    unsafe {
+        let receive_buffer = Box::new([0u8; 512]);
+        NetInitiateReceive(device, receive_buffer, 1500);
+    }
 
-    micro_delay(ms_to_micro(1500));
+    micro_delay(ms_to_micro(1500)); // Wait for 1.5 seconds
+    // We currently have this 1.5 second delay to wait for the device to be ready
+    // technically, we can wait for the interrupt in endpoint to tell us
+    // but laking ax88179 documentaiton, not sure which bits, so wait for now.
 
     unsafe {
         for i in 0..10 {
