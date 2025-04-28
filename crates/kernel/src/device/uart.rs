@@ -141,7 +141,7 @@ impl UARTInner {
         //         console.render();
         //     }
         //     drop(console);
-        //     spin_sleep(3000);
+        spin_sleep(3000);
         // }
     }
 }
