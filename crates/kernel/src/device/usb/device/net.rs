@@ -12,6 +12,7 @@ use crate::device::usb::types::*;
 use crate::device::usb::usbd::endpoint::register_interrupt_endpoint;
 use crate::device::usb::usbd::endpoint::*;
 use crate::device::usb::usbd::request::*;
+use crate::device::mailbox::HexDisplay;
 use crate::shutdown;
 use alloc::boxed::Box;
 use crate::device::usb::device::ax88179::axge_send_packet;
@@ -119,10 +120,10 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     // rndis_send_packet(device, buffer.as_mut_ptr(), 64);
     // rndis_receive_packet(device, Box::new(buffer), 64);
     // }
-    unsafe {
-        let receive_buffer = Box::new([0u8; 512]);
-        NetInitiateReceive(device, receive_buffer, 1500);
-    }
+    // unsafe {
+    //     let receive_buffer = Box::new([0u8; 512]);
+    //     NetInitiateReceive(device, receive_buffer, 1500);
+    // }
     unsafe {
         for i in 0..10 {
             NetSendPacket(
@@ -166,9 +167,8 @@ pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
         return;
     }
 
-    if buffer32[0] != 0 {
-        // println!("| Net: Buffer1: {:?}", buffer32[0]);
-
+    if buffer_length > 0 {
+        println!("| NET: analyze {:x}", HexDisplay(unsafe { core::slice::from_raw_parts(buffer, buffer_length) }));
     }
 }
 
@@ -181,7 +181,7 @@ pub fn NetSend(_buffer: *mut u8, _buffer_length: u32) {
 pub fn NetReceive(buffer: *mut u8, buffer_length: u32) {
     println!("| Net: Receive");
 
-    use crate::device::mailbox::HexDisplay;
+    
     println!("{:x}", HexDisplay(unsafe { core::slice::from_raw_parts(buffer, 40) }));
 
     println!();
