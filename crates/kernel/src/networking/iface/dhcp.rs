@@ -43,7 +43,7 @@ pub struct Dhcpd {
     rebind_time: Option<u32>,
     subnet_mask: u32,
     router: Option<Ipv4Address>,
-    dns_servers: Vec<Ipv4Address>,
+    pub dns_servers: Vec<Ipv4Address>,
     udp_socket: u16,
 }
 
@@ -195,10 +195,11 @@ impl Dhcpd {
                 self.last_action_time = system_timer::get_time();
 
                 println!(
-                    "\t[+] DHCP: Bound to IP {} with lease time {} seconds on gateway {}",
+                    "\t[+] DHCP: Bound to IP {} with lease time {} seconds on gateway {} with dns servers {:?}",
                     interface.ipv4_addr,
                     self.lease_time.unwrap_or(0),
                     interface.default_gateway,
+                    self.dns_servers
                 );
             }
             (DhcpState::Requesting, DhcpMessageType::Nak)

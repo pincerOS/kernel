@@ -41,7 +41,7 @@ pub fn send_ipv4_packet(
 }
 
 pub fn recv_ip_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Result<()> {
-    println!("[!] received IP packet");
+    // println!("[!] received IP packet");
     let ipv4_packet = Ipv4Packet::deserialize(eth_frame.payload.as_slice())?;
     if !ipv4_packet.is_valid_checksum() {
         return Err(Error::Checksum);

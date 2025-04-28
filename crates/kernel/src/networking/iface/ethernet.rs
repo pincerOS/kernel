@@ -31,9 +31,12 @@ pub fn send_ethernet_frame(
     Ok(())
 }
 
+// pub static mut FRAME: Vec<u8> = Vec::new();
+// pub static mut LEFT: u32 = 0;
+
 // recv ethernet frame from interface: parsed -> fwd to socket -> propogated up stack
-pub fn recv_ethernet_frame(interface: &mut Interface, eth_buffer: &[u8], _len: u32) -> Result<()> {
-    println!("[!] received ethernet frame");
+pub fn recv_ethernet_frame(interface: &mut Interface, eth_buffer: &[u8], len: u32) -> Result<()> {
+    // println!("[!] received ethernet frame");
     // println!("\t{:x?}", &eth_buffer[44..]);
 
     // we will truncate the first 44 bytes from the RNDIS protocol
