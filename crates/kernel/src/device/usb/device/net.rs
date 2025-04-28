@@ -101,21 +101,21 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     //     device.endpoints[interface_number as usize][0 as usize].interval
     // );
 
-    // register_interrupt_endpoint(
-    //     device,
-    //     device.endpoints[interface_number as usize][0 as usize].interval as u32,
-    //     endpoint_address_to_num(
-    //         device.endpoints[interface_number as usize][0 as usize].endpoint_address,
-    //     ),
-    //     UsbDirection::In,
-    //     size_from_number(
-    //         device.endpoints[interface_number as usize][0 as usize]
-    //             .packet
-    //             .MaxSize as u32,
-    //     ),
-    //     0,
-    //     10,
-    // );
+    register_interrupt_endpoint(
+        device,
+        device.endpoints[interface_number as usize][0 as usize].interval as u32,
+        endpoint_address_to_num(
+            device.endpoints[interface_number as usize][0 as usize].endpoint_address,
+        ),
+        UsbDirection::In,
+        size_from_number(
+            device.endpoints[interface_number as usize][0 as usize]
+                .packet
+                .MaxSize as u32,
+        ),
+        0,
+        10,
+    );
 
     micro_delay(ms_to_micro(1500)); // Wait for 1.5 seconds
     // We currently have this 1.5 second delay to wait for the device to be ready
