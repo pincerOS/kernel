@@ -62,7 +62,7 @@ pub fn recv_tcp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Re
                 tcp_packet.seq_number,
                 tcp_packet.ack_number,
                 tcp_packet.flags,
-                // tcp_packet.window_size,
+                tcp_packet.window_size,
                 tcp_packet.payload.clone(),
                 sender_socket_addr,
             );

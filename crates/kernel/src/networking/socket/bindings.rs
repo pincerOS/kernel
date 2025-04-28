@@ -97,7 +97,7 @@ pub async fn connect(socketfd: u16, saddr: SocketAddr) -> Result<()> {
     tagged_socket.connect(saddr).await
 }
 
-pub fn listen(socketfd: u16, num_requests: usize) -> Result<()> {
+pub async fn listen(socketfd: u16, num_requests: usize) -> Result<()> {
     let interface = get_interface_mut();
     // 1.check if binded, if not error
     let mut sockets = interface.sockets.lock();
@@ -111,7 +111,7 @@ pub fn listen(socketfd: u16, num_requests: usize) -> Result<()> {
     }
 
     // 2. start the listener
-    tagged_socket.listen(num_requests)
+    tagged_socket.listen(num_requests).await
 }
 
 pub async fn accept(socketfd: u16) -> Result<u16> {

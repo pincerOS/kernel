@@ -16,7 +16,7 @@ pub enum TaggedSocket {
 }
 
 impl TaggedSocket {
-    pub fn is_bound(&mut self) -> bool {
+    pub fn is_bound(&self) -> bool {
         match self {
             // TaggedSocket::Raw(socket) => socket.accepts(pair),
             TaggedSocket::Udp(socket) => socket.is_bound(),
@@ -46,6 +46,7 @@ impl TaggedSocket {
         seq_num: u32,
         ack_num: u32,
         flags: u8,
+        window_size: u16,
         payload: Vec<u8>,
         saddr: SocketAddr,
     ) -> Result<()> {
@@ -53,7 +54,7 @@ impl TaggedSocket {
             // TaggedSocket::Raw(socket) => socket.queue_recv(payload, saddr),
             TaggedSocket::Udp(socket) => socket.recv_enqueue(payload, saddr).await,
             TaggedSocket::Tcp(socket) => {
-                socket.recv_enqueue(seq_num, ack_num, flags, payload, saddr).await
+                socket.recv_enqueue(seq_num, ack_num, flags, window_size, payload, saddr).await
             }
         }
     }
@@ -99,12 +100,12 @@ impl TaggedSocket {
         }
     }
 
-    pub fn listen(&mut self, num_req: usize) -> Result<()> {
+    pub async fn listen(&mut self, num_req: usize) -> Result<()> {
         let interface = get_interface_mut();
         match self {
             // TaggedSocket::Raw(socket) => socket.recv(),
             TaggedSocket::Udp(_socket) => Err(Error::Ignored),
-            TaggedSocket::Tcp(socket) => socket.listen(interface, num_req),
+            TaggedSocket::Tcp(socket) => socket.listen(interface, num_req).await,
         }
     }
 

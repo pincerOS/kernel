@@ -98,6 +98,7 @@ impl TcpSocket {
     }
 
     pub fn binding_equals(&self, saddr: SocketAddr) -> bool {
+        println!("binding port {} provided port {}", self.binding.port, saddr.port);
         self.binding == saddr
     }
 
@@ -122,7 +123,8 @@ impl TcpSocket {
         self.binding = bind_addr;
     }
 
-    pub fn listen(&mut self, interface: &mut Interface, num_max_requests: usize) -> Result<()> {
+    pub async fn listen(&mut self, interface: &mut Interface, num_max_requests: usize) -> Result<()> {
+        println!("in listen");
         if !self.is_bound {
             // bind to ephemeral if not bound
             let ephemeral_port = NEXT_EPHEMERAL.fetch_add(1, Ordering::SeqCst);
@@ -133,6 +135,26 @@ impl TcpSocket {
         self.max_pending = num_max_requests;
         self.state = TcpState::Closed; // still in CLOSED until SYN received
         self.pending_conn = Vec::with_capacity(num_max_requests);
+
+        println!("waiting for incoming connection");
+        let response = self.recv_with_context().await;
+        println!("got incoming tcp connection");
+
+        let (payload, sender) = match response {
+            Ok((payload, sender)) => (payload, sender),
+            Err(e) => return Err(e),
+        };
+
+        let last = &payload[payload.len() - 2..payload.len()];
+        self.window_size = u16::from_le_bytes([last[0], last[1]]);
+        self.flags = payload[payload.len() - 3];
+        let last = &payload[payload.len() - 7..payload.len() - 3];
+        self.ack_number = u32::from_le_bytes([last[0], last[1], last[2], last[3]]);
+        let last = &payload[payload.len() - 11..payload.len() - 7];
+        self.seq_number = u32::from_le_bytes([last[0], last[1], last[2], last[3]]);
+
+        self.pending_conn.push(sender);
+
         Ok(())
     }
 
@@ -141,13 +163,28 @@ impl TcpSocket {
             return Err(Error::NotConnected);
         }
 
-        match self.pending_conn.pop() {
-            Some(addr) => {
-                self.remote_addr = Some(addr);
-                Ok(addr)
-            }
-            None => Err(Error::Exhausted),
-        }
+        let addr = match self.pending_conn.pop() {
+            Some(addr) => addr,
+            None => return Err(Error::Exhausted),
+        };
+
+        let interface = get_interface_mut();
+
+        tcp::send_tcp_packet(
+            interface,
+            self.binding.port,
+            addr.port,
+            self.seq_number,
+            self.ack_number, 
+            TCP_FLAG_ACK & TCP_FLAG_SYN,
+            self.window_size,
+            addr.addr,
+            Vec::new(), 
+        );
+
+        self.recv().await;
+
+        Ok(addr)
     }
 
     pub async fn connect(&mut self, interface: &mut Interface, saddr: SocketAddr) -> Result<()> {
@@ -167,7 +204,6 @@ impl TcpSocket {
         self.remote_addr = Some(saddr);
 
         let flags = TCP_FLAG_SYN;
-        println!("[!] meow");
         tcp::send_tcp_packet(
             interface,
             self.binding.port,
@@ -225,6 +261,12 @@ impl TcpSocket {
     }
 
     pub async fn recv(&mut self) -> Result<(Vec<u8>, SocketAddr)> {
+        let (mut payload, addr) = self.recv_rx.recv().await;
+        payload.truncate(payload.len().saturating_sub(11)); // get rid of context bytes
+        Ok((payload, addr))
+    }
+
+    pub async fn recv_with_context(&mut self) -> Result<(Vec<u8>, SocketAddr)> {
         let (payload, addr) = self.recv_rx.recv().await;
         Ok((payload, addr))
     }
@@ -235,13 +277,19 @@ impl TcpSocket {
         seq_number: u32,
         ack_number: u32,
         flags: u8,
-        // window_size: u16,
+        window_size: u16,
         payload: Vec<u8>,
         sender: SocketAddr,
     ) -> Result<()> {
         println!("got a recv_enqueue");
+        let mut payload_with_context = payload.clone();
+        payload_with_context.extend_from_slice(&seq_number.to_le_bytes());
+        payload_with_context.extend_from_slice(&ack_number.to_le_bytes());
+        payload_with_context.push(flags);
+        payload_with_context.extend_from_slice(&window_size.to_le_bytes());
+        
         // let packet = TcpPacket::new(sender.port, self.binding.port, seq_number, ack_number, flags, window_size, payload, sender.addr, self.binding.addr);
-        self.recv_tx.send((payload, sender)).await;
+        self.recv_tx.send((payload_with_context, sender)).await;
         Ok(())
 
         // if self.state == TcpState::SynSent {
