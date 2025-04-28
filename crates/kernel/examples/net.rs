@@ -33,16 +33,16 @@ async fn main() {
     println!("out of dhcpd");
 
     // [udp send test]
-    // println!("udp send test");
-    // let s = UdpSocket::new();
-    // let saddr = SocketAddr {
-    //     addr: Ipv4Address::new([11, 187, 10, 102]),
-    //     port: 1337,
-    // };
-    // for _i in 0..5 {
-    //     let _ = send_to(s, "hello everynyan".as_bytes().to_vec(), saddr).await;
-    // }
-    // println!("end udp send test");
+    println!("udp send test");
+    let s = UdpSocket::new();
+    let saddr = SocketAddr {
+        addr: Ipv4Address::new([11, 187, 10, 102]),
+        port: 1337,
+    };
+    for _i in 0..5 {
+        let _ = send_to(s, "hello everynyan".as_bytes().to_vec(), saddr).await;
+    }
+    println!("end udp send test");
 
 
     // [udp listening test]
@@ -82,19 +82,19 @@ async fn main() {
 
 
     // [tcp recv test]
-    let s = TcpSocket::new();
+    // let s = TcpSocket::new();
 
-    bind(s, 1337);
-    listen(s, 1); // has a timeout, we will wait for 5 seconds
+    // bind(s, 1337);
+    // listen(s, 1); // has a timeout, we will wait for 5 seconds
 
-    let clientfd = accept(s).await;
+    // let clientfd = accept(s).await;
 
-    for i in 0..5 {
-        let recv = recv_from(*clientfd.as_ref().unwrap()).await;
-        if let Ok((payload, senderaddr)) = recv {
-            println!("got message: {:x?}", payload);
-        }
-    }
+    // for i in 0..5 {
+    //     let recv = recv_from(*clientfd.as_ref().unwrap()).await;
+    //     if let Ok((payload, senderaddr)) = recv {
+    //         println!("got message: {:x?}", payload);
+    //     }
+    // }
 
     // there is a delay when calling NetSend on a packet, this loop is to allow all the packets to
     // drain out
