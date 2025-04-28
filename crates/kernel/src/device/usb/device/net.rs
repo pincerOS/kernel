@@ -190,10 +190,7 @@ pub fn NetReceive(buffer: *mut u8, buffer_length: u32) {
     // println!("| Net: Receive");
 
     
-    // println!("{:x}", HexDisplay(unsafe { core::slice::from_raw_parts(buffer, 40) }));
-
-    // println!();
-
+    println!("| Net: Receive{:x}", HexDisplay(unsafe { core::slice::from_raw_parts(buffer, 40) }));
     unsafe {
         if let Some(callback) = NET_DEVICE.receive_callback {
             callback(buffer, buffer_length);
