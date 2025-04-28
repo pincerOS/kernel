@@ -8,6 +8,7 @@ use super::super::usbd::descriptors::*;
 use super::super::usbd::device::*;
 
 use crate::device::system_timer::micro_delay;
+use crate::device::usb::hcd::dwc::dwc_otg::ms_to_micro;
 use crate::device::usb::types::*;
 use crate::device::usb::usbd::endpoint::register_interrupt_endpoint;
 use crate::device::usb::usbd::endpoint::*;
@@ -124,6 +125,9 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     //     let receive_buffer = Box::new([0u8; 512]);
     //     NetInitiateReceive(device, receive_buffer, 1500);
     // }
+
+    micro_delay(ms_to_micro(1500));
+
     unsafe {
         for i in 0..10 {
             NetSendPacket(
