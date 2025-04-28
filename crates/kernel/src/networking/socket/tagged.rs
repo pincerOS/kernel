@@ -1,10 +1,13 @@
 use crate::networking::iface::Interface;
-use crate::networking::socket::{SocketAddr, TcpSocket, UdpSocket};
+use crate::networking::socket::{SocketAddr, TcpSocket, UdpSocket, SockType};
 use crate::networking::{Error, Result};
 
 use crate::device::usb::device::net::get_interface_mut;
+use crate::ringbuffer::{Receiver, Sender};
 
 use alloc::vec::Vec;
+
+pub static BUFFER_LEN: usize = 128;
 
 pub enum TaggedSocket {
     // Raw(RawSocket),
@@ -13,7 +16,7 @@ pub enum TaggedSocket {
 }
 
 impl TaggedSocket {
-    pub fn is_bound(&mut self) -> bool {
+    pub fn is_bound(&self) -> bool {
         match self {
             // TaggedSocket::Raw(socket) => socket.accepts(pair),
             TaggedSocket::Udp(socket) => socket.is_bound(),
@@ -30,47 +33,53 @@ impl TaggedSocket {
         }
     }
 
-    pub fn send(&mut self, interface: &mut Interface) -> Result<()> {
-        match self {
-            // TaggedSocket::Raw(socket) => socket.send(),
-            TaggedSocket::Udp(socket) => socket.send(interface),
-            TaggedSocket::Tcp(socket) => socket.send(interface),
-        }
-    }
-
-    pub fn send_enqueue(&mut self, payload: Vec<u8>, saddr: SocketAddr) -> Result<()> {
+    pub async fn send_enqueue(&mut self, payload: Vec<u8>, saddr: SocketAddr) -> Result<()> {
         match self {
             // TaggedSocket::Raw(socket) => socket.queue_send(payload, saddr),
-            TaggedSocket::Udp(socket) => socket.send_enqueue(payload, saddr),
+            TaggedSocket::Udp(socket) => socket.send_enqueue(payload, saddr).await,
             TaggedSocket::Tcp(socket) => socket.send_enqueue(payload, saddr),
         }
     }
 
-    // TODO: this is so ugl lol
-    pub fn recv_enqueue(
+    pub async fn recv_enqueue(
         &mut self,
         seq_num: u32,
         ack_num: u32,
         flags: u8,
+        window_size: u16,
         payload: Vec<u8>,
         saddr: SocketAddr,
     ) -> Result<()> {
-        let interface = get_interface_mut();
-
         match self {
             // TaggedSocket::Raw(socket) => socket.queue_recv(payload, saddr),
-            TaggedSocket::Udp(socket) => socket.recv_enqueue(payload, saddr),
+            TaggedSocket::Udp(socket) => socket.recv_enqueue(payload, saddr).await,
             TaggedSocket::Tcp(socket) => {
-                socket.recv_enqueue(interface, seq_num, ack_num, flags, payload, saddr)
+                socket.recv_enqueue(seq_num, ack_num, flags, window_size, payload, saddr).await
             }
         }
     }
 
-    pub fn recv(&mut self) -> Result<(Vec<u8>, SocketAddr)> {
+    pub fn get_recv_ref(&mut self) -> (SockType, Receiver<BUFFER_LEN, (Vec<u8>, SocketAddr)>) {
+        match self {
+            // TaggedSocket::Raw(socket) => socket.accepts(pair),
+            TaggedSocket::Udp(socket) => socket.get_recv_ref(),
+            TaggedSocket::Tcp(socket) => socket.get_recv_ref(),
+        }
+    }
+
+    pub fn get_send_ref(&mut self) -> (SockType, Sender<BUFFER_LEN, (Vec<u8>, SocketAddr)>) {
+        match self {
+            // TaggedSocket::Raw(socket) => socket.accepts(pair),
+            TaggedSocket::Udp(socket) => socket.get_send_ref(),
+            TaggedSocket::Tcp(socket) => socket.get_send_ref(),
+        }
+    }
+
+    pub async fn recv(&mut self) -> Result<(Vec<u8>, SocketAddr)> {
         match self {
             // TaggedSocket::Raw(socket) => socket.recv(),
-            TaggedSocket::Udp(socket) => socket.recv(),
-            TaggedSocket::Tcp(socket) => socket.recv(),
+            TaggedSocket::Udp(socket) => socket.recv().await,
+            TaggedSocket::Tcp(socket) => socket.recv().await,
         }
     }
 
@@ -82,32 +91,29 @@ impl TaggedSocket {
         }
     }
 
-    // TODO: should block
-    // TODO: udp just throws error for now, but can be used like berkley posix to instead set the
-    // default destination as well in the future
-    pub fn connect(&mut self, saddr: SocketAddr) -> Result<()> {
+    pub async fn connect(&mut self, saddr: SocketAddr) -> Result<()> {
         let interface = get_interface_mut();
         match self {
             // TaggedSocket::Raw(socket) => socket.recv(),
             TaggedSocket::Udp(_socket) => Err(Error::Ignored),
-            TaggedSocket::Tcp(socket) => socket.connect(interface, saddr),
+            TaggedSocket::Tcp(socket) => socket.connect(interface, saddr).await,
         }
     }
 
-    pub fn listen(&mut self, num_req: usize) -> Result<()> {
+    pub async fn listen(&mut self, num_req: usize) -> Result<()> {
         let interface = get_interface_mut();
         match self {
             // TaggedSocket::Raw(socket) => socket.recv(),
             TaggedSocket::Udp(_socket) => Err(Error::Ignored),
-            TaggedSocket::Tcp(socket) => socket.listen(interface, num_req),
+            TaggedSocket::Tcp(socket) => socket.listen(interface, num_req).await,
         }
     }
 
-    pub fn accept(&mut self) -> Result<SocketAddr> {
+    pub async fn accept(&mut self) -> Result<SocketAddr> {
         match self {
             // TaggedSocket::Raw(socket) => socket.recv(),
             TaggedSocket::Udp(_socket) => Err(Error::Ignored),
-            TaggedSocket::Tcp(socket) => socket.accept(),
+            TaggedSocket::Tcp(socket) => socket.accept().await,
         }
     }
 }

@@ -1,21 +1,21 @@
 use crate::device::usb::device::net::get_interface_mut;
 use crate::networking::iface::{tcp, Interface};
+use crate::networking::repr::TcpPacket;
 use crate::networking::socket::bindings::{NEXT_EPHEMERAL, NEXT_SOCKETFD};
-use crate::networking::socket::tagged::TaggedSocket;
-use crate::networking::socket::SocketAddr;
+use crate::networking::socket::tagged::{TaggedSocket, BUFFER_LEN};
+use crate::networking::socket::{SocketAddr, SockType};
 use crate::networking::utils::ring::Ring;
 use crate::networking::{Error, Result};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
+use crate::ringbuffer::{channel, Sender, Receiver};
 
 fn new_ring_packet_buffer(capacity: usize) -> Ring<(Vec<u8>, SocketAddr)> {
     let default_entry = (Vec::new(), SocketAddr::default());
     let buffer = vec![default_entry; capacity];
     Ring::from(buffer)
 }
-
-pub static TCP_BUFFER_LEN: usize = 128;
 
 // flags
 pub const TCP_FLAG_FIN: u8 = 0x01;
@@ -48,19 +48,26 @@ pub struct TcpSocket {
     pending_conn: Vec<SocketAddr>,
     max_pending: usize,
     connected: bool,
-    send_buffer: Ring<(Vec<u8>, SocketAddr)>,
-    recv_buffer: Ring<(Vec<u8>, SocketAddr)>,
+    // send_buffer: Ring<(Vec<u8>, SocketAddr)>,
+    // recv_buffer: Ring<(Vec<u8>, SocketAddr)>,
+    recv_tx: Sender<BUFFER_LEN, (Vec<u8>, SocketAddr)>,
+    recv_rx: Receiver<BUFFER_LEN, (Vec<u8>, SocketAddr)>,
+    // recvp_tx: Sender<BUFFER_LEN, (TcpPacket, SocketAddr)>,
+    // recvp_rx: Receiver<BUFFER_LEN, (TcpPacket, SocketAddr)>,
 
     state: TcpState,
     remote_addr: Option<SocketAddr>,
     seq_number: u32,
     ack_number: u32,
+    flags: u8,
     window_size: u16,
 }
 
 impl TcpSocket {
     pub fn new() -> u16 {
         let interface = get_interface_mut();
+        let (recv_tx, recv_rx) = channel::<BUFFER_LEN, (Vec<u8>, SocketAddr)>();
+        // let (recvp_tx, recvp_rx) = channel::<BUFFER_LEN, (TcpPacket, SocketAddr)>();
         let socket = TcpSocket {
             binding: SocketAddr {
                 addr: *interface.ipv4_addr,
@@ -71,28 +78,41 @@ impl TcpSocket {
             pending_conn: Vec::new(),
             max_pending: 0,
             connected: false,
-            send_buffer: new_ring_packet_buffer(TCP_BUFFER_LEN),
-            recv_buffer: new_ring_packet_buffer(TCP_BUFFER_LEN),
+            recv_tx,
+            recv_rx,
+            // recvp_tx,
+            // recvp_rx,
+           
 
             state: TcpState::Closed,
             remote_addr: None,
             seq_number: INITIAL_SEQ_NUMBER,
-            ack_number: 0,
+            ack_number: 1,
+            flags: 0,
             window_size: DEFAULT_WINDOW_SIZE,
         };
 
         let socketfd = NEXT_SOCKETFD.fetch_add(1, Ordering::SeqCst);
-        let mut sockets = interface.sockets.lock();
-        sockets.insert(socketfd, TaggedSocket::Tcp(socket));
+        // let mut sockets = interface.sockets.lock();
+        interface.sockets.insert(socketfd, TaggedSocket::Tcp(socket));
         socketfd
     }
 
     pub fn binding_equals(&self, saddr: SocketAddr) -> bool {
+        println!("binding port {} provided port {}", self.binding.port, saddr.port);
         self.binding == saddr
     }
 
     pub fn is_bound(&self) -> bool {
         self.is_bound
+    }
+
+    pub fn get_recv_ref(&mut self) -> (SockType, Receiver<BUFFER_LEN, (Vec<u8>, SocketAddr)>) {
+        (SockType::TCP, self.recv_rx.clone())
+    }
+
+    pub fn get_send_ref(&mut self) -> (SockType, Sender<BUFFER_LEN, (Vec<u8>, SocketAddr)>) {
+        (SockType::TCP, self.recv_tx.clone())
     }
 
     pub fn bind(&mut self, interface: &mut Interface, port: u16) {
@@ -104,7 +124,8 @@ impl TcpSocket {
         self.binding = bind_addr;
     }
 
-    pub fn listen(&mut self, interface: &mut Interface, num_max_requests: usize) -> Result<()> {
+    pub async fn listen(&mut self, interface: &mut Interface, num_max_requests: usize) -> Result<()> {
+        println!("in listen");
         if !self.is_bound {
             // bind to ephemeral if not bound
             let ephemeral_port = NEXT_EPHEMERAL.fetch_add(1, Ordering::SeqCst);
@@ -115,29 +136,71 @@ impl TcpSocket {
         self.max_pending = num_max_requests;
         self.state = TcpState::Closed; // still in CLOSED until SYN received
         self.pending_conn = Vec::with_capacity(num_max_requests);
+
+        println!("waiting for incoming connection");
+        let response = self.recv_with_context().await;
+        println!("got incoming tcp connection");
+
+        let (payload, sender) = match response {
+            Ok((payload, sender)) => (payload, sender),
+            Err(e) => return Err(e),
+        };
+
+        let last = &payload[payload.len() - 2..payload.len()];
+        self.window_size = u16::from_le_bytes([last[0], last[1]]);
+        self.flags = payload[payload.len() - 3];
+        // let last = &payload[payload.len() - 7..payload.len() - 3];
+        // self.ack_number = u32::from_le_bytes([last[0], last[1], last[2], last[3]]);
+        let last = &payload[payload.len() - 11..payload.len() - 7];
+        self.ack_number = u32::from_le_bytes([last[0], last[1], last[2], last[3]]);
+
+        self.pending_conn.push(sender);
+
         Ok(())
     }
 
-    pub fn accept(&mut self) -> Result<SocketAddr> {
+    pub async fn accept(&mut self) -> Result<SocketAddr> {
+        println!("in accept");
         if !self.is_listener {
             return Err(Error::NotConnected);
         }
 
-        match self.pending_conn.pop() {
-            Some(addr) => {
-                self.remote_addr = Some(addr);
-                Ok(addr)
-            }
-            None => Err(Error::Exhausted),
-        }
+        println!("here");
+        let addr = match self.pending_conn.pop() {
+            Some(addr) => addr,
+            None => return Err(Error::Exhausted),
+        };
+
+        let interface = get_interface_mut();
+
+        self.ack_number += 1;
+        println!("ack number {}", self.ack_number);
+
+        tcp::send_tcp_packet(
+            interface,
+            self.binding.port,
+            addr.port,
+            self.seq_number,
+            self.ack_number, 
+            TCP_FLAG_ACK | TCP_FLAG_SYN,
+            self.window_size,
+            addr.addr,
+            Vec::new(), 
+        );
+
+        self.recv().await;
+
+        self.state = TcpState::Established;
+
+        Ok(addr)
     }
 
-    pub fn connect(&mut self, interface: &mut Interface, saddr: SocketAddr) -> Result<()> {
+    pub async fn connect(&mut self, interface: &mut Interface, saddr: SocketAddr) -> Result<()> {
         // make sure we're not already connected
         // match self.state {
         //     TcpState::Closed => {},
         //     _ => return Err(Error::AlreadyConnected),
-        // }
+        // };
 
         // if not already bound, bind to an ephemeral port
         if !self.is_bound {
@@ -159,11 +222,30 @@ impl TcpSocket {
             self.window_size,
             saddr.addr,
             Vec::new(), // no payload
-        )?;
+        );
 
         self.state = TcpState::SynSent;
 
         println!("[!] sent syn");
+        
+        let _ = self.recv().await;
+
+        self.seq_number += 1;
+
+        let flags = TCP_FLAG_SYN & TCP_FLAG_ACK;
+        tcp::send_tcp_packet(
+            interface,
+            self.binding.port,
+            saddr.port,
+            self.seq_number,
+            self.ack_number, 
+            flags,
+            self.window_size,
+            saddr.addr,
+            Vec::new(), 
+        );
+
+        self.state = TcpState::Established;
 
         Ok(())
     }
@@ -182,144 +264,140 @@ impl TcpSocket {
             return Err(Error::NotConnected);
         }
 
-        self.send_buffer.enqueue_maybe(|(buffer, addr)| {
-            *buffer = payload;
-            *addr = dest;
-            Ok(())
-        })
+        let interface = get_interface_mut();
+        tcp::send_tcp_packet(interface, self.binding.port, dest.port, self.seq_number, self.ack_number, self.flags, self.window_size, dest.addr, payload)
     }
 
-    pub fn send(&mut self, interface: &mut Interface) -> Result<()> {
-        if self.state != TcpState::Established {
-            return Err(Error::NotConnected);
+    pub async fn recv(&mut self) -> Result<(Vec<u8>, SocketAddr)> {
+        let (mut payload, addr) = self.recv_rx.recv().await;
+        payload.truncate(payload.len().saturating_sub(11)); // get rid of context bytes
+        let last = &payload[payload.len() - 2..payload.len()];
+        self.window_size = u16::from_le_bytes([last[0], last[1]]);
+        self.flags = payload[payload.len() - 3];
+        // let last = &payload[payload.len() - 7..payload.len() - 3];
+        // self.ack_number = u32::from_le_bytes([last[0], last[1], last[2], last[3]]);
+        let last = &payload[payload.len() - 11..payload.len() - 7];
+        self.ack_number = u32::from_le_bytes([last[0], last[1], last[2], last[3]]);
+        
+        if self.state == TcpState::Established {
+            let interface = get_interface_mut();
+            self.ack_number += payload.len() as u32;
+            self.seq_number += 1;
+            println!("sending ack to a received packet");
+            tcp::send_tcp_packet(
+                interface, 
+                self.binding.port, 
+                addr.port, 
+                self.seq_number, 
+                self.ack_number, 
+                TCP_FLAG_ACK, 
+                self.window_size, 
+                addr.addr, 
+                Vec::new()
+            );
         }
 
-        match self.state {
-            TcpState::Established => {
-                // Process outgoing data
-                loop {
-                    match self.send_buffer.dequeue_with(|entry| {
-                        let (payload, addr) = entry;
-                        (payload.clone(), *addr)
-                    }) {
-                        Ok((payload, dest)) => {
-                            // Send with appropriate TCP flags
-                            tcp::send_tcp_packet(
-                                interface,
-                                self.binding.port,
-                                dest.port,
-                                self.seq_number,
-                                self.ack_number,
-                                TCP_FLAG_ACK | TCP_FLAG_PSH, // PSH to push data to application layer
-                                self.window_size,
-                                dest.addr,
-                                payload.clone(),
-                            )?;
-
-                            // Update sequence number
-                            self.seq_number += payload.len() as u32;
-                        }
-                        Err(Error::Exhausted) => break,
-                        Err(e) => return Err(e),
-                    }
-                }
-                Ok(())
-            }
-            _ => Err(Error::NotConnected),
-        }
+        Ok((payload, addr))
     }
 
-    pub fn recv(&mut self) -> Result<(Vec<u8>, SocketAddr)> {
-        self.recv_buffer
-            .dequeue_with(|entry: &mut (Vec<u8>, SocketAddr)| {
-                let (buffer, addr) = entry;
-                (buffer.clone(), addr.clone())
-            })
+    pub async fn recv_with_context(&mut self) -> Result<(Vec<u8>, SocketAddr)> {
+        let (payload, addr) = self.recv_rx.recv().await;
+        Ok((payload, addr))
     }
 
     // Enqueues a packet for receiving and handles TCP state machine
-    pub fn recv_enqueue(
+    pub async fn recv_enqueue(
         &mut self,
-        interface: &mut Interface,
         seq_number: u32,
         ack_number: u32,
         flags: u8,
+        window_size: u16,
         payload: Vec<u8>,
         sender: SocketAddr,
     ) -> Result<()> {
-        // Handle connection establishment if in SYN_SENT state
-        if self.state == TcpState::SynSent {
-            // Check if this is a valid remote endpoint response
-            if let Some(remote) = self.remote_addr {
-                if remote == sender {
-                    // This is a response to our SYN
-                    if (flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) == (TCP_FLAG_SYN | TCP_FLAG_ACK) {
-                        // Received SYN-ACK, update ACK number
-                        self.ack_number = seq_number + 1;
-
-                        // Send ACK to complete three-way handshake
-                        tcp::send_tcp_packet(
-                            interface,
-                            self.binding.port,
-                            sender.port,
-                            self.seq_number + 1, // SYN consumes one sequence number
-                            self.ack_number,
-                            TCP_FLAG_ACK,
-                            self.window_size,
-                            sender.addr,
-                            Vec::new(),
-                        )?;
-
-                        // Update state and sequence number
-                        self.state = TcpState::Established;
-                        self.connected = true;
-                        self.seq_number += 1; // SYN consumes one sequence number
-
-                        return Ok(());
-                    }
-                }
-            }
-        } else if self.state == TcpState::Closed {
-            // Handle incoming SYN for passive open (if we're listening)
-            if flags & TCP_FLAG_SYN != 0 && flags & TCP_FLAG_ACK == 0 {
-                // This would be for a server socket - not handling passive open in this example
-                // But this is where you would handle it
-            }
-        }
-
-        // Process state transitions based on TCP flags
-        self.process_tcp_state_transitions(interface, flags, seq_number, ack_number, sender)?;
-
-        // Now that we've handled any state transitions, enqueue actual data for user
-        // Only enqueue if we're in established state and there's actual data
-        if self.state == TcpState::Established && (payload.len() > 0) {
-            // Only enqueue if there's actual data
-            self.recv_buffer.enqueue_maybe(|(buffer, addr)| {
-                *buffer = payload.clone();
-                *addr = sender;
-                Ok(())
-            })?;
-
-            // Update ACK number and send ACK for the data
-            self.ack_number = seq_number + payload.len() as u32;
-
-            // Send ACK for received data
-            if let Some(remote) = self.remote_addr {
-                tcp::send_tcp_packet(
-                    interface,
-                    self.binding.port,
-                    remote.port,
-                    self.seq_number,
-                    self.ack_number,
-                    TCP_FLAG_ACK,
-                    self.window_size,
-                    remote.addr,
-                    Vec::new(),
-                )?;
-            }
-        }
-
+        println!("got a recv_enqueue");
+        let mut payload_with_context = payload.clone();
+        payload_with_context.extend_from_slice(&seq_number.to_le_bytes());
+        payload_with_context.extend_from_slice(&ack_number.to_le_bytes());
+        payload_with_context.push(flags);
+        payload_with_context.extend_from_slice(&window_size.to_le_bytes());
+        
+        // let packet = TcpPacket::new(sender.port, self.binding.port, seq_number, ack_number, flags, window_size, payload, sender.addr, self.binding.addr);
+        self.recv_tx.send((payload_with_context, sender)).await;
         Ok(())
+
+        // if self.state == TcpState::SynSent {
+        //     // Check if this is a valid remote endpoint response
+        //     if let Some(remote) = self.remote_addr {
+        //         if remote == sender {
+        //             // This is a response to our SYN
+        //             if (flags & (TCP_FLAG_SYN | TCP_FLAG_ACK)) == (TCP_FLAG_SYN | TCP_FLAG_ACK) {
+        //                 // Received SYN-ACK, update ACK number
+        //                 self.ack_number = seq_number + 1;
+        //
+        //                 // Send ACK to complete three-way handshake
+        //                 tcp::send_tcp_packet(
+        //                     interface,
+        //                     self.binding.port,
+        //                     sender.port,
+        //                     self.seq_number + 1, // SYN consumes one sequence number
+        //                     self.ack_number,
+        //                     TCP_FLAG_ACK,
+        //                     self.window_size,
+        //                     sender.addr,
+        //                     Vec::new(),
+        //                 )?;
+        //
+        //                 // Update state and sequence number
+        //                 self.state = TcpState::Established;
+        //                 self.connected = true;
+        //                 self.seq_number += 1; // SYN consumes one sequence number
+        //
+        //                 return Ok(());
+        //             }
+        //         }
+        //     }
+        // } else if self.state == TcpState::Closed {
+        //     // Handle incoming SYN for passive open (if we're listening)
+        //     if flags & TCP_FLAG_SYN != 0 && flags & TCP_FLAG_ACK == 0 {
+        //         // This would be for a server socket - not handling passive open in this example
+        //         // But this is where you would handle it
+        //     }
+        // }
+        //
+        // // Process state transitions based on TCP flags
+        // self.process_tcp_state_transitions(interface, flags, seq_number, ack_number, sender)?;
+        //
+        // // Now that we've handled any state transitions, enqueue actual data for user
+        // // Only enqueue if we're in established state and there's actual data
+        // if self.state == TcpState::Established && (payload.len() > 0) {
+        //     // Only enqueue if there's actual data
+        //     self.recv_buffer.enqueue_maybe(|(buffer, addr)| {
+        //         *buffer = payload.clone();
+        //         *addr = sender;
+        //         Ok(())
+        //     })?;
+        //
+        //     // Update ACK number and send ACK for the data
+        //     self.ack_number = seq_number + payload.len() as u32;
+        //
+        //     // Send ACK for received data
+        //     if let Some(remote) = self.remote_addr {
+        //         tcp::send_tcp_packet(
+        //             interface,
+        //             self.binding.port,
+        //             remote.port,
+        //             self.seq_number,
+        //             self.ack_number,
+        //             TCP_FLAG_ACK,
+        //             self.window_size,
+        //             remote.addr,
+        //             Vec::new(),
+        //         )?;
+        //     }
+        // }
+
+        // Ok(())
     }
 
     // Helper function to process TCP state transitions based on packet flags
@@ -332,6 +410,10 @@ impl TcpSocket {
         _sender: SocketAddr,
     ) -> Result<()> {
         match self.state {
+            TcpState::SynSent => {
+                if flags & TCP_FLAG_ACK != 0 {
+                }
+            },
             TcpState::Established => {
                 // Handle FIN from remote
                 if flags & TCP_FLAG_FIN != 0 {
@@ -435,12 +517,12 @@ impl TcpSocket {
 
     // Returns the number of packets enqueued for sending.
     pub fn num_send_enqueued(&self) -> usize {
-        self.send_buffer.len()
+        0
     }
 
     // Returns the number of packets enqueued for receiving.
     pub fn num_recv_enqueued(&self) -> usize {
-        self.recv_buffer.len()
+        0
     }
 
     // Close the connection gracefully

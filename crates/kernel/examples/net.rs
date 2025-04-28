@@ -4,87 +4,106 @@
 extern crate alloc;
 extern crate kernel;
 
-use kernel::networking::repr::Ipv4Address;
+use core::net::Ipv4Addr;
+
+use kernel::{device::usb::device::net::get_dhcpd_mut, event::{task, thread}, networking::{iface::icmp, repr::{IcmpPacket, Ipv4Address}, socket::RawSocket}, ringbuffer};
+
 #[allow(unused_imports)]
 use kernel::networking::socket::{
-    bind, connect, recv_from, send_to, SocketAddr, TcpSocket, UdpSocket,
+    bind, accept, listen, connect, recv_from, send_to, SocketAddr, TcpSocket, UdpSocket,
 };
+use kernel::networking::Result;
 use kernel::*;
 
 #[no_mangle]
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
-    let count = 32;
-    // WARN: this is unfortunately necessary to give dhcp time to resolve our ip address because
-    // we don't have blocking currently
-    for _i in 0..count {
-        sync::spin_sleep(100_000);
-    }
+    println!("| starting kernel_main");
+    task::spawn_async(async move {
+        main().await;
+    });
+    crate::event::thread::stop();
+}
+
+async fn main() {
+    println!("starting dhcpd");
+
+    let dhcpd = get_dhcpd_mut();
+    dhcpd.start().await;
+
+    println!("out of dhcpd");
 
     // [udp send test]
+    // println!("udp send test");
     // let s = UdpSocket::new();
     // let saddr = SocketAddr {
     //     addr: Ipv4Address::new([11, 187, 10, 102]),
     //     port: 1337,
     // };
     // for _i in 0..5 {
-    //     let _ = send_to(s, "hello everynyan".as_bytes().to_vec(), saddr);
+    //     let _ = send_to(s, "hello everynyan".as_bytes().to_vec(), saddr).await;
     // }
+    // println!("end udp send test");
+
 
     // [udp listening test]
-    // To use this, send packets from your machine and uncomment this test
-    //
+    // println!("udp listening test");
     // let s = UdpSocket::new();
     //
-    // bind(s, 2222);
+    // bind(s, 53);
     //
-    // loop {
-    //     sync::spin_sleep(500_000);
-    //     let recv = recv_from(s);
+    // for i in 0..5 {
+    //     println!("listening for packets");
+    //     let recv = recv_from(s).await;
     //     if let Ok((payload, senderaddr)) = recv {
     //         println!("got message: {:x?}", payload);
     //     }
     // }
+    //
+    // println!("end udp listening test");
+
 
     // [tcp send test]
-    let saddr = SocketAddr {
-        addr: Ipv4Address::new([11, 187, 10, 102]),
-        port: 1337,
-    };
+    // println!("tcp send test");
+    // let saddr = SocketAddr {
+    //     addr: Ipv4Address::new([11, 187, 10, 102]),
+    //     port: 1337,
+    // };
+    //
+    // let s = TcpSocket::new();
+    // match connect(s, saddr).await {
+    //     Ok(_) => (),
+    //     Err(_) => println!("couldn't connect"),
+    // };
+    //
+    // for _i in 0..5 {
+    //     let _ = send_to(s, "hello everynyan".as_bytes().to_vec(), saddr);
+    // }
+    // println!("tcp send test end");
 
-    let s = TcpSocket::new();
-    match connect(s, saddr) {
-        Ok(_) => (),
-        Err(_) => println!("couldn't connect"),
-    };
-
-    // WARN: same as above, but for tcp handshake
-    for _i in 0..count {
-        sync::spin_sleep(100_000);
-    }
-
-    for _i in 0..5 {
-        let _ = send_to(s, "hello everynyan".as_bytes().to_vec(), saddr);
-    }
 
     // [tcp recv test]
-    // To use this, send packets from your machine and uncomment this test
+    let s = TcpSocket::new();
 
-    // let s = TcpSocket::new();
-    //
-    // bind(s, 2222);
-    // listen(s); // has a timeout, we will wait for 5 seconds
-    //
-    // let client = accept(s);
-    // // WARN: same as above, but for tcp handshake
-    // for _i in 0..count {
-    //     sync::spin_sleep(100_000);
-    // }
-    //
-    // loop {
-    //     sync::spin_sleep(500_000);
-    //     let recv = recv_from(s);
-    //     if let Ok((payload, senderaddr)) = recv {
-    //         println!("got message: {:x?}", payload);
-    //     }
-    // }
+    bind(s, 22);
+    listen(s, 1).await; // has a timeout, we will wait for 5 seconds
+
+    let clientfd = accept(s).await;
+
+
+    while let recv = recv_from(*clientfd.as_ref().unwrap()).await {
+        if let Ok((payload, senderaddr)) = recv {
+            println!("got message: {:x?}", payload);
+        } else {
+            break;
+        }
+    }
+
+    // there is a delay when calling NetSend on a packet, this loop is to allow all the packets to
+    // drain out
+    for i in 0..32 {
+        sync::spin_sleep(500_000);
+    }
+
+
+    shutdown();
 }
