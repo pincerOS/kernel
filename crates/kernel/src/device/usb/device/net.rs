@@ -175,7 +175,7 @@ pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
     }
 
     if buffer_length > 0 {
-        println!("| NET: analyze {:x}", HexDisplay(unsafe { core::slice::from_raw_parts(buffer, buffer_length) }));
+        println!("| NET: analyze {:x}", HexDisplay(unsafe { core::slice::from_raw_parts(buffer, buffer_length as usize) }));
     }
 }
 
