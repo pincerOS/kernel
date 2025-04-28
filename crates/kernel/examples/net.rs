@@ -41,10 +41,14 @@ async fn main() {
     //     addr: Ipv4Address::new([10, 0, 2, 2]),
     //     port: 1337,
     // };
-    // for _i in 0..100 {
+    // for _i in 0..5 {
     //     let _ = send_to(s, "hello everynyan\n".as_bytes().to_vec(), saddr).await;
     // }
     // println!("end udp send test");
+
+    // for _i in 0..5 {
+    //     sync::spin_sleep(500_000);
+    // }
 
 
     // [udp listening test]
@@ -65,24 +69,24 @@ async fn main() {
 
 
     // [tcp send test]
-    // println!("tcp send test");
-    // let saddr = SocketAddr {
-    //     addr: Ipv4Address::new([10, 0, 2, 2]),
-    //     port: 1337,
-    // };
-    //
-    // let s = TcpSocket::new();
-    // match connect(s, saddr).await {
-    //     Ok(_) => (),
-    //     Err(_) => println!("couldn't connect"),
-    // };
-    //
-    // for _i in 0..100 {
-    //     let _ = send_to(s, "hello everynyan\n".as_bytes().to_vec(), saddr).await;
-    // }
-    //
-    // close(s).await;
-    // println!("tcp send test end");
+    println!("tcp send test");
+    let saddr = SocketAddr {
+        addr: Ipv4Address::new([10, 0, 2, 2]),
+        port: 1337,
+    };
+
+    let s = TcpSocket::new();
+    match connect(s, saddr).await {
+        Ok(_) => (),
+        Err(_) => println!("couldn't connect"),
+    };
+
+    for _i in 0..100 {
+        let _ = send_to(s, "hello everynyan\n".as_bytes().to_vec(), saddr).await;
+    }
+
+    close(s).await;
+    println!("tcp send test end");
 
 
     // [tcp recv test]
@@ -107,33 +111,30 @@ async fn main() {
     // println!("got {} bytes", tot);
 
     // [http request test]
-    println!("http send test");
-    // let host = "http.badssl.com";
-    let host = "example.com";
-    let saddr = SocketAddr::resolve(host, 80).await;
-
-    // let saddr = SocketAddr {
-    //     // addr: Ipv4Address::new([81, 59, 117, 34]),
-    //     addr: Ipv4Address::new([104, 154, 89, 105]),
-    //     port: 80,
+    // println!("http send test");
+    // // let host = "http.badssl.com";
+    // let host = "http-textarea.badssl.com";
+    // // let host = "example.com";
+    // let saddr = SocketAddr::resolve(host, 80).await;
+    //
+    // let s = TcpSocket::new();
+    // match connect(s, saddr).await {
+    //     Ok(_) => (),
+    //     Err(_) => println!("couldn't connect"),
     // };
-
-    let s = TcpSocket::new();
-    match connect(s, saddr).await {
-        Ok(_) => (),
-        Err(_) => println!("couldn't connect"),
-    };
-
-    let path = "/";
-    let http_req = HttpPacket::new(HttpMethod::Get, host, path);
-    let _ = send_to(s, http_req.serialize(), saddr).await;
-
-    let (resp, _) = recv_from(s).await.unwrap();
-    
-
-    close(s).await;
-    println!("response:\n{:?}", String::from_utf8(resp));
-    println!("http send test end");
+    //
+    // let path = "/";
+    // let http_req = HttpPacket::new(HttpMethod::Get, host, path);
+    // let _ = send_to(s, http_req.serialize(), saddr).await;
+    //
+    // let (resp, _) = recv_from(s).await.unwrap();
+    // 
+    //
+    // close(s).await;
+    //
+    // println!("response:\n{:?}", resp);
+    // println!("response:\n{:?}", String::from_utf8(resp));
+    // println!("http send test end");
     
 
     shutdown();
