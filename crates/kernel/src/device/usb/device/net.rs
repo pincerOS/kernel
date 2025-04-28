@@ -176,10 +176,8 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 
     // begin receieve series, this queues a receive to be ran which will eventually propogate back
     // to us through the rgistered `recv` function which then queues another receive
-    let buf = vec![0u8; 1500];
-    unsafe {
-        NetInitiateReceive(buf.into_boxed_slice(), 1500); // TODO: ask aaron if I need to use another function?
-    }
+    let buf = vec![0u8; 1]; //TODO: Technically, the buffer doesn't matter anymore
+    NetInitiateReceive(buf.into_boxed_slice(), 1500); // TODO: ask aaron if I need to use another function?
 
     // start dhcp
     unsafe {

@@ -55,14 +55,8 @@ pub fn recv_ethernet_frame(interface: &mut Interface, eth_buffer: &[u8], _len: u
     };
 
     // queue another recv to be run in the future
-    thread::thread(move || {
-        let buf = vec![0u8; 1500];
-        unsafe {
-            let device = &mut *NET_DEVICE.device.unwrap();
-            // rndis_receive_packet(device, buf.into_boxed_slice(), 1500);
-            NetInitiateReceive(buf.into_boxed_slice(), 1500);
-        }
-    });
-
+    let buf = vec![0u8; 1];
+    NetInitiateReceive(buf.into_boxed_slice(), 1500);
+    
     return result;
 }
