@@ -7,8 +7,10 @@ use alloc::vec::Vec;
 use crate::networking::repr::{DnsPacket, Ipv4Address};
 use crate::networking::{Error, Result};
 
-use crate::device::usb::device::net::get_interface_mut;
+use crate::device::usb::device::net::{get_dhcpd_mut, get_interface_mut};
 use crate::event::task::spawn_async;
+
+use super::UdpSocket;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SocketAddr {
@@ -23,7 +25,24 @@ impl SocketAddr {
             port: 0,
         }
     }
-
+    
+    // pub async fn resolve(host: &str, port: u16) -> Self {
+    //     let dhcp = get_dhcpd_mut();
+    //     let dns_socket = UdpSocket::new();
+    //     let _ = bind(dns_socket, 53);
+    //
+    //     let dns_req = DnsPacket::new(DnsType::Request, host);
+    //
+    //     let saddr = SocketAddr {
+    //         addr: dhcp.dns_servers[0],
+    //         port: 53,
+    //     };
+    //
+    //     send_to(socketfd, dns_req.serialize(), saddr).await;
+    //
+    //     let resp = recv_from(socketfd);
+    //             
+    // }
 }
 
 impl Display for SocketAddr {

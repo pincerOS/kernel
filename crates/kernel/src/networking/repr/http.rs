@@ -30,9 +30,11 @@ pub struct Packet {
 }
 
 impl Packet {
-    pub fn new(host: &str, method: Method, path: &str) -> Self {
+    pub fn new(method: Method, host: &str, path: &str) -> Self {
         let mut headers = Vec::new();
         headers.push(Header { name: "Host".to_string(), value: host.to_string() });
+        headers.push(Header { name: "User-Agent".to_string(), value: "curl/8.13.0".to_string() });
+        headers.push(Header { name: "Accept".to_string(), value: "*/*".to_string() });
         Packet {
             method,
             path: path.to_string(),

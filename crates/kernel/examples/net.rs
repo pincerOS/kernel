@@ -15,6 +15,8 @@ use kernel::networking::socket::{
 use kernel::networking::Result;
 use kernel::*;
 
+use alloc::string::String;
+
 #[no_mangle]
 extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     println!("| starting kernel_main");
@@ -32,15 +34,15 @@ async fn main() {
 
     println!("out of dhcpd");
 
-    // [udp send test]
+    // // [udp send test]
     // println!("udp send test");
     // let s = UdpSocket::new();
     // let saddr = SocketAddr {
     //     addr: Ipv4Address::new([10, 0, 2, 2]),
     //     port: 1337,
     // };
-    // for _i in 0..5 {
-    //     let _ = send_to(s, "hello everynyan".as_bytes().to_vec(), saddr).await;
+    // for _i in 0..100 {
+    //     let _ = send_to(s, "hello everynyan\n".as_bytes().to_vec(), saddr).await;
     // }
     // println!("end udp send test");
 
@@ -63,24 +65,24 @@ async fn main() {
 
 
     // [tcp send test]
-    println!("tcp send test");
-    let saddr = SocketAddr {
-        addr: Ipv4Address::new([10, 0, 2, 2]),
-        port: 1337,
-    };
-
-    let s = TcpSocket::new();
-    match connect(s, saddr).await {
-        Ok(_) => (),
-        Err(_) => println!("couldn't connect"),
-    };
-
-    for _i in 0..5 {
-        let _ = send_to(s, "hello everynyan".as_bytes().to_vec(), saddr).await;
-    }
-
-    close(s).await;
-    println!("tcp send test end");
+    // println!("tcp send test");
+    // let saddr = SocketAddr {
+    //     addr: Ipv4Address::new([10, 0, 2, 2]),
+    //     port: 1337,
+    // };
+    //
+    // let s = TcpSocket::new();
+    // match connect(s, saddr).await {
+    //     Ok(_) => (),
+    //     Err(_) => println!("couldn't connect"),
+    // };
+    //
+    // for _i in 0..100 {
+    //     let _ = send_to(s, "hello everynyan\n".as_bytes().to_vec(), saddr).await;
+    // }
+    //
+    // close(s).await;
+    // println!("tcp send test end");
 
 
     // [tcp recv test]
@@ -106,26 +108,26 @@ async fn main() {
 
     // [http request test]
     // println!("http send test");
-    // // let host = "api.ipfy.org";
-    // //
-    // // let saddr = SocketAddr::resolve("host", 80);
-    // let saddr = SocketAddr {
-    //     addr: Ipv4Address::new([173, 194, 208, 100]),
-    //     port: 80,
-    // };
-    //
-    // let s = TcpSocket::new();
-    // match connect(s, saddr).await {
-    //     Ok(_) => (),
-    //     Err(_) => println!("couldn't connect"),
-    // };
-    //
-    // let path = "/";
-    // let http_req = HttpPacket::new(HttpMethod::Get, host, path);
-    // let _ = send_to(s, http_req.serialize(), saddr).await;
-    // 
-    // close(s).await;
-    // println!("http send test end");
+    let host = "example.com";
+    // let saddr = SocketAddr::resolve("host", 80);
+    let saddr = SocketAddr {
+        addr: Ipv4Address::new([23, 215, 0, 138]),
+        port: 80,
+    };
+
+    let s = TcpSocket::new();
+    match connect(s, saddr).await {
+        Ok(_) => (),
+        Err(_) => println!("couldn't connect"),
+    };
+
+    let path = "/";
+    let http_req = HttpPacket::new(HttpMethod::Get, host, path);
+    println!("{}",String::from_utf8(http_req.serialize()).unwrap());
+    let _ = send_to(s, http_req.serialize(), saddr).await;
+
+    close(s).await;
+    println!("http send test end");
     
 
     shutdown();
