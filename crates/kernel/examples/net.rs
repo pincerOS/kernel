@@ -10,7 +10,7 @@ use kernel::{device::usb::device::net::get_dhcpd_mut, event::{task, thread}, net
 
 #[allow(unused_imports)]
 use kernel::networking::socket::{
-    bind, accept, listen, connect, recv_from, send_to, SocketAddr, TcpSocket, UdpSocket,
+    bind, close, accept, listen, connect, recv_from, send_to, SocketAddr, TcpSocket, UdpSocket,
 };
 use kernel::networking::Result;
 use kernel::*;
@@ -36,7 +36,7 @@ async fn main() {
     // println!("udp send test");
     // let s = UdpSocket::new();
     // let saddr = SocketAddr {
-    //     addr: Ipv4Address::new([11, 187, 10, 102]),
+    //     addr: Ipv4Address::new([10, 0, 2, 2]),
     //     port: 1337,
     // };
     // for _i in 0..5 {
@@ -63,46 +63,49 @@ async fn main() {
 
 
     // [tcp send test]
-    // println!("tcp send test");
-    // let saddr = SocketAddr {
-    //     addr: Ipv4Address::new([11, 187, 10, 102]),
-    //     port: 1337,
-    // };
-    //
-    // let s = TcpSocket::new();
-    // match connect(s, saddr).await {
-    //     Ok(_) => (),
-    //     Err(_) => println!("couldn't connect"),
-    // };
-    //
-    // for _i in 0..5 {
-    //     let _ = send_to(s, "hello everynyan".as_bytes().to_vec(), saddr);
-    // }
-    // println!("tcp send test end");
+    println!("tcp send test");
+    let saddr = SocketAddr {
+        addr: Ipv4Address::new([10, 0, 2, 2]),
+        port: 1337,
+    };
+
+    let s = TcpSocket::new();
+    match connect(s, saddr).await {
+        Ok(_) => (),
+        Err(_) => println!("couldn't connect"),
+    };
+
+    for _i in 0..5 {
+        let _ = send_to(s, "hello everynyan".as_bytes().to_vec(), saddr).await;
+    }
+
+    close(s).await;
+    println!("tcp send test end");
 
 
     // [tcp recv test]
-    let s = TcpSocket::new();
+    // let s = TcpSocket::new();
+    //
+    // bind(s, 22);
+    // listen(s, 1).await;
+    //
+    // let clientfd = accept(s).await;
+    //
+    // while let recv = recv_from(*clientfd.as_ref().unwrap()).await {
+    //     if let Ok((payload, senderaddr)) = recv {
+    //         println!("got message: {:x?}", payload);
+    //     } else {
+    //         println!("\t[!] got a fin, ended");
+    //         break;
+    //     }
+    // }
 
-    bind(s, 22);
-    listen(s, 1).await; // has a timeout, we will wait for 5 seconds
-
-    let clientfd = accept(s).await;
-
-
-    while let recv = recv_from(*clientfd.as_ref().unwrap()).await {
-        if let Ok((payload, senderaddr)) = recv {
-            println!("got message: {:x?}", payload);
-        } else {
-            break;
-        }
+    // let usb packets drain
+    for _i in 0..32 {
+        sync::spin_sleep(10000_00);
     }
 
-    // there is a delay when calling NetSend on a packet, this loop is to allow all the packets to
-    // drain out
-    for i in 0..32 {
-        sync::spin_sleep(500_000);
-    }
+    println!("here");
 
 
     shutdown();
