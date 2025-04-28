@@ -32,12 +32,13 @@ pub fn send_ethernet_frame(
 }
 
 // recv ethernet frame from interface: parsed -> fwd to socket -> propogated up stack
-pub fn recv_ethernet_frame(interface: &mut Interface, eth_buffer: &[u8], _len: u32) -> Result<()> {
+pub fn recv_ethernet_frame(interface: &mut Interface, eth_buffer: &[u8], _len: u32, truncation: usize) -> Result<()> {
     println!("[!] received ethernet frame");
     // println!("\t{:x?}", &eth_buffer[44..]);
 
     // we will truncate the first 44 bytes from the RNDIS protocol
-    let eth_frame = EthernetFrame::deserialize(&eth_buffer[44..])?;
+    // will also need to truncate the first 8 for AX88179
+    let eth_frame = EthernetFrame::deserialize(&eth_buffer[truncation..])?;
 
     // if this frame is not broadcast/multicast or to us, ignore it
     if eth_frame.dst != interface.ethernet_addr

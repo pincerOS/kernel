@@ -34,6 +34,7 @@ pub static mut NET_DEVICE: NetDevice = NetDevice {
     device: None,
     net_send: None,
     net_receive: None,
+    truncation: 0,
 };
 
 pub static mut INTERFACE: Option<Interface> = None;
@@ -69,6 +70,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         unsafe {
             NET_DEVICE.net_send = Some(axge_send_packet);
             NET_DEVICE.net_receive = Some(axge_receive_packet);
+            NET_DEVICE.truncation = 8;
         }
 
     } else {
@@ -78,6 +80,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
         unsafe {
             NET_DEVICE.net_send = Some(rndis_send_packet);
             NET_DEVICE.net_receive = Some(rndis_receive_packet);
+            NET_DEVICE.truncation = 44;
         }
     }
 
@@ -219,7 +222,8 @@ pub unsafe fn recv(buf: *mut u8, buf_len: u32) {
     let slice: &[u8] = unsafe { slice::from_raw_parts(buf, buf_len as usize) };
 
     let interface = get_interface_mut();
-    let _ = ethernet::recv_ethernet_frame(interface, slice, buf_len);
+    let truncation = unsafe { NET_DEVICE.truncation };
+    let _ = ethernet::recv_ethernet_frame(interface, slice, buf_len, truncation);
 }
 
 pub unsafe fn NetAnalyze(buffer: *mut u8, buffer_length: u32) {
@@ -270,6 +274,7 @@ pub struct NetDevice {
     pub device: Option<*mut UsbDevice>,
     pub net_send: Option<unsafe fn(&mut UsbDevice, *mut u8, u32) -> ResultCode>,
     pub net_receive: Option<unsafe fn(&mut UsbDevice, Box<[u8]>, u32) -> ResultCode>,
+    pub truncation: usize,
 }
 
 #[repr(u32)]
