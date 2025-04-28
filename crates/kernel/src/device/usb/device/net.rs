@@ -114,26 +114,42 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
     //     10,
     // );
 
+    micro_delay(ms_to_micro(1500)); // Wait for 1.5 seconds
+    // We currently have this 1.5 second delay to wait for the device to be ready
+    // technically, we can wait for the interrupt in endpoint to tell us
+    // but laking ax88179 documentaiton, not sure which bits, so wait for now.
+
     // 1. new network interface
     // 2. initialize mac address
     // 3. initalize and statically set ip address and gateway
     // 4. initialize arp table
 
-    let mac_addr: &mut [u8; 6];
-    unsafe {
-        let mut b = vec![0u8; 30];
-        let query = rndis_query_msg(device, OID::OID_802_3_PERMANENT_ADDRESS, b.as_mut_ptr(), 30);
+    let mut mac_addr: &mut [u8; 6] = &mut [0u8; 6];
 
-        if query.0 != ResultCode::OK {
-            panic!("| Net: Error getting MAC address {:#?}", query.0);
+    if device.descriptor.vendor_id == 0xB95 && device.descriptor.product_id == 0x1790 {
+        mac_addr[0] = 0x54;
+        mac_addr[1] = 0x52;
+        mac_addr[2] = 0x00;
+        mac_addr[3] = 0x12;
+        mac_addr[4] = 0x34;
+        mac_addr[5] = 0x56;
+        // [0x54, 0x52, 0x00, 0x12, 0x34, 0x56];
+    } else {
+        unsafe {
+            let mut b = vec![0u8; 30];
+            let query = rndis_query_msg(device, OID::OID_802_3_PERMANENT_ADDRESS, b.as_mut_ptr(), 30);
+    
+            if query.0 != ResultCode::OK {
+                panic!("| Net: Error getting MAC address {:#?}", query.0);
+            }
+    
+            let b_offset = query.1;
+            let b_len = query.2;
+            if b_len != 6 {
+                panic!("| Net: Error getting MAC address {}", b_len);
+            }
+            mac_addr = &mut *(b.as_mut_ptr().offset(b_offset as isize) as *mut [u8; 6]);
         }
-
-        let b_offset = query.1;
-        let b_len = query.2;
-        if b_len != 6 {
-            panic!("| Net: Error getting MAC address {}", b_len);
-        }
-        mac_addr = &mut *(b.as_mut_ptr().offset(b_offset as isize) as *mut [u8; 6]);
     }
 
     println!("| Net: MAC Address: {:x?}", mac_addr);
