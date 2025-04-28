@@ -483,7 +483,7 @@ fn HcdChannelInterruptToError(device: &mut UsbDevice, hcint: u32, isComplete: bo
     return result;
 }
 
-pub const RequestTimeout: u32 = 5000;
+pub const RequestTimeout: u32 = 50000;
 
 pub fn HcdChannelSendWaitOne(
     device: &mut UsbDevice,
