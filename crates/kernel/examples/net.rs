@@ -94,11 +94,11 @@ async fn main() {
         if let Ok((payload, senderaddr)) = recv {
             println!("got message: {:x?}", payload);
         } else {
+            println!("\t[!] got a fin, ended");
             break;
         }
     }
 
-    // there is a delay when calling NetSend on a packet, this loop is to allow all the packets to
     // drain out
     for i in 0..32 {
         sync::spin_sleep(500_000);
