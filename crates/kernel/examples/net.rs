@@ -107,13 +107,15 @@ async fn main() {
     // println!("got {} bytes", tot);
 
     // [http request test]
-    // println!("http send test");
-    let host = "example.com";
-    // let saddr = SocketAddr::resolve("host", 80);
-    let saddr = SocketAddr {
-        addr: Ipv4Address::new([23, 215, 0, 138]),
-        port: 80,
-    };
+    println!("http send test");
+    let host = "http.badssl.com";
+    let saddr = SocketAddr::resolve(host, 80).await;
+
+    // let saddr = SocketAddr {
+    //     // addr: Ipv4Address::new([81, 59, 117, 34]),
+    //     addr: Ipv4Address::new([104, 154, 89, 105]),
+    //     port: 80,
+    // };
 
     let s = TcpSocket::new();
     match connect(s, saddr).await {

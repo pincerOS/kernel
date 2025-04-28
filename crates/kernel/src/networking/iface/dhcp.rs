@@ -43,7 +43,7 @@ pub struct Dhcpd {
     rebind_time: Option<u32>,
     subnet_mask: u32,
     router: Option<Ipv4Address>,
-    dns_servers: Vec<Ipv4Address>,
+    pub dns_servers: Vec<Ipv4Address>,
     udp_socket: u16,
 }
 
