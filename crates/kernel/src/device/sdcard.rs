@@ -521,6 +521,8 @@ impl bcm2711_emmc2_driver {
             panic!("Cannot init SD card");
         }
 
+        println!("| SD capacity is {:?} Bytes", driver.get_capacity());
+
         driver
     }
 
@@ -1310,7 +1312,6 @@ impl bcm2711_emmc2_driver {
             }
 
             self.emmc.capacity = (nSize << nShift) as u64 * SD_BLOCK_SIZE as u64;
-            println!("SD capacity is {:?} Bytes", self.emmc.capacity);
 
             if let Err(e) = self.issue_command(SELECT_CARD, self.emmc.card_rca << 16, 500000) {
                 println!("Error sending CMD7");
@@ -1395,7 +1396,7 @@ impl bcm2711_emmc2_driver {
                 let old_irpt_mask = self.reg(IRPT_MASK).read();
                 let new_irpt_mask = old_irpt_mask & !(1 << 8);
                 self.reg(IRPT_MASK).write(new_irpt_mask);
-
+                self.issue_command(STOP_TRANSMISSION, 0, 500000);
                 if self.issue_command(SET_BUS_WIDTH, 2, 500000).is_err() {
                     println!("Switch to 4-bit data mode failed");
                 } else {
@@ -1407,7 +1408,7 @@ impl bcm2711_emmc2_driver {
             }
 
             println!(
-                "Found a valid {:#?} SD Card",
+                "| Found a valid {:#?} SD Card",
                 SD_VERSIONS[(*self.emmc.scr).sd_version as usize]
             );
 
@@ -1430,7 +1431,7 @@ impl bcm2711_emmc2_driver {
         let vendor = ver >> 24;
         let slot_status = ver & 0xff;
         println!(
-            "SD version: {:#?}, vendor: {:#010x}, slot status: {:#010x}",
+            "| SD version: {:#?}, vendor: {:#010x}, slot status: {:#010x}",
             SD_VERSIONS[sdversion as usize], vendor, slot_status
         );
 
@@ -1453,11 +1454,15 @@ impl bcm2711_emmc2_driver {
 
     fn ensure_data_mode(&mut self) -> Result<(), SdCardError> {
         if self.emmc.card_rca == CARD_RCA_INVALID {
+            println!("Card rca invalid, resetting");
             let ret = self.card_reset();
             if ret.is_err() {
+                println!("Card reset failed");
                 return ret;
             }
         }
+
+
 
         if let Err(e) = self.issue_command(SEND_STATUS, self.emmc.card_rca << 16, 500000) {
             self.emmc.card_rca = CARD_RCA_INVALID;
@@ -1482,12 +1487,14 @@ impl bcm2711_emmc2_driver {
             }
             let _ = self.reset_dat();
         } else if cur_state != 4 {
+            println!("Card not in data mode resetting, cur_state: {:#010x}", cur_state);
             let ret = self.card_reset();
             if ret.is_err() {
                 return ret;
             }
         }
         if cur_state != 4 {
+            println!("Card still not in data mode, cur_state: {:#010x}", cur_state);
             if let Err(e) = self.issue_command(SEND_STATUS, self.emmc.card_rca << 16, 500000) {
                 self.emmc.card_rca = CARD_RCA_INVALID;
                 println!("ensure_data_mode() error sending CMD13");
@@ -1497,7 +1504,7 @@ impl bcm2711_emmc2_driver {
             cur_state = (status >> 9) & 0xf;
             if cur_state != 4 {
                 self.emmc.card_rca = CARD_RCA_INVALID;
-                sderror!("Unable to initialize SD card to date mode")
+                sderror!("Unable to initialize SD card to data mode")
             }
         }
         Ok(())
@@ -1562,6 +1569,7 @@ impl bcm2711_emmc2_driver {
             self.emmc.card_rca = CARD_RCA_INVALID;
             return Err(SdCardError::Error);
         }
+        self.issue_command(STOP_TRANSMISSION, 0, 500000)?;
         Ok(())
     }
 
@@ -1574,9 +1582,7 @@ impl bcm2711_emmc2_driver {
     }
 
     fn do_write(&mut self, buf: &[u8], block_no: u32) -> Result<u32, SdCardError> {
-        if self.ensure_data_mode().is_err() {
-            return Err(SdCardError::Error);
-        }
+        self.ensure_data_mode()?;
         let ptr = buf.as_ptr() as *mut u8;
         let tmp: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(ptr, buf.len()) };
         self.do_data_command(true, tmp, block_no)?;

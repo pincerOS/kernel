@@ -5,7 +5,7 @@ set -e
 # Check if sdcard.img exists, create it if not
 if [ ! -f sdcard.img ]; then
     echo "Creating SD card image"
-    qemu-img create -f raw sdcard.img 32M
+    mkfs.ext2 -q -b 4096 -i 4096 -I 128 -r 0 -t ext2 -d ../init/fs sdcard.img 32m
     echo "SD card image created"
 fi
 
@@ -58,3 +58,5 @@ qemu-system-aarch64 \
 # -netdev user,id=net0,hostfwd=tcp::2222-:22 \
 # -object filter-dump,id=f1,netdev=net0,file=net0.pcap \
 # -trace enable=net* \
+
+rm -f sdcard.img
