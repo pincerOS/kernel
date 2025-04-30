@@ -31,6 +31,10 @@ use crate::sync::time::{interval, MissedTicks};
 
 use alloc::boxed::Box;
 
+static mut NET_BUFFER_CUR_LEN: u32 = 0;
+static mut NET_BUFFER_LEN: u32 = 0;
+static mut NET_BUFFER_ACTIVE: bool = false;
+
 pub fn finish_bulk_endpoint_callback_in(
     endpoint: endpoint_descriptor,
     hcint: u32,
@@ -39,7 +43,7 @@ pub fn finish_bulk_endpoint_callback_in(
     let device = unsafe { &mut *endpoint.device };
 
     let transfer_size = HcdUpdateTransferSize(device, channel);
-    let last_transfer = endpoint.buffer_length - transfer_size;
+    let mut last_transfer = endpoint.buffer_length - transfer_size;
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     if hcint & HCINT_NAK != 0 {
@@ -90,6 +94,43 @@ pub fn finish_bulk_endpoint_callback_in(
     // unsafe {
     //     core::ptr::copy_nonoverlapping(dma_addr as *const u8, buffer, buffer_length as usize);
     // }
+
+    //assume rndis net bulk in
+    unsafe {
+        if !NET_BUFFER_ACTIVE {
+            use alloc::slice;
+            // let slice: &[u8] = unsafe { slice::from_raw_parts(dma_addr as *const u8, 16 as usize) };
+            let slice32: &[u32] =
+                unsafe { slice::from_raw_parts(dma_addr as *const u32, 4 as usize) };
+            //print slice
+            // println!("| Net buffer: {:?}", slice);
+            // println!("| Net buffer 32: {:?}", slice32);
+            let buffer32 = dma_addr as *const u32;
+
+            let rndis_len = slice32[3];
+            // let part1 = unsafe { buffer32.offset(0) } as u32;
+            // println!("| rndis 1 {}", part1);
+            println!("| Net buffer length: {} rndis_len: {}", last_transfer, rndis_len);
+            if rndis_len > last_transfer - 44 {
+                NET_BUFFER_ACTIVE = true;
+                NET_BUFFER_LEN = rndis_len;
+                //reenable channel
+                DwcActivateChannel(channel);
+                return false;
+            }
+            println!("| NEt continue");
+        } else {
+            if last_transfer >= NET_BUFFER_LEN {
+                println!("| NEt buffer finished length: {} NETBUFFER {}", last_transfer, NET_BUFFER_LEN);
+                NET_BUFFER_ACTIVE = false;
+                last_transfer = NET_BUFFER_LEN;
+            } else {
+                println!("| Net buffer not yet active length: {} NETBUFFER {}", last_transfer, NET_BUFFER_LEN);
+                DwcActivateChannel(channel);
+                return false;
+            }
+        }
+    }
 
     //TODO: Perhaps update this to pass the direct dma buffer address instead of copying
     //      as it is likely that the callback will need to copy the data anyway
