@@ -106,10 +106,10 @@ pub fn finish_bulk_endpoint_callback_in(
             let rndis_len = slice32[3];
             // let part1 = unsafe { buffer32.offset(0) } as u32;
             // println!("| rndis 1 {}", part1);
-            println!(
-                "| Net buffer length: {} rndis_len: {}",
-                last_transfer, rndis_len
-            );
+            // println!(
+            //     "| Net buffer length: {} rndis_len: {}",
+            //     last_transfer, rndis_len
+            // );
             if rndis_len > last_transfer - 44 {
                 NET_BUFFER_ACTIVE = true;
                 NET_BUFFER_LEN = rndis_len;
@@ -117,7 +117,7 @@ pub fn finish_bulk_endpoint_callback_in(
                 DwcActivateChannel(channel);
                 return false;
             }
-            println!("| NEt continue");
+            // println!("| NEt continue");
         } else {
             if last_transfer >= NET_BUFFER_LEN {
                 // println!("| NEt buffer finished length: {} NETBUFFER {}", last_transfer, NET_BUFFER_LEN);

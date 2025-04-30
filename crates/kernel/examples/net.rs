@@ -98,6 +98,7 @@ async fn main() {
     // let s = TcpSocket::new();
     //
     // bind(s, 22);
+
     // listen(s, 1).await;
     //
     // let clientfd = accept(s).await;
@@ -117,9 +118,10 @@ async fn main() {
 
     // [http request test]
     println!("http send test");
-    let host = "http.badssl.com";
+    // let host = "http.badssl.com";
     // let host = "http-textarea.badssl.com";
     // let host = "httpforever.com";
+    let host = "neverssl.com";
     let saddr = SocketAddr::resolve(host, 80).await;
 
     let s = TcpSocket::new();

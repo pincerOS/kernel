@@ -150,7 +150,7 @@ pub fn NetAttach(device: &mut UsbDevice, interface_number: u32) -> ResultCode {
 
     // begin receieve series, this queues a receive to be ran which will eventually propogate back
     // to us through the rgistered `recv` function which then queues another receive
-    let buf = vec![0u8; 1500];
+    let buf = vec![0u8; 1600];
     unsafe {
         rndis_receive_packet(device, buf.into_boxed_slice(), 1500); // TODO: ask aaron if I need to use another function?
     }
@@ -203,6 +203,12 @@ pub unsafe fn NetReceive(buffer: *mut u8, buffer_length: u32) {
         } else {
             println!("| Net: No callback for receive.");
         }
+    }
+
+    let buf = vec![0u8; 1];
+    unsafe {
+        let device = &mut *NET_DEVICE.device.unwrap();
+        rndis_receive_packet(device, buf.into_boxed_slice(), 1600);
     }
 }
 
