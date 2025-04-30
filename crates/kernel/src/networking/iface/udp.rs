@@ -2,7 +2,7 @@ use crate::networking::iface::*;
 use crate::networking::repr::*;
 use crate::networking::socket::SockType;
 use crate::networking::socket::SocketAddr;
-use crate::networking::{Result, Error};
+use crate::networking::{Error, Result};
 
 use crate::event::task;
 
@@ -45,7 +45,7 @@ pub fn recv_udp_packet(interface: &mut Interface, ipv4_packet: Ipv4Packet) -> Re
     };
 
     // let mut sockets = interface.sockets.lock();
-    
+
     for (_, socket) in interface.sockets.iter_mut() {
         if socket.binding_equals(local_socket_addr) {
             let (stype, mut tx) = socket.get_send_ref();

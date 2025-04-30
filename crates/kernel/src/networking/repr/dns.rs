@@ -1,9 +1,9 @@
-use alloc::vec::Vec;
-use alloc::vec;
-use alloc::string::String;
-use crate::networking::{Error, Result};
-use byteorder::{ByteOrder, NetworkEndian};
 use crate::networking::repr::Ipv4Address;
+use crate::networking::{Error, Result};
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
+use byteorder::{ByteOrder, NetworkEndian};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DnsHeader {
@@ -38,24 +38,23 @@ pub struct Packet {
     pub answers: Vec<DnsRecord>,
     pub authorities: Vec<DnsRecord>,
     pub additionals: Vec<DnsRecord>,
-    pub ip: Ipv4Address,
 }
 
 impl Packet {
     pub fn create_dns_query(domain: &str) -> Self {
         let header = DnsHeader {
             id: 0x1337,
-            flags: 0x0100,      // Standard query (QR=0), recursion desired (RD=1)
-            qdcount: 1,         // One question
-            ancount: 0,         // No answers initially
-            nscount: 0,         // No authorities initially
-            arcount: 0,         // No additionals initially
+            flags: 0x0100, // Standard query (QR=0), recursion desired (RD=1)
+            qdcount: 1,    // One question
+            ancount: 0,    // No answers initially
+            nscount: 0,    // No authorities initially
+            arcount: 0,    // No additionals initially
         };
 
         let question = DnsQuestion {
             qname: String::from(domain),
-            qtype: 1,   // Type A (IPv4 address)
-            qclass: 1,  // Class IN (Internet)
+            qtype: 1,  // Type A (IPv4 address)
+            qclass: 1, // Class IN (Internet)
         };
 
         Packet {
@@ -64,21 +63,24 @@ impl Packet {
             answers: Vec::new(),
             authorities: Vec::new(),
             additionals: Vec::new(),
-            ip: Ipv4Address::empty(),
         }
     }
 
     pub fn extract_ip_address(&self) -> Option<Ipv4Address> {
         for record in &self.answers {
             if record.rtype == 1 && record.rdata.len() == 4 {
-                let ip = Ipv4Address::new([record.rdata[0], record.rdata[1], record.rdata[2], record.rdata[3]]);
+                let ip = Ipv4Address::new([
+                    record.rdata[0],
+                    record.rdata[1],
+                    record.rdata[2],
+                    record.rdata[3],
+                ]);
                 return Some(ip);
             }
         }
 
-        Some(self.ip)
+        return None;
     }
-
 
     pub fn deserialize(buffer: &[u8]) -> Result<Self> {
         if buffer.len() < 12 {
@@ -92,50 +94,59 @@ impl Packet {
         let nscount = NetworkEndian::read_u16(&buffer[8..10]);
         let arcount = NetworkEndian::read_u16(&buffer[10..12]);
 
-        // let mut offset = 12;
-        // let mut questions = Vec::new();
-        // for _ in 0..qdcount {
-        //     let (qname, next_offset) = read_qname(buffer, offset)?;
-        //     offset = next_offset;
-        //     if offset + 4 > buffer.len() {
-        //         return Err(Error::Malformed);
-        //     }
-        //     let qtype = NetworkEndian::read_u16(&buffer[offset..offset+2]);
-        //     let qclass = NetworkEndian::read_u16(&buffer[offset+2..offset+4]);
-        //     offset += 4;
-        //     questions.push(DnsQuestion { qname, qtype, qclass });
-        // }
-        //
-        // let mut answers = Vec::new();
-        // for _ in 0..ancount {
-        //     println!("\t[!]ANSWER offset {}", offset );
-        //     let (record, next_offset) = read_record(buffer, offset)?;
-        //     answers.push(record);
-        //     offset = next_offset;
-        // }
-        //
-        // let mut authorities = Vec::new();
-        // for _ in 0..nscount {
-        //     let (record, next_offset) = read_record(buffer, offset)?;
-        //     authorities.push(record);
-        //     offset = next_offset;
-        // }
-        //
-        // let mut additionals = Vec::new();
-        // for _ in 0..arcount {
-        //     let (record, next_offset) = read_record(buffer, offset)?;
-        //     additionals.push(record);
-        //     offset = next_offset;
-        // }
+        let mut offset = 12;
+        let mut questions = Vec::new();
+        for _ in 0..qdcount {
+            let (qname, next_offset) = read_qname(buffer, offset)?;
+            offset = next_offset;
+            if offset + 4 > buffer.len() {
+                return Err(Error::Malformed);
+            }
+            let qtype = NetworkEndian::read_u16(&buffer[offset..offset + 2]);
+            let qclass = NetworkEndian::read_u16(&buffer[offset + 2..offset + 4]);
+            offset += 4;
+            questions.push(DnsQuestion {
+                qname,
+                qtype,
+                qclass,
+            });
+        }
 
-        let len = buffer.len();
+        let mut answers = Vec::new();
+        for _ in 0..ancount {
+            println!("\t[!]ANSWER offset {}", offset);
+            let (record, next_offset) = read_record(buffer, offset)?;
+            answers.push(record);
+            offset = next_offset;
+        }
+
+        let mut authorities = Vec::new();
+        for _ in 0..nscount {
+            let (record, next_offset) = read_record(buffer, offset)?;
+            authorities.push(record);
+            offset = next_offset;
+        }
+
+        let mut additionals = Vec::new();
+        for _ in 0..arcount {
+            let (record, next_offset) = read_record(buffer, offset)?;
+            additionals.push(record);
+            offset = next_offset;
+        }
+
         Ok(Packet {
-            header: DnsHeader { id, flags, qdcount, ancount, nscount, arcount },
-            questions: Vec::new(),
-            answers: Vec::new(),
-            authorities: Vec::new(),
-            additionals: Vec::new(),
-            ip: Ipv4Address::new([buffer[len-4], buffer[len-3], buffer[len-2], buffer[len-1]]),
+            header: DnsHeader {
+                id,
+                flags,
+                qdcount,
+                ancount,
+                nscount,
+                arcount,
+            },
+            questions,
+            answers,
+            authorities,
+            additionals,
         })
     }
 
@@ -175,24 +186,49 @@ impl Packet {
 
 fn read_qname(buffer: &[u8], mut offset: usize) -> Result<(String, usize)> {
     let mut labels = Vec::new();
+    let mut jumped = false;
+    let original_offset = offset;
+
     loop {
         if offset >= buffer.len() {
             return Err(Error::Malformed);
         }
-        let len = buffer[offset] as usize;
-        offset += 1;
-        if len == 0 {
-            break;
-        }
-        if offset + len > buffer.len() {
-            return Err(Error::Malformed);
-        }
 
-        let label = core::str::from_utf8(&buffer[offset..offset+len]).map_err(|_| Error::Malformed)?;
-        labels.push(String::from(label));
-        offset += len;
+        let len = buffer[offset];
+        if len & 0xC0 == 0xC0 {
+            // Pointer to another location
+            if offset + 1 >= buffer.len() {
+                return Err(Error::Malformed);
+            }
+            let pointer = (((len & 0x3F) as usize) << 8) | buffer[offset + 1] as usize;
+            if pointer >= buffer.len() {
+                return Err(Error::Malformed);
+            }
+            let (suffix, _) = read_qname(buffer, pointer)?;
+            labels.push(suffix);
+            offset += 2;
+            jumped = true;
+            break;
+        } else if len == 0 {
+            offset += 1;
+            break;
+        } else {
+            offset += 1;
+            if offset + len as usize > buffer.len() {
+                return Err(Error::Malformed);
+            }
+            let label = core::str::from_utf8(&buffer[offset..offset + len as usize])
+                .map_err(|_| Error::Malformed)?;
+            labels.push(String::from(label));
+            offset += len as usize;
+        }
     }
-    Ok((labels.join("."), offset))
+
+    if !jumped {
+        Ok((labels.join("."), offset))
+    } else {
+        Ok((labels.join("."), original_offset + 2)) // after pointer
+    }
 }
 
 fn write_qname(buffer: &mut Vec<u8>, name: &str) {
@@ -206,26 +242,32 @@ fn write_qname(buffer: &mut Vec<u8>, name: &str) {
 fn read_record(buffer: &[u8], offset: usize) -> Result<(DnsRecord, usize)> {
     let (name, mut pos) = read_qname(buffer, offset)?;
     if pos + 10 > buffer.len() {
-    println!("malformed ");
+        println!("malformed ");
         return Err(Error::Malformed);
     }
-    let rtype = NetworkEndian::read_u16(&buffer[pos..pos+2]);
-    let rclass = NetworkEndian::read_u16(&buffer[pos+2..pos+4]);
-    let ttl = NetworkEndian::read_u32(&buffer[pos+4..pos+8]);
-    let rdlength = NetworkEndian::read_u16(&buffer[pos+8..pos+10]) as usize;
+    let rtype = NetworkEndian::read_u16(&buffer[pos..pos + 2]);
+    let rclass = NetworkEndian::read_u16(&buffer[pos + 2..pos + 4]);
+    let ttl = NetworkEndian::read_u32(&buffer[pos + 4..pos + 8]);
+    let rdlength = NetworkEndian::read_u16(&buffer[pos + 8..pos + 10]) as usize;
     pos += 10;
 
     if pos + rdlength > buffer.len() {
-    println!("malformed ");
+        println!("malformed ");
         return Err(Error::Malformed);
     }
-    let rdata = buffer[pos..pos+rdlength].to_vec();
+    let rdata = buffer[pos..pos + rdlength].to_vec();
     pos += rdlength;
 
     println!("made it");
 
     Ok((
-        DnsRecord { name, rtype, rclass, ttl, rdata },
+        DnsRecord {
+            name,
+            rtype,
+            rclass,
+            ttl,
+            rdata,
+        },
         pos,
     ))
 }
@@ -240,4 +282,3 @@ fn write_record(buffer: &mut Vec<u8>, record: &DnsRecord) {
     buffer.extend_from_slice(&rinfo);
     buffer.extend_from_slice(&record.rdata);
 }
-

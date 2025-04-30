@@ -1,6 +1,4 @@
 use crate::device::system_timer;
-use crate::ringbuffer::channel;
-use crate::event::task::spawn_async;
 
 use crate::device::usb::device::net::get_interface_mut;
 use crate::networking::iface::Interface;
@@ -89,12 +87,12 @@ impl Dhcpd {
         self.state = DhcpState::Discovering;
         self.last_action_time = time;
 
-        send_dhcp_discover(interface, self.udp_socket, self.xid).await;
+        let _ = send_dhcp_discover(interface, self.udp_socket, self.xid).await;
 
         while self.state != DhcpState::Bound {
             let r = recv_from(self.udp_socket).await;
             let (payload, _) = r.unwrap();
-            self.process_dhcp_packet(interface, payload).await;
+            let _ = self.process_dhcp_packet(interface, payload).await;
         }
 
         Ok(())
@@ -110,7 +108,8 @@ impl Dhcpd {
 
         if let (Some(server_id), Some(offered_ip)) = (self.server_identifier, self.offered_ip) {
             let result =
-                send_dhcp_release(interface, self.xid, offered_ip, server_id, self.udp_socket).await;
+                send_dhcp_release(interface, self.xid, offered_ip, server_id, self.udp_socket)
+                    .await;
             self.state = DhcpState::Released;
             result
         } else {
@@ -145,7 +144,8 @@ impl Dhcpd {
                     self.last_action_time = system_timer::get_time();
                     self.retries = DEFAULT_LEASE_RETRY;
 
-                    send_dhcp_request(interface, self.xid, offered_ip, server_id, self.udp_socket).await?;
+                    send_dhcp_request(interface, self.xid, offered_ip, server_id, self.udp_socket)
+                        .await?;
                     // send_dhcp_packet_workaround(interface, self.xid, offered_ip, server_id, packet)?;
                 } else {
                     return Err(Error::Malformed);
@@ -405,7 +405,11 @@ pub async fn send_dhcp_release(
     send_dhcp_packet_unicast(interface, socketfd, &packet, server_id).await
 }
 
-async fn send_dhcp_packet(interface: &mut Interface, socketfd: u16, packet: &DhcpPacket) -> Result<()> {
+async fn send_dhcp_packet(
+    interface: &mut Interface,
+    socketfd: u16,
+    packet: &DhcpPacket,
+) -> Result<()> {
     let data = packet.serialize();
     let saddr = SocketAddr {
         addr: interface.ipv4_addr.broadcast(),
