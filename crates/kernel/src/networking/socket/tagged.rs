@@ -1,5 +1,4 @@
-use crate::networking::iface::Interface;
-use crate::networking::socket::{SocketAddr, TcpSocket, UdpSocket, SockType};
+use crate::networking::socket::{SockType, SocketAddr, TcpSocket, UdpSocket};
 use crate::networking::{Error, Result};
 
 use crate::device::usb::device::net::get_interface_mut;
@@ -54,7 +53,9 @@ impl TaggedSocket {
             // TaggedSocket::Raw(socket) => socket.queue_recv(payload, saddr),
             TaggedSocket::Udp(socket) => socket.recv_enqueue(payload, saddr).await,
             TaggedSocket::Tcp(socket) => {
-                socket.recv_enqueue(seq_num, ack_num, flags, window_size, payload, saddr).await
+                socket
+                    .recv_enqueue(seq_num, ack_num, flags, window_size, payload, saddr)
+                    .await
             }
         }
     }

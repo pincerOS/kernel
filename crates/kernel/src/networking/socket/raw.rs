@@ -1,12 +1,11 @@
-use crate::networking::repr::Ipv4Protocol;
-use crate::networking::utils::{ring::Ring, slice::Slice};
+use crate::device::usb::device::net::get_interface_mut;
 use crate::networking::iface::ipv4;
 use crate::networking::iface::Interface;
-use crate::device::usb::device::net::get_interface_mut;
-use crate::networking::{Result, Error};
-use crate::ringbuffer::{channel, Sender, Receiver};
-use crate::networking::socket::tagged::{TaggedSocket, BUFFER_LEN};
-use crate::networking::socket::{SocketAddr, SockType};
+use crate::networking::repr::Ipv4Protocol;
+use crate::networking::socket::tagged::BUFFER_LEN;
+use crate::networking::socket::{SockType, SocketAddr};
+use crate::networking::{Error, Result};
+use crate::ringbuffer::{channel, Receiver, Sender};
 
 use alloc::vec::Vec;
 
@@ -26,9 +25,7 @@ pub struct RawSocket {
 }
 
 impl RawSocket {
-    pub fn new(
-        raw_type: RawType,
-    ) -> RawSocket {
+    pub fn new(raw_type: RawType) -> RawSocket {
         let (recv_tx, recv_rx) = channel::<BUFFER_LEN, (Vec<u8>, SocketAddr)>();
         let interface = get_interface_mut();
         RawSocket {
@@ -60,7 +57,12 @@ impl RawSocket {
         self.binding = bind_addr;
     }
 
-    pub async fn send_enqueue(&mut self, payload: Vec<u8>, proto: Ipv4Protocol, dest: SocketAddr) -> Result<()> {
+    pub async fn send_enqueue(
+        &mut self,
+        payload: Vec<u8>,
+        proto: Ipv4Protocol,
+        dest: SocketAddr,
+    ) -> Result<()> {
         println!("enqueud send");
         let interface = get_interface_mut();
 

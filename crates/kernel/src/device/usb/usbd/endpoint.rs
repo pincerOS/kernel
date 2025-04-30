@@ -8,9 +8,13 @@
  */
 use crate::device::usb;
 
+use crate::device::system_timer::micro_delay;
+use crate::device::usb::hcd::dwc::dwc_otg;
 use crate::device::usb::hcd::dwc::dwc_otg::DwcActivateChannel;
 use crate::device::usb::hcd::dwc::dwc_otg::UpdateDwcOddFrame;
+use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCINT;
 use crate::device::usb::hcd::dwc::dwc_otgreg::HCINT_FRMOVRUN;
+use crate::device::usb::DwcDisableChannel;
 use crate::device::usb::UsbSendInterruptMessage;
 use usb::dwc_hub;
 use usb::hcd::dwc::dwc_otg::HcdUpdateTransferSize;
@@ -19,17 +23,15 @@ use usb::types::*;
 use usb::usbd::device::*;
 use usb::usbd::pipe::*;
 use usb::PacketId;
-use crate::device::usb::hcd::dwc::dwc_otg;
-use crate::device::usb::hcd::dwc::dwc_otgreg::DOTG_HCINT;
-use crate::device::usb::DwcDisableChannel;
-use crate::device::system_timer::micro_delay;
-
 
 use crate::event::task::spawn_async_rt;
-use crate::shutdown;
 use crate::sync::time::{interval, MissedTicks};
 
 use alloc::boxed::Box;
+
+// static mut NET_BUFFER_CUR_LEN: u32 = 0;
+static mut NET_BUFFER_LEN: u32 = 0;
+static mut NET_BUFFER_ACTIVE: bool = false;
 
 pub fn finish_bulk_endpoint_callback_in(
     endpoint: endpoint_descriptor,
@@ -39,7 +41,7 @@ pub fn finish_bulk_endpoint_callback_in(
     let device = unsafe { &mut *endpoint.device };
 
     let transfer_size = HcdUpdateTransferSize(device, channel);
-    let last_transfer = endpoint.buffer_length - transfer_size;
+    let mut last_transfer = endpoint.buffer_length - transfer_size;
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
 
     if hcint & HCINT_NAK != 0 {
@@ -55,8 +57,7 @@ pub fn finish_bulk_endpoint_callback_in(
             channel, hcint, last_transfer
         );
 
-        if last_transfer > 0 && (hcint & HCINT_CHHLTD == 0) && (hcint & HCINT_XFERCOMPL == 0)
-        {
+        if last_transfer > 0 && (hcint & HCINT_CHHLTD == 0) && (hcint & HCINT_XFERCOMPL == 0) {
             // DwcActivateChannel(channel);
 
             return false;
@@ -68,8 +69,8 @@ pub fn finish_bulk_endpoint_callback_in(
             // return true;
         }
     }
-        // return; // WARN: aaron said to comment this out
-    
+    // return; // WARN: aaron said to comment this out
+
     if hcint & HCINT_CHHLTD == 0 {
         panic!(
             "| Endpoint {} in: HCINT_CHHLTD not set, aborting. hcint: {:x} last transfer: {}",
@@ -90,6 +91,45 @@ pub fn finish_bulk_endpoint_callback_in(
     // unsafe {
     //     core::ptr::copy_nonoverlapping(dma_addr as *const u8, buffer, buffer_length as usize);
     // }
+
+    //assume rndis net bulk in
+    unsafe {
+        if !NET_BUFFER_ACTIVE {
+            use alloc::slice;
+            // let slice: &[u8] = unsafe { slice::from_raw_parts(dma_addr as *const u8, 16 as usize) };
+            let slice32: &[u32] = slice::from_raw_parts(dma_addr as *const u32, 4 as usize);
+            //print slice
+            // println!("| Net buffer: {:?}", slice);
+            // println!("| Net buffer 32: {:?}", slice32);
+            let _buffer32 = dma_addr as *const u32;
+
+            let rndis_len = slice32[3];
+            // let part1 = unsafe { buffer32.offset(0) } as u32;
+            // println!("| rndis 1 {}", part1);
+            // println!(
+            //     "| Net buffer length: {} rndis_len: {}",
+            //     last_transfer, rndis_len
+            // );
+            if rndis_len > last_transfer - 44 {
+                NET_BUFFER_ACTIVE = true;
+                NET_BUFFER_LEN = rndis_len;
+                //reenable channel
+                DwcActivateChannel(channel);
+                return false;
+            }
+            // println!("| NEt continue");
+        } else {
+            if last_transfer >= NET_BUFFER_LEN {
+                // println!("| NEt buffer finished length: {} NETBUFFER {}", last_transfer, NET_BUFFER_LEN);
+                NET_BUFFER_ACTIVE = false;
+                last_transfer = NET_BUFFER_LEN;
+            } else {
+                // println!("| Net buffer not yet active length: {} NETBUFFER {}", last_transfer, NET_BUFFER_LEN);
+                DwcActivateChannel(channel);
+                return false;
+            }
+        }
+    }
 
     //TODO: Perhaps update this to pass the direct dma buffer address instead of copying
     //      as it is likely that the callback will need to copy the data anyway
@@ -115,15 +155,23 @@ pub fn finish_bulk_endpoint_callback_out(
     let transfer_size = HcdUpdateTransferSize(device, channel);
     let last_transfer = endpoint.buffer_length - transfer_size;
 
-    println!("Bulk out transfer hcint {:x} , last transfer: {} ", hcint, last_transfer);
+    println!(
+        "Bulk out transfer hcint {:x} , last transfer: {} ",
+        hcint, last_transfer
+    );
     if hcint & HCINT_CHHLTD == 0 {
-        panic!("| Endpoint {}: HCINT_CHHLTD not set, aborting. bulk out hcint {:x}", channel, hcint);
+        panic!(
+            "| Endpoint {}: HCINT_CHHLTD not set, aborting. bulk out hcint {:x}",
+            channel, hcint
+        );
     }
 
     if hcint & HCINT_XFERCOMPL == 0 {
-        panic!("| Endpoint {}: HCINT_XFERCOMPL not set, aborting. bulk out hcint {:x}", channel, hcint);
+        panic!(
+            "| Endpoint {}: HCINT_XFERCOMPL not set, aborting. bulk out hcint {:x}",
+            channel, hcint
+        );
     }
-
 
     //Most Likely not going to be called but could be useful for cases where precise timing of when message gets off the system is needed
     let endpoint_device = device.driver_data.downcast::<UsbEndpointDevice>().unwrap();
@@ -177,7 +225,6 @@ pub fn finish_interrupt_endpoint_callback(
             hcint_nochhltd = dwc_otg::read_volatile(DOTG_HCINT(channel as usize));
             // return true;
         }
-
 
         hcint |= hcint_nochhltd;
     }

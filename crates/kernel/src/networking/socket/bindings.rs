@@ -4,11 +4,10 @@ use core::sync::atomic::{AtomicU16, Ordering};
 
 use alloc::vec::Vec;
 
-use crate::networking::repr::{DhcpPacket, DnsPacket, Ipv4Address};
+use crate::networking::repr::{DnsPacket, Ipv4Address};
 use crate::networking::{Error, Result};
 
 use crate::device::usb::device::net::{get_dhcpd_mut, get_interface_mut};
-use crate::event::task::spawn_async;
 
 use super::UdpSocket;
 
@@ -25,7 +24,7 @@ impl SocketAddr {
             port: 0,
         }
     }
-    
+
     pub async fn resolve(host: &str, port: u16) -> Self {
         let dhcp = get_dhcpd_mut();
         let dns_socket = UdpSocket::new();
@@ -38,14 +37,14 @@ impl SocketAddr {
             port: 53,
         };
 
-        send_to(dns_socket, dns_req.serialize(), saddr).await;
+        let _ = send_to(dns_socket, dns_req.serialize(), saddr).await;
 
         let (resp, _) = recv_from(dns_socket).await.unwrap();
         let dhcp_resp = DnsPacket::deserialize(&resp).unwrap();
 
         SocketAddr {
             addr: dhcp_resp.extract_ip_address().unwrap(),
-            port
+            port,
         }
     }
 }
@@ -60,7 +59,7 @@ impl Display for SocketAddr {
 pub enum SockType {
     UDP,
     TCP,
-    Raw
+    Raw,
 }
 
 // TODO: these technically runs out eventually lol need wrap around
@@ -72,7 +71,8 @@ pub async fn send_to(socketfd: u16, payload: Vec<u8>, saddr: SocketAddr) -> Resu
     // let mut sockets = interface.sockets.lock();
 
     // 1. check if socket fd is valid if not return error
-    let tagged_socket = interface.sockets
+    let tagged_socket = interface
+        .sockets
         .get_mut(&socketfd)
         .ok_or(Error::InvalidSocket(socketfd))?;
 
@@ -91,7 +91,8 @@ pub async fn recv_from(socketfd: u16) -> Result<(Vec<u8>, SocketAddr)> {
     let interface = get_interface_mut();
 
     // 1. check if a socketfd is valid if not return error
-    let tagged_socket = interface.sockets
+    let tagged_socket = interface
+        .sockets
         .get_mut(&socketfd)
         .ok_or(Error::InvalidSocket(socketfd))?;
 
@@ -101,7 +102,7 @@ pub async fn recv_from(socketfd: u16) -> Result<(Vec<u8>, SocketAddr)> {
     }
 
     // 3. blocking recv from socket recv queue
-    
+
     tagged_socket.recv().await
 }
 
@@ -110,7 +111,8 @@ pub async fn connect(socketfd: u16, saddr: SocketAddr) -> Result<()> {
     // let mut sockets = interface.sockets.lock();
 
     // 1. check if a socketfd is valid if not return error
-    let tagged_socket = interface.sockets
+    let tagged_socket = interface
+        .sockets
         .get_mut(&socketfd)
         .ok_or(Error::InvalidSocket(socketfd))?;
 
@@ -122,7 +124,8 @@ pub async fn listen(socketfd: u16, num_requests: usize) -> Result<()> {
     // 1.check if binded, if not error
     // let mut sockets = interface.sockets.lock();
 
-    let tagged_socket = interface.sockets
+    let tagged_socket = interface
+        .sockets
         .get_mut(&socketfd)
         .ok_or(Error::InvalidSocket(socketfd))?;
 
@@ -139,12 +142,13 @@ pub async fn accept(socketfd: u16) -> Result<u16> {
     // 1. if listener not started, error
     // let mut sockets = interface.sockets.lock();
 
-    let tagged_socket = interface.sockets
+    let tagged_socket = interface
+        .sockets
         .get_mut(&socketfd)
         .ok_or(Error::InvalidSocket(socketfd))?;
 
     // 2. accept 1 connection, error if no pending connections
-    tagged_socket.accept().await;
+    let _ = tagged_socket.accept().await;
     Ok(socketfd)
 }
 
@@ -153,7 +157,8 @@ pub async fn close(socketfd: u16) -> Result<()> {
     // 1. if listener not started, error
     // let mut sockets = interface.sockets.lock();
 
-    let tagged_socket = interface.sockets
+    let tagged_socket = interface
+        .sockets
         .get_mut(&socketfd)
         .ok_or(Error::InvalidSocket(socketfd))?;
 
@@ -176,7 +181,8 @@ pub fn bind(socketfd: u16, port: u16) -> Result<()> {
     }
 
     // 2. check if this is a valid socketfd
-    let tagged_socket = interface.sockets
+    let tagged_socket = interface
+        .sockets
         .get_mut(&socketfd)
         .ok_or(Error::InvalidSocket(socketfd))?;
 

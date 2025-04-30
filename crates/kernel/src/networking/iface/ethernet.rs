@@ -35,7 +35,7 @@ pub fn send_ethernet_frame(
 // pub static mut LEFT: u32 = 0;
 
 // recv ethernet frame from interface: parsed -> fwd to socket -> propogated up stack
-pub fn recv_ethernet_frame(interface: &mut Interface, eth_buffer: &[u8], len: u32) -> Result<()> {
+pub fn recv_ethernet_frame(interface: &mut Interface, eth_buffer: &[u8], _len: u32) -> Result<()> {
     // println!("[!] received ethernet frame");
     // println!("\t{:x?}", &eth_buffer[44..]);
 
@@ -57,13 +57,13 @@ pub fn recv_ethernet_frame(interface: &mut Interface, eth_buffer: &[u8], len: u3
     };
 
     // queue another recv to be run in the future
-    thread::thread(move || {
-        let buf = vec![0u8; 1500];
-        unsafe {
-            let device = &mut *NET_DEVICE.device.unwrap();
-            rndis_receive_packet(device, buf.into_boxed_slice(), 1500);
-        }
-    });
+    // thread::thread(move || {
+    //     let buf = vec![0u8; 1500];
+    //     unsafe {
+    //         let device = &mut *NET_DEVICE.device.unwrap();
+            
+    //     }
+    // });
 
     return result;
 }

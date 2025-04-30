@@ -1,7 +1,6 @@
-use alloc::string::{String, ToString};
-use alloc::vec;
-use alloc::vec::Vec;
 use crate::networking::{Error, Result};
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Method {
@@ -32,9 +31,18 @@ pub struct Packet {
 impl Packet {
     pub fn new(method: Method, host: &str, path: &str) -> Self {
         let mut headers = Vec::new();
-        headers.push(Header { name: "Host".to_string(), value: host.to_string() });
-        headers.push(Header { name: "User-Agent".to_string(), value: "curl/8.13.0".to_string() });
-        headers.push(Header { name: "Accept".to_string(), value: "*/*".to_string() });
+        headers.push(Header {
+            name: "Host".to_string(),
+            value: host.to_string(),
+        });
+        headers.push(Header {
+            name: "User-Agent".to_string(),
+            value: "curl/8.13.0".to_string(),
+        });
+        headers.push(Header {
+            name: "Accept".to_string(),
+            value: "*/*".to_string(),
+        });
         Packet {
             method,
             path: path.to_string(),
@@ -126,7 +134,8 @@ impl Packet {
             let header_line = &buffer[pos..header_end];
 
             if let Some(colon_pos) = header_line.iter().position(|&b| b == b':') {
-                let name = String::from_utf8(header_line[..colon_pos].to_vec()).map_err(|_| Error::Malformed)?;
+                let name = String::from_utf8(header_line[..colon_pos].to_vec())
+                    .map_err(|_| Error::Malformed)?;
                 let value = String::from_utf8(header_line[colon_pos + 1..].to_vec())
                     .map_err(|_| Error::Malformed)?
                     .trim()
@@ -195,4 +204,3 @@ fn split_ascii_whitespace(line: &[u8]) -> Vec<&[u8]> {
     }
     parts
 }
-

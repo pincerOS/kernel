@@ -1,21 +1,12 @@
 use crate::device::usb::device::net::get_interface_mut;
 use crate::networking::iface::{tcp, Interface};
-use crate::networking::repr::TcpPacket;
 use crate::networking::socket::bindings::{NEXT_EPHEMERAL, NEXT_SOCKETFD};
 use crate::networking::socket::tagged::{TaggedSocket, BUFFER_LEN};
-use crate::networking::socket::{SocketAddr, SockType};
-use crate::networking::utils::ring::Ring;
+use crate::networking::socket::{SockType, SocketAddr};
 use crate::networking::{Error, Result};
-use alloc::vec;
+use crate::ringbuffer::{channel, Receiver, Sender};
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
-use crate::ringbuffer::{channel, Sender, Receiver};
-
-fn new_ring_packet_buffer(capacity: usize) -> Ring<(Vec<u8>, SocketAddr)> {
-    let default_entry = (Vec::new(), SocketAddr::default());
-    let buffer = vec![default_entry; capacity];
-    Ring::from(buffer)
-}
 
 // flags
 pub const TCP_FLAG_FIN: u8 = 0x01;
@@ -54,7 +45,6 @@ pub struct TcpSocket {
     recv_rx: Receiver<BUFFER_LEN, (Vec<u8>, SocketAddr)>,
     // recvp_tx: Sender<BUFFER_LEN, (TcpPacket, SocketAddr)>,
     // recvp_rx: Receiver<BUFFER_LEN, (TcpPacket, SocketAddr)>,
-
     state: TcpState,
     remote_addr: Option<SocketAddr>,
     seq_number: u32,
@@ -82,8 +72,6 @@ impl TcpSocket {
             recv_rx,
             // recvp_tx,
             // recvp_rx,
-           
-
             state: TcpState::Closed,
             remote_addr: None,
             seq_number: INITIAL_SEQ_NUMBER,
@@ -94,7 +82,9 @@ impl TcpSocket {
 
         let socketfd = NEXT_SOCKETFD.fetch_add(1, Ordering::SeqCst);
         // let mut sockets = interface.sockets.lock();
-        interface.sockets.insert(socketfd, TaggedSocket::Tcp(socket));
+        interface
+            .sockets
+            .insert(socketfd, TaggedSocket::Tcp(socket));
         socketfd
     }
 
@@ -124,7 +114,11 @@ impl TcpSocket {
         self.binding = bind_addr;
     }
 
-    pub async fn listen(&mut self, interface: &mut Interface, num_max_requests: usize) -> Result<()> {
+    pub async fn listen(
+        &mut self,
+        interface: &mut Interface,
+        num_max_requests: usize,
+    ) -> Result<()> {
         println!("in listen");
         if !self.is_bound {
             // bind to ephemeral if not bound
@@ -176,19 +170,19 @@ impl TcpSocket {
         self.ack_number += 1;
         println!("ack number {}", self.ack_number);
 
-        tcp::send_tcp_packet(
+        let _ = tcp::send_tcp_packet(
             interface,
             self.binding.port,
             addr.port,
             self.seq_number,
-            self.ack_number, 
+            self.ack_number,
             TCP_FLAG_ACK | TCP_FLAG_SYN,
             self.window_size,
             addr.addr,
-            Vec::new(), 
+            Vec::new(),
         );
 
-        self.recv().await;
+        let _ = self.recv().await;
 
         self.state = TcpState::Established;
 
@@ -212,7 +206,7 @@ impl TcpSocket {
         self.remote_addr = Some(saddr);
 
         let flags = TCP_FLAG_SYN;
-        tcp::send_tcp_packet(
+        let _ = tcp::send_tcp_packet(
             interface,
             self.binding.port,
             saddr.port,
@@ -227,7 +221,7 @@ impl TcpSocket {
         self.state = TcpState::SynSent;
 
         println!("[!] sent syn");
-        
+
         let _ = self.recv().await?;
 
         Ok(())
@@ -247,20 +241,20 @@ impl TcpSocket {
         // }
 
         let interface = get_interface_mut();
-        tcp::send_tcp_packet(
-            interface, 
-            self.binding.port, 
-            dest.port, 
-            self.seq_number, 
-            self.ack_number, 
-            // TCP_FLAG_PSH | TCP_FLAG_ACK, 
-            TCP_FLAG_ACK, 
-            self.window_size, 
-            dest.addr, 
-            payload
+        let _ = tcp::send_tcp_packet(
+            interface,
+            self.binding.port,
+            dest.port,
+            self.seq_number,
+            self.ack_number,
+            // TCP_FLAG_PSH | TCP_FLAG_ACK,
+            TCP_FLAG_ACK,
+            self.window_size,
+            dest.addr,
+            payload,
         );
 
-        self.recv().await;
+        let _ = self.recv().await;
 
         Ok(())
     }
@@ -278,7 +272,7 @@ impl TcpSocket {
         let seq_number = u32::from_le_bytes([last[0], last[1], last[2], last[3]]);
 
         payload.truncate(payload.len().saturating_sub(11)); // get rid of context bytes
-        
+
         match self.state {
             TcpState::SynSent => {
                 if flags & TCP_FLAG_RST != 0 {
@@ -301,12 +295,12 @@ impl TcpSocket {
 
                     self.state = TcpState::Established;
                 }
-
             }
             TcpState::FinWait1 => {
                 if flags & TCP_FLAG_ACK != 0 {
                     // Our FIN was acknowledged
-                    if flags & TCP_FLAG_FIN != 0 {        // Simultaneous FIN-ACK
+                    if flags & TCP_FLAG_FIN != 0 {
+                        // Simultaneous FIN-ACK
                         self.ack_number = seq_number + 1;
 
                         // Send ACK for their FIN
@@ -330,7 +324,7 @@ impl TcpSocket {
                         self.state = TcpState::FinWait2;
                     }
                 }
-            },
+            }
             TcpState::FinWait2 => {
                 if flags & TCP_FLAG_FIN != 0 {
                     self.ack_number = seq_number + 1;
@@ -351,14 +345,14 @@ impl TcpSocket {
 
                     self.state = TcpState::TimeWait;
                 }
-            },
+            }
             TcpState::LastAck => {
                 if flags & TCP_FLAG_ACK != 0 {
                     self.state = TcpState::Closed;
                     self.connected = false;
                     self.remote_addr = None;
                 }
-            },
+            }
             TcpState::Established => {
                 let interface = get_interface_mut();
 
@@ -366,16 +360,16 @@ impl TcpSocket {
                     self.state = TcpState::Closed;
 
                     self.ack_number += 1;
-                    tcp::send_tcp_packet(
-                        interface, 
-                        self.binding.port, 
-                        addr.port, 
-                        self.seq_number, 
-                        self.ack_number, 
-                        TCP_FLAG_ACK, 
-                        self.window_size, 
-                        addr.addr, 
-                        Vec::new()
+                    let _ = tcp::send_tcp_packet(
+                        interface,
+                        self.binding.port,
+                        addr.port,
+                        self.seq_number,
+                        self.ack_number,
+                        TCP_FLAG_ACK,
+                        self.window_size,
+                        addr.addr,
+                        Vec::new(),
                     );
 
                     return Err(Error::Closed);
@@ -384,24 +378,24 @@ impl TcpSocket {
                 if payload.len() > 0 {
                     self.ack_number += payload.len() as u32;
                     self.seq_number += 1;
-                    tcp::send_tcp_packet(
-                        interface, 
-                        self.binding.port, 
-                        addr.port, 
-                        self.seq_number, 
-                        self.ack_number, 
-                        TCP_FLAG_ACK, 
-                        self.window_size, 
-                        addr.addr, 
-                        Vec::new()
+                    let _ = tcp::send_tcp_packet(
+                        interface,
+                        self.binding.port,
+                        addr.port,
+                        self.seq_number,
+                        self.ack_number,
+                        TCP_FLAG_ACK,
+                        self.window_size,
+                        addr.addr,
+                        Vec::new(),
                     );
                 } else {
                     let old_seq = self.seq_number;
                     self.seq_number = ack_number;
                     self.ack_number = old_seq + payload.len() as u32;
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         }
 
         Ok((payload, addr))
@@ -428,10 +422,9 @@ impl TcpSocket {
         payload_with_context.extend_from_slice(&ack_number.to_le_bytes());
         payload_with_context.push(flags);
         payload_with_context.extend_from_slice(&window_size.to_le_bytes());
-        
+
         self.recv_tx.send((payload_with_context, sender)).await;
         Ok(())
-
     }
 
     // Returns the number of packets enqueued for sending.
@@ -468,10 +461,10 @@ impl TcpSocket {
                     self.state = TcpState::FinWait1;
                 }
 
-                self.recv().await;
+                let _ = self.recv().await;
 
                 if self.state == TcpState::FinWait2 {
-                    self.recv().await;
+                    let _ = self.recv().await;
                 }
 
                 Ok(())
