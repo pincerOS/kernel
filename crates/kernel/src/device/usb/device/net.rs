@@ -8,7 +8,6 @@ use super::super::usbd::device::*;
  */
 use core::slice;
 
-use crate::device::usb::hcd::dwc::dwc_otg::DwcActivateChannel;
 use crate::networking::iface::*;
 use crate::networking::repr::*;
 

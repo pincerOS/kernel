@@ -3,9 +3,9 @@ use crate::networking::iface::udp;
 use crate::networking::iface::Interface;
 use crate::networking::socket::bindings::NEXT_SOCKETFD;
 use crate::networking::socket::tagged::{TaggedSocket, BUFFER_LEN};
-use crate::networking::socket::{SocketAddr, SockType};
-use crate::ringbuffer::{channel, Sender, Receiver};
+use crate::networking::socket::{SockType, SocketAddr};
 use crate::networking::{Error, Result};
+use crate::ringbuffer::{channel, Receiver, Sender};
 
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
@@ -23,7 +23,7 @@ pub struct UdpSocket {
 impl UdpSocket {
     pub fn new() -> u16 {
         let interface = get_interface_mut();
-        
+
         // let (send_tx, send_rx) = channel::<UDP_BUFFER_LEN, (Vec<u8>, SocketAddr)>();
         let (recv_tx, recv_rx) = channel::<BUFFER_LEN, (Vec<u8>, SocketAddr)>();
 
@@ -41,7 +41,9 @@ impl UdpSocket {
 
         let socketfd = NEXT_SOCKETFD.fetch_add(1, Ordering::SeqCst);
         // let mut sockets = interface.sockets.lock();
-        interface.sockets.insert(socketfd, TaggedSocket::Udp(socket));
+        interface
+            .sockets
+            .insert(socketfd, TaggedSocket::Udp(socket));
 
         socketfd
     }

@@ -4,15 +4,23 @@
 extern crate alloc;
 extern crate kernel;
 
-use core::net::Ipv4Addr;
-
-use kernel::{device::usb::device::net::get_dhcpd_mut, event::{task, thread}, networking::{iface::icmp, repr::{HttpPacket, HttpMethod, IcmpPacket, Ipv4Address}, socket::RawSocket}, ringbuffer};
+#[allow(unused_imports)]
+use kernel::{
+    device::usb::device::net::get_dhcpd_mut,
+    event::{task, thread},
+    networking::{
+        iface::icmp,
+        repr::{HttpMethod, HttpPacket, IcmpPacket, Ipv4Address},
+        socket::RawSocket,
+        Result,
+    },
+    ringbuffer,
+};
 
 #[allow(unused_imports)]
 use kernel::networking::socket::{
-    bind, close, accept, listen, connect, recv_from, send_to, SocketAddr, TcpSocket, UdpSocket,
+    accept, bind, close, connect, listen, recv_from, send_to, SocketAddr, TcpSocket, UdpSocket,
 };
-use kernel::networking::Result;
 use kernel::*;
 
 use alloc::string::String;
@@ -30,7 +38,7 @@ async fn main() {
     println!("starting dhcpd");
 
     let dhcpd = get_dhcpd_mut();
-    dhcpd.start().await;
+    let _ = dhcpd.start().await;
 
     println!("out of dhcpd");
 
@@ -50,7 +58,6 @@ async fn main() {
     //     sync::spin_sleep(500_000);
     // }
 
-
     // [udp listening test]
     // println!("udp listening test");
     // let s = UdpSocket::new();
@@ -67,27 +74,25 @@ async fn main() {
     //
     // println!("end udp listening test");
 
-
     // [tcp send test]
-    println!("tcp send test");
-    let saddr = SocketAddr {
-        addr: Ipv4Address::new([10, 0, 2, 2]),
-        port: 1337,
-    };
-
-    let s = TcpSocket::new();
-    match connect(s, saddr).await {
-        Ok(_) => (),
-        Err(_) => println!("couldn't connect"),
-    };
-
-    for _i in 0..100 {
-        let _ = send_to(s, "hello everynyan\n".as_bytes().to_vec(), saddr).await;
-    }
-
-    close(s).await;
-    println!("tcp send test end");
-
+    // println!("tcp send test");
+    // let saddr = SocketAddr {
+    //     addr: Ipv4Address::new([10, 0, 2, 2]),
+    //     port: 1337,
+    // };
+    //
+    // let s = TcpSocket::new();
+    // match connect(s, saddr).await {
+    //     Ok(_) => (),
+    //     Err(_) => println!("couldn't connect"),
+    // };
+    //
+    // for _i in 0..100 {
+    //     let _ = send_to(s, "hello everynyan\n".as_bytes().to_vec(), saddr).await;
+    // }
+    //
+    // close(s).await;
+    // println!("tcp send test end");
 
     // [tcp recv test]
     // let s = TcpSocket::new();
@@ -111,31 +116,29 @@ async fn main() {
     // println!("got {} bytes", tot);
 
     // [http request test]
-    // println!("http send test");
-    // // let host = "http.badssl.com";
+    println!("http send test");
+    let host = "http.badssl.com";
     // let host = "http-textarea.badssl.com";
-    // // let host = "example.com";
-    // let saddr = SocketAddr::resolve(host, 80).await;
-    //
-    // let s = TcpSocket::new();
-    // match connect(s, saddr).await {
-    //     Ok(_) => (),
-    //     Err(_) => println!("couldn't connect"),
-    // };
-    //
-    // let path = "/";
-    // let http_req = HttpPacket::new(HttpMethod::Get, host, path);
-    // let _ = send_to(s, http_req.serialize(), saddr).await;
-    //
-    // let (resp, _) = recv_from(s).await.unwrap();
-    // 
-    //
-    // close(s).await;
-    //
-    // println!("response:\n{:?}", resp);
-    // println!("response:\n{:?}", String::from_utf8(resp));
-    // println!("http send test end");
-    
+    // let host = "httpforever.com";
+    let saddr = SocketAddr::resolve(host, 80).await;
+
+    let s = TcpSocket::new();
+    match connect(s, saddr).await {
+        Ok(_) => (),
+        Err(_) => println!("couldn't connect"),
+    };
+
+    let path = "/";
+    let http_req = HttpPacket::new(HttpMethod::Get, host, path);
+    let _ = send_to(s, http_req.serialize(), saddr).await;
+
+    let (resp, _) = recv_from(s).await.unwrap();
+
+    let _ = close(s).await;
+
+    println!("response:\n{:?}", resp);
+    println!("response:\n{:?}", String::from_utf8(resp));
+    println!("http send test end");
 
     shutdown();
 }

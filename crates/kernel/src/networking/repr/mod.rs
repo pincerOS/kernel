@@ -20,13 +20,13 @@
 mod arp;
 pub mod dev;
 mod dhcp;
+mod dns;
 mod ethernet;
+mod http;
 mod icmp;
 mod ipv4;
 mod tcp;
 mod udp;
-mod dns;
-mod http;
 
 pub use self::ethernet::{
     Address as EthernetAddress, EtherType as EthernetType, Frame as EthernetFrame,
@@ -47,7 +47,7 @@ pub use self::udp::Packet as UdpPacket;
 
 pub use self::dns::Packet as DnsPacket;
 
-pub use self::http::{Packet as HttpPacket, Method as HttpMethod};
+pub use self::http::{Method as HttpMethod, Packet as HttpPacket};
 
 pub use self::dhcp::{DhcpOption, DhcpParam, MessageType as DhcpMessageType, Packet as DhcpPacket};
 

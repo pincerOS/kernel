@@ -9,12 +9,10 @@
 use crate::device::system_timer;
 use crate::sync::SpinLock;
 
-use crate::networking::repr::{Device, EthernetAddress, Ipv4Address, Ipv4Cidr};
+use crate::networking::repr::{EthernetAddress, Ipv4Address, Ipv4Cidr};
 use crate::networking::socket::TaggedSocket;
 use crate::networking::utils::arp_cache::ArpCache;
 
-use alloc::boxed::Box;
-use alloc::sync::Arc;
 use alloc::collections::btree_map::BTreeMap;
 
 pub mod arp;
@@ -23,7 +21,6 @@ pub mod dhcp;
 pub mod ethernet;
 pub mod icmp;
 pub mod ipv4;
-pub mod socket;
 pub mod tcp;
 pub mod udp;
 
