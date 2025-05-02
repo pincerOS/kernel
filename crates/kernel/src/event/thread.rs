@@ -12,12 +12,16 @@ use super::{Event, SCHEDULER};
 /// while the thread isn't running, stores the saved register state of
 /// the thread.
 pub struct Thread {
+    //Pointer to the last context run on this thread. More documentation is offered below
     pub last_context: NonNull<Context>,
     pub stack: NonNull<[u128]>,
     // Stored on the thread's stack
     func: Option<NonNull<dyn Callback + Send>>,
 
     pub context: Option<Context>,
+    //Backup user context which stores the old context prior to the run of the handler
+    //This is necessary because we do not want to context to be modified inside of the handler
+    pub backup_context: Option<Context>,
     pub user_regs: Option<UserRegs>,
     pub process: Option<crate::process::ProcessRef>,
     pub priority: Priority,
@@ -74,6 +78,7 @@ impl Thread {
             last_context: NonNull::dangling(),
             func: None,
             context: Some(data),
+            backup_context: None,
             user_regs: Some(UserRegs {
                 ttbr0_el1: process.get_ttbr0(),
                 usermode: true,
@@ -118,6 +123,7 @@ impl Thread {
             last_context: context,
             func,
             context: None,
+            backup_context: None,
             user_regs: None,
             process: None,
             priority,
@@ -176,7 +182,14 @@ impl Thread {
         unsafe { crate::sync::disable_interrupts() };
 
         if let Some(user) = &self.user_regs {
-            let ctx = unsafe { &mut *next_ctx };
+            //If in handler, use backup context as to not modify regular context
+            let proc = self.process.unwrap().as_ref();
+            let ctx: &mut Context;
+            if proc.signal_flags.contains(crate::process::signal::SignalFlagOptions::IN_HANDLER) {
+                ctx = &mut self.backup_context.unwrap();
+            } else {
+                ctx = unsafe { &mut *next_ctx };
+            }
             unsafe { Self::restore_user_regs(user, ctx) };
         }
 

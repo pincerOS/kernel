@@ -122,6 +122,13 @@ syscall!(26 => pub fn sys_sem_create(value: usize) -> isize);
 syscall!(27 => pub fn sys_sem_up(fd: usize) -> isize);
 syscall!(28 => pub fn sys_sem_down(fd: usize) -> isize);
 
+syscall!(33 => pub fn sys_register_signal_handler(signal_number: usize, signal_handler: usize) -> isize);
+//Shouldn't return
+syscall!(34 => pub fn sys_sigreturn() -> isize);
+syscall!(35 => pub fn sys_kill(pid: usize) -> isize);
+syscall!(36 => pub fn sys_kill_unblockable(pid: usize) -> isize);
+
+
 /* * * * * * * * * * * * * * * * * * * */
 /* Syscall wrappers                    */
 /* * * * * * * * * * * * * * * * * * * */

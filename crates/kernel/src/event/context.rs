@@ -74,6 +74,7 @@ unsafe impl Sync for AllCores {}
 
 /// The register context of a thread.
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct Context {
     pub regs: [usize; 31],
     pub kernel_sp: usize,

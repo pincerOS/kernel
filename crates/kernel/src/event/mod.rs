@@ -10,6 +10,9 @@ use alloc::boxed::Box;
 use context::{deschedule_thread, Context, DescheduleAction, CORES};
 use scheduler::{Priority, Scheduler};
 
+use crate::process::signal::{SignalCode, SignalFlagOptions};
+use crate::syscall::proc::exit_user_thread;
+
 pub static SCHEDULER: Scheduler = Scheduler::new();
 
 pub struct Event {
@@ -69,6 +72,66 @@ pub unsafe extern "C" fn run_event_loop() -> ! {
                 func();
             }
             EventKind::ScheduleThread(thread) => {
+                
+                if thread.is_user_thread() {
+                    let proc = thread.process.as_ref().unwrap();
+
+                    //Cleanup, if not in handler then invalidate backup
+                    if !proc.signal_flags.contains(SignalFlagOptions::IN_HANDLER) && thread.backup_context.is_some() {
+                        thread.backup_context = None;
+                    }
+
+                    if proc.signal_flags.contains(SignalFlagOptions::IS_DEAD) {
+                        exit_user_thread(thread, SignalCode::KilledUnblockable);
+                    } else if proc.signal_flags.contains(SignalFlagOptions::IS_KILL) {
+                        
+                        if proc.signal_flags.contains(SignalFlagOptions::IN_HANDLER) {
+                            //Received kill while in another signal handler
+                            exit_user_thread(thread, SignalCode::InHandler);
+                        }
+
+                        if let Some(kill_block_handler) = proc.signal_handlers.kill_block_handler {
+                            //enter_thread will now use the backup context
+                            proc.signal_flags.set(SignalFlagOptions::IN_HANDLER, true);
+                            
+                            thread.backup_context = Some(thread.context.unwrap());
+                            //replacing link register with the address of the handler and the
+                            //the first two registers with the signal number and stack pointer
+                            thread.backup_context.unwrap().regs[0] = SignalCode::KilledBlockable as usize;
+                            thread.backup_context.unwrap().regs[30] = unsafe { core::mem::transmute::<fn(), usize>(kill_block_handler) };
+                            
+                            //It is up to sigreturn to remove handler status which will then
+                            //invalidate the secondary context
+
+                        } else {
+                            //No kill block handler registered
+                            exit_user_thread(thread, SignalCode::KilledBlockable);
+                        }
+                    } else if proc.signal_flags.contains(SignalFlagOptions::IS_PAGE_FAULT) {
+                        //There should be a nicer way to write this with less code duplication
+                        
+                        if proc.signal_flags.contains(SignalFlagOptions::IN_HANDLER) {
+                            //Received kill while in another signal handler
+                            exit_user_thread(thread, SignalCode::InHandler);
+                        }
+
+                        if let Some(page_fault_handler) = proc.signal_handlers.user_page_fault_handler {
+                            //enter_thread will now use the backup context
+                            proc.signal_flags.set(SignalFlagOptions::IN_HANDLER, true);
+                            
+                            thread.backup_context = Some(thread.context.unwrap());
+                            //replacing link register with the address of the handler and the
+                            //the first two registers with the signal number and stack pointer
+                            thread.backup_context.unwrap().regs[0] = SignalCode::PageFault as usize;
+                            thread.backup_context.unwrap().regs[30] = unsafe { core::mem::transmute::<fn(), usize>(page_fault_handler) };
+                            
+                        } else {
+                            //No page fault handler registed
+                            exit_user_thread(thread, SignalCode::PageFault);
+                        }
+                    }
+                }
+
                 unsafe { thread.enter_thread() };
             }
             EventKind::AsyncTask(task_id) => {

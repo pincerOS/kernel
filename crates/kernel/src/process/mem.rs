@@ -11,7 +11,7 @@ use crate::arch::memory::vmm::{
 use crate::event::async_handler::{run_async_handler, HandlerContext};
 use crate::event::context::Context;
 use crate::event::exceptions::DataAbortISS;
-use crate::process::signal::SignalFlags;
+use crate::process::signal::{SignalFlagOptions, SignalFlags};
 use crate::syscall::proc::exit_user_thread;
 
 use super::fd::ArcFd;
@@ -313,7 +313,7 @@ pub fn page_fault_handler(ctx: &mut Context, far: usize, _iss: DataAbortISS) -> 
     run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
         let proc = context.cur_process().unwrap();
         
-        if proc.signal_flags.contains(signal::SignalFlags::IN_HANDLER) {
+        if proc.signal_flags.contains(signal::SignalFlagOptions::IN_HANDLER) {
             println!("Page fault at addr {far:#10x} while in a signal handler");
         } 
 
@@ -326,9 +326,11 @@ pub fn page_fault_handler(ctx: &mut Context, far: usize, _iss: DataAbortISS) -> 
             None => {
                 
                 if let Some(user_page_fault_handler) = proc.signal_handlers.user_page_fault_handler {
-                    proc.signal_flags.set(SignalFlags::IN_HANDLER, true);
-                    //TODO: run page fault handler and plug in correct args
-                    proc.signal_flags.set(SignalFlags::IN_HANDLER, false);
+                    //The event loop handle the rest
+                    proc.signal_flags.set(SignalFlagOptions::IN_HANDLER, true);
+                    
+                    //It is up to sigreturn to remove handler status and invalidate the secondary
+                    //context
                 }
 
                 let exit_code = &proc.exit_code;
