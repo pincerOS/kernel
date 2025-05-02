@@ -13,6 +13,7 @@ extern "C" fn main(argc: usize, argv: *const *const u8) -> ! {
     let arg_bytes = arg.to_bytes();
     let arg_str = core::str::from_utf8(arg_bytes).unwrap();
 
+    println!("| ping: {}", arg_str);
     //Add ping to the kernel
 
     ulib::sys::exit(0);
