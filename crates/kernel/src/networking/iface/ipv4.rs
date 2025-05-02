@@ -4,6 +4,7 @@ use crate::networking::{Error, Result};
 
 use crate::device::usb::device::net::{get_dhcpd_mut, get_interface_mut};
 use crate::event::thread;
+use crate::sync;
 
 use alloc::vec::Vec;
 
@@ -30,6 +31,7 @@ pub fn send_ipv4_packet(
         Err(e) => {
             println!("failed to resolve ip, queuing another send, waiting for ARP");
             thread::thread(move || {
+                sync::spin_sleep(100_000);
                 let interface = get_interface_mut();
                 let _ = send_ipv4_packet(interface, payload, protocol, dst_addr);
             });
@@ -39,20 +41,18 @@ pub fn send_ipv4_packet(
 }
 
 pub fn recv_ip_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Result<()> {
-    println!("[!] received IP packet");
+    // println!("[!] received IP packet");
     let ipv4_packet = Ipv4Packet::deserialize(eth_frame.payload.as_slice())?;
     if !ipv4_packet.is_valid_checksum() {
         return Err(Error::Checksum);
     }
 
     let dhcpd = get_dhcpd_mut();
-    if dhcpd.is_transacting() {
-        return Err(Error::Ignored);
-    }
 
     if ipv4_packet.dst_addr != *interface.ipv4_addr
         && !interface.ipv4_addr.is_member(ipv4_packet.dst_addr)
         && !interface.ipv4_addr.is_broadcast(ipv4_packet.dst_addr)
+        && !dhcpd.is_transacting()
     {
         return Err(Error::Ignored);
     }
@@ -74,7 +74,7 @@ pub fn recv_ip_packet(interface: &mut Interface, eth_frame: EthernetFrame) -> Re
 // get next hop for a packet destined to a specified address.
 pub fn ipv4_addr_route(interface: &mut Interface, address: Ipv4Address) -> Ipv4Address {
     if interface.ipv4_addr.is_member(address) || interface.ipv4_addr.is_broadcast(address) {
-        println!("{} will be routed through link", address);
+        // println!("{} will be routed through link", address);
         address
     } else {
         println!("{} will be routed through default gateway", address);

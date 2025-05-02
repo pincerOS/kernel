@@ -63,6 +63,8 @@ pub struct UsbDriverDataHeader {
     pub data_size: u32,
 }
 
+unsafe impl Send for UsbDevice {}
+
 /// Structure to store the details of a detected USB device.
 #[repr(C)]
 pub struct UsbDevice {

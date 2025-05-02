@@ -49,7 +49,7 @@ impl Packet {
         let length = NetworkEndian::read_u16(&buf[4..6]);
         let checksum = NetworkEndian::read_u16(&buf[6..8]);
 
-        println!("length {} buf length {}", length, buf.len());
+        // println!("length {} buf length {}", length, buf.len());
         if length < 8 || buf.len() != length as usize {
             return Err(Error::Malformed);
         }

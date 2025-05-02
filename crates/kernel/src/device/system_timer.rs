@@ -357,14 +357,14 @@ pub struct ArmGenericTimer {
 }
 
 #[inline(always)]
-unsafe fn read_cntpct() -> u64 {
+pub unsafe fn read_cntpct() -> u64 {
     let cnt: u64;
     unsafe { asm!("mrs {}, cntpct_el0", out(reg) cnt, options(nomem, nostack, preserves_flags)) };
     cnt
 }
 
 #[inline(always)]
-unsafe fn read_cntfrq() -> u64 {
+pub unsafe fn read_cntfrq() -> u64 {
     let cnt: u64;
     unsafe { asm!("mrs {}, cntfrq_el0", out(reg) cnt, options(nomem, nostack, preserves_flags)) };
     cnt

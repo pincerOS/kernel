@@ -46,6 +46,7 @@ pub enum Error {
     Checksum,
     Timeout,
     NotImplemented,
+    Closed,
 }
 
 pub type Result<T> = CoreResult<T, Error>;

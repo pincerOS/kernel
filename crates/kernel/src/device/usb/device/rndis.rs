@@ -22,6 +22,30 @@ const ControlTimeoutPeriod: u32 = 10;
 #[allow(dead_code)]
 const KeepAliveTimeoutPeriod: u32 = 5;
 
+pub fn rndis_init(device: &mut UsbDevice) {
+    rndis_initialize_msg(device);
+
+    let mut buffer = [0u8; 52];
+
+    unsafe {
+        rndis_query_msg(
+            device,
+            OID::OID_GEN_CURRENT_PACKET_FILTER,
+            buffer.as_mut_ptr(),
+            30,
+        );
+
+        rndis_set_msg(device, OID::OID_GEN_CURRENT_PACKET_FILTER, 0xB);
+
+        rndis_query_msg(
+            device,
+            OID::OID_GEN_CURRENT_PACKET_FILTER,
+            buffer.as_mut_ptr(),
+            30,
+        );
+    }
+}
+
 pub fn rndis_initialize_msg(device: &mut UsbDevice) -> ResultCode {
     let buffer = &mut RndisInitializeMsg {
         message_type: 0x00000002,
@@ -29,7 +53,8 @@ pub fn rndis_initialize_msg(device: &mut UsbDevice) -> ResultCode {
         request_id: 0,
         major_version: 1,
         minor_version: 0,
-        max_transfer_size: 0x4000,
+        // max_transfer_size: 0x4000,
+        max_transfer_size: 1540,
     };
 
     let mut buffer_req = [0u8; 52];

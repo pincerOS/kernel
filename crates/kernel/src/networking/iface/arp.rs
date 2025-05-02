@@ -72,7 +72,7 @@ pub fn eth_addr_for_ip(
     match eth_addr {
         Some(eth_addr) => Ok(eth_addr),
         None => {
-            println!("address not found, sending ARP request for {}", ipv4_addr);
+            // println!("address not found, sending ARP request for {}", ipv4_addr);
             send_arp_packet(
                 interface,
                 ArpOperation::Request,
