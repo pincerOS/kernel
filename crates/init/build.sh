@@ -13,6 +13,9 @@ mkdir -p fs
 # ./ls.rs
 # cp ls.elf fs/
 
+./signals_test.rs
+cp signals_test.elf fs/
+
 cargo run -q -p initfs --bin util \
     -- create --compress --out fs.arc --root fs fs --verbose
 

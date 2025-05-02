@@ -8,11 +8,36 @@ pub struct SignalHandlers {
 
 //These numbers are somewhat based on the Linux signal numbers
 pub enum SignalCode {
-    InHandler = -1,
+    InHandler = u32::MAX as isize,
     Interrupt = 2,
-    KilledUnblockable = 9,
-    PageFault = -4, //For compatibility with page fault handler
-    KilledBlockable = 15,
+    KillUnblockable = 9,
+    PageFault = 11,
+    KillBlockable = 15,
+}
+
+impl From<u32> for SignalCode {
+    fn from(value: u32) -> SignalCode {
+        match value {
+            u32::MAX => SignalCode::InHandler,
+            2 => SignalCode::Interrupt,
+            9 => SignalCode::KillUnblockable,
+            11 => SignalCode::PageFault,
+            15 => SignalCode::KillBlockable,
+            _ => panic!("Failed to convert u32 {} into signal code", value),
+        }
+    }
+}
+
+impl From<SignalCode> for u32 {
+    fn from(value: SignalCode) -> u32 {
+        match value {
+            SignalCode::InHandler => u32::MAX,
+            SignalCode::Interrupt => 2,
+            SignalCode::KillUnblockable => 9,
+            SignalCode::PageFault => 11,
+            SignalCode::KillBlockable => 15,
+        }
+    }
 }
 
 //TODO: replace this with a queue
@@ -43,16 +68,16 @@ impl SignalFlags {
         return SignalFlags(AtomicU8::new(0));
     }
 
-    pub fn set(&self, option: SignalFlagOptions, val: bool) {
+    pub fn set(&self, flag: SignalFlagOptions, val: bool) {
         if val {
-            self.0.fetch_or(option as u8, Ordering::SeqCst);
+            self.0.fetch_or(flag.bits(), Ordering::SeqCst);
         } else {
-            self.0.fetch_and(!(option as u8), Ordering::SeqCst);
+            self.0.fetch_and(!flag.bits(), Ordering::SeqCst);
         }
     }
 
     pub fn contains(&self, flag: SignalFlagOptions) -> bool {
-        return self.0.load(Ordering::SeqCst) & (flag as u8);
+        return (self.0.load(Ordering::SeqCst) & flag.bits()) != 0;
     }
 }
 

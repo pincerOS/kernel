@@ -348,3 +348,40 @@ extern "C" fn exec_child(spawn_args: *const SpawnArgs) -> ! {
     // TODO: notify parent of spawn failure
     exit(1);
 }
+
+pub enum SignalCode {
+    Interrupt = 2,
+    KillUnblockable = 9,
+    PageFault = 11,
+    KillBlockable = 15,
+}
+
+impl From<u32> for SignalCode {
+    fn from(value: u32) -> SignalCode {
+        match value {
+            2 => SignalCode::Interrupt,
+            9 => SignalCode::KillUnblockable,
+            11 => SignalCode::PageFault,
+            15 => SignalCode::KillBlockable,
+            _ => panic!("Failed to convert u32 {} into signal code", value),
+        }
+    }
+}
+
+impl From<SignalCode> for u32 {
+    fn from(value: SignalCode) -> u32 {
+        match value {
+            SignalCode::Interrupt => 2,
+            SignalCode::KillUnblockable => 9,
+            SignalCode::PageFault => 11,
+            SignalCode::KillBlockable => 15,
+        }
+    }
+}
+
+//Currently the kernel only supports registering handlers for PageFault and KillBlockable
+pub unsafe fn register_signal_handler(code: SignalCode, handler: fn()) -> Result<usize, usize> {
+    let code_as_int: u32 = code.into();
+    let res = unsafe { sys_register_signal_handler(code_as_int as usize, core::mem::transmute::<fn(), usize>(handler)) };
+    int_to_error(res)
+}

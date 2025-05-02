@@ -183,13 +183,13 @@ impl Thread {
 
         if let Some(user) = &self.user_regs {
             //If in handler, use backup context as to not modify regular context
-            let proc = self.process.unwrap().as_ref();
-            let ctx: &mut Context;
-            if proc.signal_flags.contains(crate::process::signal::SignalFlagOptions::IN_HANDLER) {
-                ctx = &mut self.backup_context.unwrap();
+            let proc = self.process.as_ref().unwrap();
+            let ctx: &mut Context = if proc.signal_flags.contains(crate::process::signal::SignalFlagOptions::IN_HANDLER) {
+                &mut self.backup_context.unwrap()
             } else {
-                ctx = unsafe { &mut *next_ctx };
-            }
+                unsafe { &mut *next_ctx }
+            };
+
             unsafe { Self::restore_user_regs(user, ctx) };
         }
 

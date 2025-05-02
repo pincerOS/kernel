@@ -71,7 +71,7 @@ pub unsafe extern "C" fn run_event_loop() -> ! {
             EventKind::Function(func) => {
                 func();
             }
-            EventKind::ScheduleThread(thread) => {
+            EventKind::ScheduleThread(mut thread) => {
                 
                 if thread.is_user_thread() {
                     let proc = thread.process.as_ref().unwrap();
@@ -82,22 +82,22 @@ pub unsafe extern "C" fn run_event_loop() -> ! {
                     }
 
                     if proc.signal_flags.contains(SignalFlagOptions::IS_DEAD) {
-                        exit_user_thread(thread, SignalCode::KilledUnblockable);
+                        unsafe { exit_user_thread(thread, SignalCode::KillUnblockable.into()) };
                     } else if proc.signal_flags.contains(SignalFlagOptions::IS_KILL) {
                         
                         if proc.signal_flags.contains(SignalFlagOptions::IN_HANDLER) {
                             //Received kill while in another signal handler
-                            exit_user_thread(thread, SignalCode::InHandler);
+                            unsafe { exit_user_thread(thread, SignalCode::InHandler.into()) };
                         }
 
-                        if let Some(kill_block_handler) = proc.signal_handlers.kill_block_handler {
+                        if let Some(kill_block_handler) = proc.signal_handlers.lock().kill_block_handler {
                             //enter_thread will now use the backup context
                             proc.signal_flags.set(SignalFlagOptions::IN_HANDLER, true);
                             
                             thread.backup_context = Some(thread.context.unwrap());
                             //replacing link register with the address of the handler and the
                             //the first two registers with the signal number and stack pointer
-                            thread.backup_context.unwrap().regs[0] = SignalCode::KilledBlockable as usize;
+                            thread.backup_context.unwrap().regs[0] = SignalCode::KillBlockable as usize;
                             thread.backup_context.unwrap().regs[30] = unsafe { core::mem::transmute::<fn(), usize>(kill_block_handler) };
                             
                             //It is up to sigreturn to remove handler status which will then
@@ -105,17 +105,17 @@ pub unsafe extern "C" fn run_event_loop() -> ! {
 
                         } else {
                             //No kill block handler registered
-                            exit_user_thread(thread, SignalCode::KilledBlockable);
+                            unsafe { exit_user_thread(thread, SignalCode::KillBlockable.into()) };
                         }
                     } else if proc.signal_flags.contains(SignalFlagOptions::IS_PAGE_FAULT) {
                         //There should be a nicer way to write this with less code duplication
                         
                         if proc.signal_flags.contains(SignalFlagOptions::IN_HANDLER) {
                             //Received kill while in another signal handler
-                            exit_user_thread(thread, SignalCode::InHandler);
+                            unsafe { exit_user_thread(thread, SignalCode::InHandler.into()) };
                         }
 
-                        if let Some(page_fault_handler) = proc.signal_handlers.user_page_fault_handler {
+                        if let Some(page_fault_handler) = proc.signal_handlers.lock().user_page_fault_handler {
                             //enter_thread will now use the backup context
                             proc.signal_flags.set(SignalFlagOptions::IN_HANDLER, true);
                             
@@ -123,11 +123,12 @@ pub unsafe extern "C" fn run_event_loop() -> ! {
                             //replacing link register with the address of the handler and the
                             //the first two registers with the signal number and stack pointer
                             thread.backup_context.unwrap().regs[0] = SignalCode::PageFault as usize;
+                            //TODO: save the fault address into register 1
                             thread.backup_context.unwrap().regs[30] = unsafe { core::mem::transmute::<fn(), usize>(page_fault_handler) };
                             
                         } else {
                             //No page fault handler registed
-                            exit_user_thread(thread, SignalCode::PageFault);
+                            unsafe { exit_user_thread(thread, SignalCode::PageFault.into()) };
                         }
                     }
                 }

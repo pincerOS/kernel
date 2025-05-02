@@ -325,25 +325,28 @@ pub fn page_fault_handler(ctx: &mut Context, far: usize, _iss: DataAbortISS) -> 
         match vme {
             None => {
                 
-                if let Some(user_page_fault_handler) = proc.signal_handlers.user_page_fault_handler {
+                if let Some(_user_page_fault_handler) = proc.signal_handlers.lock().user_page_fault_handler {
                     //The event loop handle the rest
                     proc.signal_flags.set(SignalFlagOptions::IN_HANDLER, true);
                     
                     //It is up to sigreturn to remove handler status and invalidate the secondary
                     //context
+                    drop(mem);
+                    context.resume_final()
+                } else {
+
+                    let exit_code = &proc.exit_code;
+                    exit_code.set(crate::process::ExitStatus {
+                        status: signal::SignalCode::PageFault.into(),
+                    });
+                    drop(mem);
+
+                    println!("Invalid user access at addr {far:#10x}");
+                    println!("{:#?}", &*context.regs());
+
+                    let thread = context.detach_thread();
+                    unsafe { exit_user_thread(thread, -4i32 as u32) }
                 }
-
-                let exit_code = &proc.exit_code;
-                exit_code.set(crate::process::ExitStatus {
-                    status: -1i32 as u32,
-                });
-                drop(mem);
-
-                println!("Invalid user access at addr {far:#10x}");
-                println!("{:#?}", &*context.regs());
-
-                let thread = context.detach_thread();
-                unsafe { exit_user_thread(thread, -4i32 as u32) }
             }
             Some(vme) => {
                 mem.populate_page(vme, page_addr).await.unwrap(); // TODO: errors?

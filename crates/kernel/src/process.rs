@@ -23,7 +23,7 @@ pub struct Process {
     pub root: Option<fd::ArcFd>,
     pub file_descriptors: SpinLock<FileDescriptorList>,
     pub exit_code: Arc<BlockingOnceCell<ExitStatus>>,
-    pub signal_handlers: signal::SignalHandlers,
+    pub signal_handlers: SpinLock<signal::SignalHandlers>,
     pub signal_flags: signal::SignalFlags, // TODO: replace this with signal queue
 }
 
@@ -36,7 +36,7 @@ impl Process {
             root: None,
             file_descriptors: SpinLock::new(FileDescriptorList { desc: Vec::new() }),
             exit_code: Arc::new(BlockingOnceCell::new()),
-            signal_handlers: signal::SignalHandlers::new(),
+            signal_handlers: SpinLock::new(signal::SignalHandlers::new()),
             signal_flags: signal::SignalFlags::empty(),
         }
     }
@@ -66,6 +66,8 @@ impl Process {
             root: self.root.clone(),
             file_descriptors: SpinLock::new(new_fds),
             exit_code: Arc::new(BlockingOnceCell::new()),
+            signal_handlers: SpinLock::new(signal::SignalHandlers::new()),
+            signal_flags: signal::SignalFlags::empty(),
         };
 
         new_process
