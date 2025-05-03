@@ -6,7 +6,7 @@
   <br>PincerOS
 </h1>
   <p align="center">
-    Bare metal microkernel-based multi-core operating system written in Rust for the Raspberry Pi 4b.
+    Bare metal monolithic kernel multi-core operating system written in Rust for the Raspberry Pi 4B.
     <br />
     </p>
 </p>
@@ -58,9 +58,9 @@ PincerOS has the following key kernel components:
 ## Userspace Features
 PincerOS makes the following features and applications availabile in its userspace
 
-- ulib - a userspce library which provides user level applications with an API to use system calls
+- ulib - a userspace library which provides user level applications with an API to use system calls
 - Display Server - Allows for multiple processes to have graphical windows which simultaneously display content on a monitor. Please view the demo on the PincerOS blog to see the display sever in action for applications such as Doom, a drawing application, and more!
-- Shell - a user space shell with common utilities
+- Shell - a userspace shell with common utilities
 
 # Installation 📦
 Currently, the project can be tested on QEMU version 9.0 or higher. If your package manager doesn't have it, you will have to build QEMU from source.
