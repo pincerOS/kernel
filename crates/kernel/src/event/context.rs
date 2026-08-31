@@ -76,9 +76,36 @@ unsafe impl Sync for AllCores {}
 #[repr(C)]
 pub struct Context {
     pub regs: [usize; 31],
-    pub sp: usize,
+    /// Note: don't use this, use a helper method on HandlerContext
+    /// or an equivalent.  (This will always resolve to the kernel sp,
+    /// even for user threads.)
+    #[deprecated = "Don't use the context sp directly; use get_sp/set_sp"]
+    pub kernel_sp: usize,
     pub link_reg: usize,
     pub spsr: usize,
+}
+
+#[derive(Debug, PartialEq, PartialOrd)]
+pub enum ExceptionLevel {
+    EL0 = 0,
+    EL1 = 1,
+    EL2 = 2,
+    EL3 = 3,
+}
+
+impl Context {
+    pub fn current_el(&self) -> ExceptionLevel {
+        let m = self.spsr & 0b1111;
+        let el = m >> 2;
+        let _sp_el0 = (m & 1) == 0;
+        match el {
+            0 => ExceptionLevel::EL0,
+            1 => ExceptionLevel::EL1,
+            2 => ExceptionLevel::EL2,
+            3 => ExceptionLevel::EL3,
+            _ => unreachable!(),
+        }
+    }
 }
 
 type EventQueue = super::scheduler::Queue<Event>;
@@ -108,6 +135,10 @@ pub enum DescheduleAction {
 pub fn context_switch(mut action: SwitchAction) {
     let (core_sp, thread) = CORES.with_current(|core| (core.core_sp.get(), core.thread.take()));
     let thread = thread.expect("attempt to context switch from an event");
+    assert!(
+        thread.is_kernel_thread(),
+        "attempt to context switch with a user thread TCB"
+    );
     unsafe { asm_context_switch(Some(thread), Some(&mut action), core_sp) }
 }
 
@@ -127,7 +158,7 @@ pub unsafe fn enter_event_loop() -> ! {
 }
 
 #[allow(improper_ctypes)]
-extern "C" {
+unsafe extern "C" {
     fn asm_context_switch(
         src_thread: Option<Box<Thread>>,
         action: Option<&mut SwitchAction>,
@@ -238,7 +269,7 @@ asm_deschedule_thread:
 /// Run by [`asm_context_switch`] after it saves the context and switches
 /// to the per-core stack; it then moves the passed [`SwitchAction`] onto
 /// the local stack, and calls [`context_switch_inner`].
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn context_switch_callback(
     thread: Option<Box<Thread>>,
     action: Option<&mut SwitchAction>,
@@ -252,7 +283,7 @@ unsafe extern "C" fn context_switch_callback(
 
 /// Run by [`asm_deschedule_thread`] after it switches to the per-core
 /// stack; runs [`context_switch_inner`] with a translated action.
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn deschedule_thread_callback(
     thread: Option<Box<Thread>>,
     action: DescheduleAction,

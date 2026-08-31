@@ -8,7 +8,7 @@ impl core::fmt::Debug for InterruptsState {
     }
 }
 
-extern "C" {
+unsafe extern "C" {
     fn get_interrupts_asm() -> u64;
     fn set_interrupts_asm(state: u64);
     fn disable_interrupts_asm();

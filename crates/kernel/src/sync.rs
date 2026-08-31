@@ -4,6 +4,7 @@ mod condvar;
 pub mod handler_table;
 pub mod init;
 pub mod lock;
+pub mod once_cell;
 pub mod per_core;
 pub mod time;
 

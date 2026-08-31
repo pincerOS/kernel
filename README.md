@@ -115,6 +115,8 @@ This project is a collaboration between students at the University of Texas at A
 - Sasha Huang (@umbresp)
 - Slava Andrianov (@Slava-A1)
 
+
+This project also incorporates code from [CSUD](https://github.com/Chadderz121/csud/tree/master), made by Alex Chadwick and licensed under the MIT License (See CSUD_LICENSE for more details). CSUD was used as a base for the USB implementation and additional support of Interrupt & Bulk Endpoints were added on.
 # License 📝
 
 This project is licensed under the MIT License.

@@ -218,7 +218,7 @@ impl<'a> MappingIterator<'a> {
 }
 
 impl<'a> Mapping<'a> {
-    pub fn iter_ranges(&self) -> Option<impl ExactSizeIterator<Item = MapRangeField> + 'a> {
+    pub fn iter_ranges(&self) -> Option<impl ExactSizeIterator<Item = MapRangeField> + use<'a>> {
         let mapping = self.mapping?;
         let addr_cells = self.addr_cells as usize;
         let size_cells = self.size_cells as usize;

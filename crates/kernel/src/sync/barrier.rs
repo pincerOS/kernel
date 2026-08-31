@@ -60,3 +60,58 @@ impl Barrier {
         }
     }
 }
+
+test_case!(async async_barrier);
+async fn async_barrier() -> Result<(), crate::test::BoxError> {
+    use crate::event::task::spawn_async;
+    use alloc::sync::Arc;
+    use core::sync::atomic::{AtomicU32, Ordering};
+
+    let count = 16;
+    let barrier = Arc::new(Barrier::new(count + 1));
+    let reached = Arc::new(AtomicU32::new(0));
+
+    for i in 0..count {
+        let r = reached.clone();
+        let b: Arc<Barrier> = barrier.clone();
+        spawn_async(async move {
+            r.fetch_add(i, Ordering::SeqCst);
+            b.sync().await;
+        });
+    }
+
+    barrier.sync().await;
+    kassert_eq!(reached.load(Ordering::SeqCst), count * (count - 1) / 2)?;
+
+    Ok(())
+}
+
+// TODO: better built-in threaded tests
+test_case!(thread thread_barrier);
+fn thread_barrier() -> Result<(), crate::test::BoxError> {
+    use alloc::sync::Arc;
+    use core::sync::atomic::{AtomicU32, Ordering};
+
+    let count = 32;
+    let barrier = Arc::new(Barrier::new(count + 1));
+    let reached = Arc::new(AtomicU32::new(0));
+
+    for i in 0..count {
+        let r = reached.clone();
+        let b: Arc<Barrier> = barrier.clone();
+        crate::event::thread::thread(move || {
+            // println!("Starting thread {i}");
+            // TODO: non-spinning sleep
+            crate::sync::spin_sleep(100_000);
+            // println!("Ending thread {i}");
+
+            r.fetch_add(i, Ordering::SeqCst);
+            b.sync_blocking();
+        });
+    }
+    barrier.sync_blocking();
+    println!("End of preemption test");
+
+    kassert_eq!(reached.load(Ordering::SeqCst), count * (count - 1) / 2)?;
+    Ok(())
+}

@@ -1,55 +1,24 @@
-use core::num::NonZeroU32;
-
 use alloc::boxed::Box;
-use alloc::vec::Vec;
+use alloc::sync::Arc;
 
 use crate::event::async_handler::{run_async_handler, HandlerContext};
 use crate::event::context::Context;
+use crate::process::fd;
 use crate::ringbuffer;
 use crate::sync::SpinLock;
 
 // TODO: tracking ownership of objects
-pub struct ObjectDescriptor(core::num::NonZeroU32);
+
+// TODO: MPMC channels
+pub struct Channel {
+    pub send: SpinLock<ringbuffer::Sender<16, Message>>,
+    pub recv: SpinLock<ringbuffer::Receiver<16, Message>>,
+}
 
 pub struct Message {
     pub tag: u64,
-    pub objects: [Option<ObjectDescriptor>; 4],
+    pub objects: [Option<fd::ArcFd>; 4],
     pub data: Option<Box<[u8]>>,
-}
-
-pub enum Object {
-    Channel {
-        send: ringbuffer::Sender<16, Message>,
-        recv: ringbuffer::Receiver<16, Message>,
-    },
-}
-
-// TODO: this is a hack, move it to a per-task list & remap in messages
-pub static OBJECTS: SpinLock<Vec<Option<Object>>> = SpinLock::new(Vec::new());
-
-pub fn alloc_obj(obj: Object) -> ObjectDescriptor {
-    let mut list = OBJECTS.lock();
-    let idx = list.len();
-    list.push(Some(obj));
-    ObjectDescriptor(core::num::NonZeroU32::new(idx as u32).unwrap())
-}
-
-pub unsafe fn sys_channel(ctx: &mut Context) -> *mut Context {
-    let (a_tx, b_rx) = ringbuffer::channel();
-    let (b_tx, a_rx) = ringbuffer::channel();
-    let a_chan = alloc_obj(Object::Channel {
-        send: a_tx,
-        recv: a_rx,
-    });
-    let b_chan = alloc_obj(Object::Channel {
-        send: b_tx,
-        recv: b_rx,
-    });
-
-    ctx.regs[0] = a_chan.0.get() as usize;
-    ctx.regs[1] = b_chan.0.get() as usize;
-
-    ctx
 }
 
 #[repr(C)]
@@ -64,32 +33,49 @@ bitflags::bitflags! {
     }
 }
 
+pub unsafe fn sys_channel(ctx: &mut Context) -> *mut Context {
+    let (a_tx, b_rx) = ringbuffer::channel();
+    let (b_tx, a_rx) = ringbuffer::channel();
+    let a_chan = Channel {
+        send: SpinLock::new(a_tx),
+        recv: SpinLock::new(a_rx),
+    };
+    let b_chan = Channel {
+        send: SpinLock::new(b_tx),
+        recv: SpinLock::new(b_rx),
+    };
+
+    let proc = super::current_process().unwrap();
+
+    let mut guard = proc.file_descriptors.lock();
+    let a_fdi = guard.insert(Arc::new(a_chan));
+    let b_fdi = guard.insert(Arc::new(b_chan));
+
+    ctx.regs[0] = a_fdi;
+    ctx.regs[1] = b_fdi;
+    ctx
+}
+
 pub unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
-    let desc = ctx.regs[0];
+    let fd = ctx.regs[0];
     let msg_ptr = ctx.regs[1];
     let buf_ptr = ctx.regs[2];
     let buf_len = ctx.regs[3];
     let flags = SendRecvFlags::from_bits_truncate(ctx.regs[4] as u32);
 
     run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
-        let Some(desc) = NonZeroU32::new(desc as u32) else {
-            context.regs().regs[0] = -1isize as usize;
+        let proc = context.cur_process().unwrap();
+
+        let mut fds_guard = proc.file_descriptors.lock();
+        let file = fds_guard.get(fd).cloned();
+        let Some(file) = file else {
+            drop(fds_guard);
+            context.regs().regs[0] = i64::from(-1) as usize;
             return context.resume_final();
         };
-        let sender = OBJECTS
-            .lock()
-            .get_mut(desc.get() as usize)
-            .and_then(|d| match d.take() {
-                Some(Object::Channel { send, recv }) => Some((send, recv)),
-                obj => {
-                    *d = obj;
-                    None
-                }
-            });
-        let Some((mut send, recv)) = sender else {
-            // TODO: proper approach to mpsc channels?
-            println!("Skipping message, channel in-use or non-existant!");
-            context.regs().regs[0] = -1isize as usize;
+        let Some(sender) = file.as_any().downcast_ref::<Channel>() else {
+            drop(fds_guard);
+            context.regs().regs[0] = i64::from(-1) as usize;
             return context.resume_final();
         };
 
@@ -99,49 +85,58 @@ pub unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
             unsafe { core::ptr::read(msg_ptr) }
         });
 
-        // TODO: validate ownership of objects
-        let objects = user_message
-            .objects
-            .map(NonZeroU32::new)
-            .map(|d| d.map(ObjectDescriptor));
+        let mut objects = [const { None }; 4];
+        for (&desc, obj) in user_message.objects.iter().zip(&mut objects) {
+            if desc != u32::MAX {
+                let Some(fd) = fds_guard.remove(desc as usize) else {
+                    drop(fds_guard);
+                    context.regs().regs[0] = i64::from(-1) as usize;
+                    return context.resume_final();
+                };
+                *obj = Some(fd);
+            }
+        }
+
+        drop(fds_guard);
 
         let data;
         if buf_ptr == 0 {
             data = None;
         } else {
-            // TODO: validate memory region
-            let buf_ptr = buf_ptr as *const u8;
             let mut kbuf = Box::new_uninit_slice(buf_len);
-            let kbuf_ptr = kbuf.as_mut_ptr() as *mut u8;
-            unsafe {
-                core::ptr::copy_nonoverlapping(buf_ptr, kbuf_ptr, buf_len);
-            }
+            context.with_user_vmem(|| {
+                // TODO: validate memory region
+                let buf_ptr = buf_ptr as *const u8;
+                let kbuf_ptr = kbuf.as_mut_ptr() as *mut u8;
+                unsafe {
+                    core::ptr::copy_nonoverlapping(buf_ptr, kbuf_ptr, buf_len);
+                }
+            });
             data = Some(unsafe { kbuf.assume_init() });
         }
 
         let res;
         if flags.contains(SendRecvFlags::NO_BLOCK) {
-            let r = send.try_send(Message {
+            let msg = Message {
                 tag: user_message.tag,
                 objects,
                 data,
-            });
+            };
+            let r = sender.send.lock().try_send(msg);
             if r.is_err() {
                 res = -2isize as usize;
             } else {
                 res = 0;
             }
         } else {
-            send.send(Message {
+            let msg = Message {
                 tag: user_message.tag,
                 objects,
                 data,
-            })
-            .await;
+            };
+            sender.send.lock().send(msg).await;
             res = 0;
         }
-
-        OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
 
         context.regs().regs[0] = res;
         context.resume_final()
@@ -149,54 +144,53 @@ pub unsafe fn sys_send(ctx: &mut Context) -> *mut Context {
 }
 
 pub unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
-    let desc = ctx.regs[0];
+    let fd = ctx.regs[0];
     let msg_ptr = ctx.regs[1];
     let buf_ptr = ctx.regs[2];
     let buf_cap = ctx.regs[3];
     let flags = SendRecvFlags::from_bits_truncate(ctx.regs[4] as u32);
 
     run_async_handler(ctx, async move |mut context: HandlerContext<'_>| {
-        let Some(desc) = NonZeroU32::new(desc as u32) else {
-            context.regs().regs[0] = -1isize as usize;
+        let proc = context.cur_process().unwrap();
+
+        let file = proc.file_descriptors.lock().get(fd).cloned();
+        let Some(file) = file else {
+            context.regs().regs[0] = i64::from(-1) as usize;
             return context.resume_final();
         };
-        let receiver = OBJECTS
-            .lock()
-            .get_mut(desc.get() as usize)
-            .and_then(|d| match d.take() {
-                Some(Object::Channel { send, recv }) => Some((send, recv)),
-                obj => {
-                    *d = obj;
-                    None
-                }
-            });
-
-        let Some((send, mut recv)) = receiver else {
-            // TODO: proper approach to mpsc channels?
-            println!("Skipping message, channel in-use or non-existant!");
-            context.regs().regs[0] = -1isize as usize;
+        let Some(channel) = file.as_any().downcast_ref::<Channel>() else {
+            context.regs().regs[0] = i64::from(-1) as usize;
             return context.resume_final();
         };
 
         let message;
         if flags.contains(SendRecvFlags::NO_BLOCK) {
-            message = recv.try_recv();
+            message = channel.recv.lock().try_recv();
         } else {
-            message = Some(recv.recv().await);
+            message = Some(channel.recv.lock().recv().await);
         }
-
-        OBJECTS.lock()[desc.get() as usize] = Some(Object::Channel { send, recv });
 
         let Some(message) = message else {
             context.regs().regs[0] = -2isize as usize;
             return context.resume_final();
         };
 
+        let mut objects = [u32::MAX; 4];
+        {
+            let proc = context.cur_process().unwrap();
+            let mut fds_guard = proc.file_descriptors.lock();
+            for (object, fd) in message.objects.into_iter().zip(&mut objects) {
+                if let Some(obj) = object {
+                    let new_fd = fds_guard.insert(obj) as u32;
+                    *fd = new_fd;
+                }
+            }
+        }
+
         let user_message = UserMessage {
             tag: message.tag,
-            objects: message.objects.map(|s| s.map(|o| o.0.get()).unwrap_or(0)),
+            objects,
         };
-        // TODO: track ownership of objects
 
         let mut data_len = 0;
 
@@ -220,4 +214,37 @@ pub unsafe fn sys_recv(ctx: &mut Context) -> *mut Context {
         context.regs().regs[0] = data_len;
         context.resume_final()
     })
+}
+
+impl fd::FileDescriptor for Channel {
+    fn is_same_file(&self, other: &dyn fd::FileDescriptor) -> bool {
+        let other = other.as_any().downcast_ref::<Self>();
+        other.map(|o| core::ptr::eq(self, o)).unwrap_or(true)
+    }
+    fn kind(&self) -> fd::FileKind {
+        fd::FileKind::Other
+    }
+    fn read<'a>(
+        &'a self,
+        _offset: u64,
+        _buf: &'a mut [u8],
+    ) -> fd::SmallFuture<'a, fd::FileDescResult> {
+        fd::boxed_future(async move { Err(1).into() })
+    }
+    fn write<'a>(
+        &'a self,
+        _offset: u64,
+        _buf: &'a [u8],
+    ) -> fd::SmallFuture<'a, fd::FileDescResult> {
+        fd::boxed_future(async move { Err(1).into() })
+    }
+    fn size<'a>(&'a self) -> fd::SmallFuture<'a, fd::FileDescResult> {
+        fd::boxed_future(async move { Err(1).into() })
+    }
+    fn mmap_page(&self, _offset: u64) -> fd::SmallFuture<Option<fd::FileDescResult>> {
+        fd::boxed_future(async move { None })
+    }
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }

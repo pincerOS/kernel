@@ -9,13 +9,9 @@ pub struct Stdout;
 
 impl core::fmt::Write for Stdout {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        let msg = sys::Message {
-            tag: 0,
-            objects: [0; 4],
-        };
-        let chan = sys::ChannelDesc(1);
-        sys::send_block(chan, &msg, s.as_bytes());
-        Ok(())
+        sys::pwrite_all(1, s.as_bytes(), 0)
+            .map(|_| ())
+            .map_err(|_| core::fmt::Error)
     }
 }
 

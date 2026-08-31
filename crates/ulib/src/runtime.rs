@@ -1,12 +1,11 @@
-extern "Rust" {
+unsafe extern "Rust" {
     fn main(chan: crate::sys::ChannelDesc);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn _start(x0: usize) -> ! {
     unsafe { main(crate::sys::ChannelDesc(x0 as u32)) };
-    unsafe { crate::sys::exit() };
-    loop {}
+    crate::sys::exit(0);
 }
 
 #[cfg(not(test))]
@@ -24,5 +23,5 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     } else {
         crate::println!("Panic; {}", info.message());
     }
-    loop {}
+    unsafe { core::arch::asm!("udf #2", options(noreturn)) }
 }

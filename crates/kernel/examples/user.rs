@@ -6,6 +6,7 @@ extern crate kernel;
 
 use core::arch::asm;
 
+use alloc::sync::Arc;
 use event::{context, task, thread};
 use kernel::*;
 
@@ -21,9 +22,9 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     let (_stdio, mut stdin_tx, mut stdout_rx) = {
         let (stdin_tx, stdin_rx) = ringbuffer::channel();
         let (stdout_tx, stdout_rx) = ringbuffer::channel();
-        let stdio_chan = syscall::channel::alloc_obj(syscall::channel::Object::Channel {
-            send: stdout_tx,
-            recv: stdin_rx,
+        let stdio_chan = Arc::new(syscall::channel::Channel {
+            send: sync::SpinLock::new(stdout_tx),
+            recv: sync::SpinLock::new(stdin_rx),
         });
         (stdio_chan, stdin_tx, stdout_rx)
     };
@@ -68,8 +69,12 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
         }
     });
 
-    // Create user region (mapped at 0x20_0000 in virtual memory)
-    let (user_region, ttbr0) = unsafe { crate::arch::memory::create_user_region() };
+    // Create a user process
+    let mut process = crate::process::Process::new();
+    // Assume fixed mapped range in user process (0x20_0000 in virtual memory)
+    // TODO: mmap instead
+    let user_region = 0x20_0000 as *mut u8;
+    let ttbr0 = process.get_ttbr0();
 
     // Mark current thread as using TTBR0, so that preemption saves
     // and restores the register.
@@ -113,10 +118,25 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
     // "Done copying user data, took 868749µs"
     println!("Done copying user data, took {:4}µs", end - start);
 
+    static ARCHIVE: &[u8] = initfs::include_bytes_align!(u32, "../../init/fs.arc");
+    let fs = fs::initfs::InitFs::new(&ARCHIVE).unwrap();
+    let root = fs.root();
+
+    process.root = Some(root.clone());
+
+    {
+        let mut fds = process.file_descriptors.lock();
+        let uart_fd = Arc::new(process::fd::UartFd(device::uart::UART.get())) as Arc<_>;
+        let _ = fds.set(0, Arc::clone(&uart_fd));
+        let _ = fds.set(1, Arc::clone(&uart_fd));
+        let _ = fds.set(2, uart_fd);
+        let _ = fds.set(3, root);
+    }
+
     let user_sp = 0x100_0000;
     let user_entry = 0x20_0000;
 
-    let user_thread = unsafe { thread::Thread::new_user(user_sp, user_entry, ttbr0) };
+    let user_thread = unsafe { thread::Thread::new_user(Arc::new(process), user_sp, user_entry) };
 
     event::SCHEDULER.add_task(event::Event::ScheduleThread(user_thread));
 

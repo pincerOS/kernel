@@ -193,3 +193,17 @@ impl<const N: usize, T> Receiver<N, T> {
         res
     }
 }
+
+// TODO: proper oneshot SPSC channel (single-use version of Future for cs439)
+pub fn spawn_thread<F, O>(f: F) -> Receiver<2, O>
+where
+    F: FnOnce() -> O + Send + 'static,
+    O: Send + 'static,
+{
+    let (mut tx, rx) = channel();
+    crate::event::thread::thread(move || {
+        let res = f();
+        tx.try_send(res).map_err(|_| ()).unwrap();
+    });
+    rx
+}

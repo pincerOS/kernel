@@ -38,9 +38,6 @@ jobs:
 
       - uses: taiki-e/install-action@cargo-hack # for workspace feature unificiation
 
-      - name: cargo fmt
-        run: cargo fmt --all -- --check
-
       - name: build init
         working-directory: ./crates/init
         run: ./build.sh
@@ -50,3 +47,6 @@ jobs:
 
       - name: cargo clippy
         run: cargo hack clippy --workspace --tests --examples --target=aarch64-unknown-linux-gnu -- $CLIPPY_OPTIONS
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check

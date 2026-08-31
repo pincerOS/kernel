@@ -69,7 +69,11 @@ where
     // TODO: ensure preemption/interrupts disabled before this point
     let thread = CORES.with_current(|core| core.thread.take());
     let mut thread = thread.expect("usermode syscall without active thread");
-    thread.last_context = ctx.into();
+    let mut ctx = core::ptr::NonNull::from(ctx);
+    thread.last_context = ctx;
+
+    // TODO: only save user regs if the handler accesses them?
+    unsafe { thread.save_user_regs() };
 
     // TODO: avoid allocating in the syscall handler?
     let mut future = new_handler_future(thread, handler);
@@ -86,8 +90,15 @@ where
             task::TASKS.remove_task(task_id);
 
             let thread = unsafe { &mut *future.data.thread.get() }.take().unwrap();
+
+            if future.data.user_regs_changed.get() {
+                if let Some(regs) = &thread.user_regs {
+                    unsafe { thread::Thread::restore_user_regs(regs, ctx.as_mut()) };
+                }
+            }
+
             CORES.with_current(|core| core.thread.set(Some(thread)));
-            ctx
+            ctx.as_ptr()
         }
         Poll::Pending => {
             future.data.in_handler.set(false);
@@ -97,12 +108,12 @@ where
                 CORES.with_current(|core| core.thread.set(Some(thread)));
 
                 // Return back to the user context
-                ctx
+                ctx.as_ptr()
             } else {
                 // The handler yielded; suspend the current thread, and set
                 // up the future to reschedule the thread when it finishes.
                 let thread = unsafe { &mut *future.data.thread.get() }.as_mut().unwrap();
-                unsafe { thread.save_context(ctx.into()) };
+                unsafe { thread.save_context(ctx, thread.is_kernel_thread()) };
 
                 let woken = task::TASKS.return_task(task_id, task::Task::new(future));
                 if woken {
@@ -119,6 +130,7 @@ where
 struct OuterData {
     in_handler: core::cell::Cell<bool>,
     suspend_thread: core::cell::Cell<bool>,
+    user_regs_changed: core::cell::Cell<bool>,
     thread: core::cell::UnsafeCell<Option<Box<thread::Thread>>>,
 }
 
@@ -126,14 +138,17 @@ pub struct HandlerContext<'a> {
     outer_data: &'a OuterData,
 }
 
-impl HandlerContext<'_> {
-    fn cur_thread_mut(&mut self) -> &mut Option<Box<thread::Thread>> {
+impl<'outer> HandlerContext<'outer> {
+    pub fn cur_thread_mut(&mut self) -> &mut Option<Box<thread::Thread>> {
         unsafe { &mut *self.outer_data.thread.get() }
     }
-    fn cur_thread(&self) -> &thread::Thread {
+    pub fn cur_thread(&self) -> &thread::Thread {
         unsafe { &*self.outer_data.thread.get() }
             .as_deref()
             .unwrap()
+    }
+    pub fn cur_process(&self) -> Option<&alloc::sync::Arc<crate::process::Process>> {
+        self.cur_thread().process.as_ref()
     }
 
     pub async fn resume(mut self) -> ResumedContext {
@@ -154,21 +169,32 @@ impl HandlerContext<'_> {
         ResumedContext(())
     }
 
-    pub fn regs(&mut self) -> ContextRef<'_> {
+    pub fn regs(&mut self) -> ThreadRefMut<'_, Context> {
         let thread = self.cur_thread_mut().as_mut().unwrap();
-        ContextRef {
+        ThreadRefMut {
             inner: unsafe { thread.last_context.as_mut() },
             marker: core::marker::PhantomData,
         }
     }
 
-    pub fn with_user_vmem<F, O>(&self, callback: F) -> O
-    where
-        F: FnOnce() -> O,
-    {
+    pub fn set_sp(&mut self, sp: usize) {
+        let thread = self.cur_thread_mut().as_mut().unwrap();
+        thread::Thread::set_sp(
+            &mut thread.user_regs,
+            unsafe { thread.last_context.as_mut() },
+            sp,
+        );
+        self.outer_data.user_regs_changed.set(true);
+    }
+
+    pub fn get_sp(&self) -> usize {
+        let thread = self.cur_thread();
+        thread::Thread::get_sp(&thread.user_regs, unsafe { thread.last_context.as_ref() })
+    }
+
+    fn enable_user_vmem(&self) {
         if self.outer_data.in_handler.get() {
             // User virtual memory is still enabled, haven't yielded yet
-            callback()
         } else {
             // This handler has already yielded; user virtual memory likely
             // hasn't been switched back to the correct address space.
@@ -185,27 +211,62 @@ impl HandlerContext<'_> {
                     asm!("msr TTBR0_EL1, {0}", "isb", "dsb sy", "tlbi vmalle1is", "dsb sy", in(reg) user_ttbr0)
                 };
             }
+        }
+    }
 
-            callback()
+    pub fn with_user_vmem<F, O>(&self, callback: F) -> O
+    where
+        F: FnOnce() -> O,
+    {
+        self.enable_user_vmem();
+        callback()
+    }
+
+    pub fn with_user_vmem_async<F, O>(
+        &self,
+        callback: F,
+    ) -> impl Future<Output = O> + use<'outer, F, O>
+    where
+        F: Future<Output = O>,
+    {
+        struct UserVmemWrap<'a, F> {
+            this: HandlerContext<'a>,
+            fut: F,
+        }
+        impl<'a, F, O> Future for UserVmemWrap<'a, F>
+        where
+            F: Future<Output = O>,
+        {
+            type Output = O;
+            fn poll(self: Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
+                self.as_ref().this.enable_user_vmem();
+                let inner = unsafe { self.map_unchecked_mut(|f| &mut f.fut) };
+                inner.poll(cx)
+            }
+        }
+        UserVmemWrap {
+            this: HandlerContext {
+                outer_data: self.outer_data,
+            },
+            fut: callback,
         }
     }
 }
 
 unsafe impl Send for HandlerContext<'_> {}
 
-pub struct ContextRef<'a> {
-    inner: &'a mut Context,
-    // To ensure ContextRef: !Send, and can't be kept across await points.
+pub struct ThreadRefMut<'a, T> {
+    inner: &'a mut T,
+    // To ensure ThreadRefMut: !Send, and can't be kept across await points.
     marker: core::marker::PhantomData<*mut ()>,
 }
-
-impl core::ops::Deref for ContextRef<'_> {
-    type Target = Context;
+impl<T> core::ops::Deref for ThreadRefMut<'_, T> {
+    type Target = T;
     fn deref(&self) -> &Self::Target {
         &*self.inner
     }
 }
-impl core::ops::DerefMut for ContextRef<'_> {
+impl<T> core::ops::DerefMut for ThreadRefMut<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut *self.inner
     }
@@ -231,6 +292,7 @@ where
             thread: core::cell::UnsafeCell::new(Some(thread)),
             in_handler: core::cell::Cell::new(true),
             suspend_thread: core::cell::Cell::new(true),
+            user_regs_changed: core::cell::Cell::new(false),
         },
     });
 

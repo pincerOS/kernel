@@ -31,7 +31,9 @@ exit # -->"##]
 #[macro_use]
 extern crate ulib;
 
-use ulib::sys::{recv_block, send_block, ChannelDesc, Message};
+use ulib::sys::FileDesc;
+
+const STDIN_FD: FileDesc = 0;
 
 const CMD_EXIT: u64 = 0x0000000000000001;
 const CMD_CAT: u64 = 0x0000000000000002;
@@ -40,12 +42,8 @@ const CMD_CD: u64 = 0x0000000000000004;
 const CMD_EXEC: u64 = 0x0000000000000005;
 const CMD_PWD: u64 = 0x0000000000000006;
 
-fn try_read_stdin(buf: &mut [u8]) -> isize {
-    let chan = ChannelDesc(1);
-    match recv_block(chan, buf) {
-        Ok((i, _)) => i as isize,
-        Err(i) => i,
-    }
+fn try_read_stdin(buf: &mut [u8]) -> Result<usize, usize> {
+    ulib::sys::pread(STDIN_FD, buf, 0)
 }
 
 struct LineReader {
@@ -73,7 +71,7 @@ impl LineReader {
     }
 }
 
-fn readline(reader: &mut LineReader) -> Result<&[u8], isize> {
+fn readline(reader: &mut LineReader) -> Result<&[u8], usize> {
     reader.shift();
     let mut effective_length = 0;
     
@@ -114,18 +112,98 @@ fn readline(reader: &mut LineReader) -> Result<&[u8], isize> {
 }
 
 #[no_mangle]
-fn main(chan: ChannelDesc) {
+fn main(_chan: ulib::sys::ChannelDesc) {
     println!("Starting 🐚");
 
-    let mut buf = [0; 1024];
-    let (len, msg) = recv_block(chan, &mut buf).unwrap();
-    let data = &buf[..len];
+    let root = 3;
+    let path = "test.txt";
+    let fd = ulib::sys::openat(root, path.as_bytes(), 0, 0).unwrap();
+
+    println!("File: {}", fd);
+
+    let mut data = [0; 4096];
+
+    let mut read = 0;
+    while read < data.len() {
+        match ulib::sys::pread(fd, &mut data[read..], read as u64) {
+            Err(_) => break,
+            Ok(0) => break,
+            Ok(i) => read += i,
+        }
+    }
 
     println!(
-        "Received message from parent; tag {:#x}, data {:?}",
-        msg.tag,
-        core::str::from_utf8(data).unwrap()
+        "File content: ======\n{}\n====================",
+        core::str::from_utf8(&data[..read]).unwrap()
     );
+
+    let stdout = 1;
+    let buf = b"Stdout write test\n";
+    ulib::sys::pwrite_all(stdout, buf, 0).unwrap();
+
+    println!("Dir: {}", root);
+
+    let mut cookie = 0;
+    let mut data_backing = [0u64; 8192 / 8];
+    let data = cast_slice(&mut data_backing);
+
+    fn cast_slice<'a>(s: &'a mut [u64]) -> &'a mut [u8] {
+        unsafe {
+            core::slice::from_raw_parts_mut(s.as_mut_ptr().cast::<u8>(), s.len() * size_of::<u64>())
+        }
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone, Debug)]
+    pub struct DirEntry {
+        pub inode: u64,
+        pub next_entry_cookie: u64,
+        pub rec_len: u16,
+        pub name_len: u16,
+        pub file_type: u8,
+        pub name: [u8; 3],
+        // Name is an arbitrary size array; the record is always padded with
+        // 0 bytes such that rec_len is a multiple of 8 bytes.
+    }
+
+    loop {
+        println!("reading dir with cookie {}", cookie);
+        match ulib::sys::pread(root, data, cookie) {
+            Err(_) => break,
+            Ok(0) => {
+                println!("read 0 bytes, exiting");
+                break;
+            }
+            Ok(len) => {
+                println!("read {} bytes", len);
+                let mut i = 0;
+                while i < len as usize {
+                    let slice = &data[i..];
+                    assert!(slice.len() >= size_of::<DirEntry>());
+                    let entry = unsafe { *slice.as_ptr().cast::<DirEntry>() };
+                    println!("Entry: {:#?}", entry);
+                    let name_off = core::mem::offset_of!(DirEntry, name);
+                    let name = &slice[name_off..][..entry.name_len as usize];
+                    println!("Name: {}", core::str::from_utf8(name).unwrap());
+                    i += entry.rec_len as usize;
+                    cookie = entry.next_entry_cookie;
+                }
+                if cookie == 0 {
+                    break;
+                }
+            }
+        }
+    }
+
+    // let mut buf = [0; 1024];
+    // let (len, msg) = recv_block(chan, &mut buf).unwrap();
+    // let data = &buf[..len];
+
+    // println!(
+    //     "Received message from parent; tag {:#x}, data {:?}",
+    //     msg.tag,
+    //     core::str::from_utf8(data).unwrap()
+    // );
 
     let mut reader = LineReader {
         buf: [0; 4096],
@@ -316,5 +394,5 @@ fn main(chan: ChannelDesc) {
         }
     }
 
-    unsafe { ulib::sys::exit() };
+    ulib::sys::exit(15);
 }

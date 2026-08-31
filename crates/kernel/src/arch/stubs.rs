@@ -26,7 +26,7 @@ pub fn debug_get_sp() -> usize {
 
 pub mod boot {
     #[allow(unused)]
-    extern "C" {
+    unsafe extern "C" {
         pub fn kernel_entry();
         pub fn kernel_entry_alt();
     }
@@ -34,8 +34,8 @@ pub mod boot {
     const STACK_SIZE_LOG2: usize = 16;
     const STACK_SIZE: usize = 1 << STACK_SIZE_LOG2;
 
-    #[no_mangle]
-    #[link_section = ".bss"]
+    #[unsafe(no_mangle)]
+    #[unsafe(link_section = ".bss")]
     pub static mut STACKS: [[u128; STACK_SIZE / 16]; 4] = [[0u128; STACK_SIZE / 16]; 4];
 }
 

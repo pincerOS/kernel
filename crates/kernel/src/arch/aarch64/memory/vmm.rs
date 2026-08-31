@@ -17,28 +17,27 @@ const PG_SZ: usize = 0x1000;
 const KERNEL_LEAF_TABLE_SIZE: usize = PG_SZ / 8 * 2;
 
 #[repr(C, align(128))]
-struct KernelTranslationTable([TranslationDescriptor; 16]);
+pub struct KernelTranslationTable(pub [TranslationDescriptor; 16]);
 
 #[repr(C, align(4096))]
-struct KernelLeafTable([LeafDescriptor; KERNEL_LEAF_TABLE_SIZE]);
+pub struct KernelLeafTable(pub [LeafDescriptor; KERNEL_LEAF_TABLE_SIZE]);
 
 const USER_PG_SZ: usize = 0x1000;
 const USER_LEAF_TABLE_SIZE: usize = USER_PG_SZ / 8 * 2;
 
 //This is public so that it can be placed in the PCB later
 #[repr(C, align(128))]
-pub struct UserTranslationTable([TranslationDescriptor; 16]);
+pub struct UserTranslationTable(pub [TranslationDescriptor; 16]);
 
-#[allow(dead_code)]
 #[repr(C, align(4096))]
-struct UserLeafTable([LeafDescriptor; USER_LEAF_TABLE_SIZE]);
+pub struct UserLeafTable(pub [LeafDescriptor; USER_LEAF_TABLE_SIZE]);
 
 fn virt_addr_base() -> NonNull<()> {
     NonNull::new(ptr::with_exposed_provenance_mut(0xFFFF_FFFF_FE00_0000)).unwrap()
 }
 
 #[allow(improper_ctypes)]
-extern "C" {
+unsafe extern "C" {
     static __rpi_phys_binary_end_addr: ();
 }
 
@@ -71,12 +70,12 @@ impl PageAlloc {
     fn alloc_frame(&self) -> (usize, usize) {
         let va: usize = self.table_va + self.alloc_offset.fetch_add(PG_SZ, Ordering::Relaxed);
         let pa: usize = va - self.table_va + self.table_pa;
-        return (va, pa);
+        (va, pa)
     }
 }
 
 unsafe fn kernel_paddr_to_vaddr(paddr: usize) -> *mut () {
-    return (paddr + (virt_addr_base().as_ptr() as usize)) as *mut ();
+    core::ptr::with_exposed_provenance_mut(paddr + (virt_addr_base().as_ptr() as usize))
 }
 
 static PAGE_ALLOCATOR: UnsafeInit<PageAlloc> = unsafe { UnsafeInit::uninit() };
@@ -98,7 +97,7 @@ pub unsafe fn init_physical_alloc() {
     unsafe { init_page_allocator() };
 }
 
-fn create_user_table(phys_base: usize) -> alloc::boxed::Box<UserTranslationTable> {
+pub fn create_user_table(phys_base: usize) -> alloc::boxed::Box<UserTranslationTable> {
     let mut table = alloc::boxed::Box::new(UserTranslationTable(
         [TranslationDescriptor {
             table: TableDescriptor::empty(),
@@ -123,21 +122,20 @@ fn create_user_table(phys_base: usize) -> alloc::boxed::Box<UserTranslationTable
     table
 }
 
-pub unsafe fn create_user_region() -> (*mut [u8], usize) {
+pub unsafe fn create_user_region() -> (*mut [u8], Box<UserTranslationTable>) {
     let virt_region_base = 0x20_0000;
     let region_size = 0x20_0000 * 7;
 
     let phys_base = PHYSICAL_ALLOC_BASE.fetch_add(region_size, Ordering::Relaxed);
 
     let user_table = create_user_table(phys_base);
-    let user_table_ptr = alloc::boxed::Box::into_raw(user_table);
-
-    let user_table_phys = physical_addr(user_table_ptr.addr()).unwrap();
+    let user_table_vaddr = (&*user_table as *const UserTranslationTable).addr();
+    let user_table_phys = physical_addr(user_table_vaddr).unwrap();
     println!("creating user table, {:#010x}", user_table_phys);
 
     let ptr = core::ptr::with_exposed_provenance_mut::<u8>(virt_region_base);
     let slice = core::ptr::slice_from_raw_parts_mut(ptr, region_size);
-    (slice, user_table_phys as usize)
+    (slice, user_table)
 }
 
 /// only call once!
@@ -253,7 +251,7 @@ pub unsafe fn map_pa_to_va_kernel(pa: usize, va: usize) -> Result<(), MappingErr
         }
     }
 
-    return Ok(());
+    Ok(())
 }
 
 //TODO: add option to map huge page
@@ -312,7 +310,7 @@ pub unsafe fn map_pa_to_va_user(pa: usize, va: usize, ttbr0_pa: usize) -> Result
         }
     }
 
-    return Ok(());
+    Ok(())
 }
 
 /// not thread safe
@@ -432,11 +430,11 @@ pub unsafe fn map_physical_noncacheable(pa_start: usize, size: usize) -> NonNull
 }
 
 //This is two adjacent pages all filled with leaf descriptors
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut KERNEL_LEAF_TABLE: KernelLeafTable =
     KernelLeafTable([LeafDescriptor::empty(); PG_SZ / 8 * 2]);
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut KERNEL_TRANSLATION_TABLE: KernelTranslationTable = KernelTranslationTable(
     [TranslationDescriptor {
         table: TableDescriptor::empty(),

@@ -6,9 +6,7 @@ extern crate ulib;
 
 mod runtime;
 
-use ulib::sys;
-
-static ARCHIVE: &[u8] = include_bytes_align!(u32, "../fs.arc");
+use ulib::sys::FileDesc;
 
 // Define IPC message tags
 const CMD_EXIT: u64 = 0x0000000000000001;
@@ -18,31 +16,29 @@ const CMD_CD: u64 = 0x0000000000000004;
 const CMD_EXEC: u64 = 0x0000000000000005;
 const CMD_PWD: u64 = 0x0000000000000006;
 
-fn spawn_elf(elf: elf::Elf<'_>) -> sys::ChannelDesc {
-    let phdrs = elf.program_headers().unwrap();
 
-    for phdr in phdrs {
-        let phdr = phdr.unwrap();
-        if matches!(phdr.p_type, elf::program_header::Type::Load) {
-            let data = elf.segment_data(&phdr).unwrap();
-            let memsize = (phdr.p_memsz as usize).next_multiple_of(4096).max(4096);
+fn spawn_elf(fd: FileDesc) -> Result<FileDesc, usize> {
+    let current_stack = current_sp();
+    let target_pc = exec_child as usize;
+    let arg = fd;
 
-            // TODO: mmap
-            let addr = (phdr.p_vaddr as usize) as *mut u8;
-            let mapping: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(addr, memsize) };
-            mapping[..data.len()].copy_from_slice(data);
-            mapping[data.len()..].fill(0);
-        }
-    }
+    let wait_fd = unsafe { ulib::sys::spawn(target_pc, current_stack, arg as usize, 0) };
+    wait_fd
+}
 
-    let (local, remote) = sys::channel();
+fn current_sp() -> usize {
+    let sp: usize;
+    unsafe { core::arch::asm!("mov {0}, sp", out(reg) sp) };
+    sp
+}
 
-    let entry = elf.elf_header().e_entry();
-    let new_sp = 0x100_0000;
-    let x0 = remote.0 as usize;
-    unsafe { sys::spawn(entry as usize, new_sp, x0, 0) };
-
-    local
+extern "C" fn exec_child(fd: FileDesc) -> ! {
+    let flags = 0;
+    let args = &[];
+    let env = &[];
+    let res = unsafe { ulib::sys::execve_fd(fd, flags, args, env) };
+    println!("Execve failed: {:?}", res);
+    ulib::sys::exit(1);
 }
 
 fn resolve_path<'a>(path: &'a str, current_dir: &[u8], buf: &'a mut [u8]) -> (usize, &'a [u8]) {
@@ -94,7 +90,7 @@ fn resolve_path<'a>(path: &'a str, current_dir: &[u8], buf: &'a mut [u8]) -> (us
     (len, path_for_lookup)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn main() {
     let archive = match initfs::Archive::load(ARCHIVE) {
         Ok(archive) => archive,
@@ -116,20 +112,28 @@ pub extern "C" fn main() {
 
     println!("Running in usermode! (parent)");
 
-    let elf = elf::Elf::new(file).unwrap();
-    let child = spawn_elf(elf);
+    let root_fd = 3;
+    let path = b"example.elf";
+    let file = ulib::sys::openat(root_fd, path, 0, 0).unwrap();
 
-    let msg = sys::Message {
-        tag: 0xAABBCCDD,
-        objects: [0; 4],
-    };
-    sys::send_block(child, &msg, b"Hello child!");
+    // TODO: channels
+    let child = spawn_elf(file).unwrap();
 
-    let mut buf = [0; 1024];
+    let status = ulib::sys::wait(child).unwrap();
 
-    loop {
-        let (len, msg) = sys::recv_block(child, &mut buf).unwrap();
-        let data = &buf[..len];
+    println!("Child exited with status {}", status);
+
+    // let msg = sys::Message {
+    //     tag: 0xAABBCCDD,
+    //     objects: [0; 4],
+    // };
+    // sys::send_block(child, &msg, b"Hello child!");
+
+    // let mut buf = [0; 1024];
+
+    // loop {
+    //     let (len, msg) = sys::recv_block(child, &mut buf).unwrap();
+    //     let data = &buf[..len];
 
         match msg.tag {
             CMD_EXIT => {
@@ -397,8 +401,7 @@ pub extern "C" fn main() {
         }
     }
 
-    unsafe { sys::shutdown() };
-    unreachable!();
+    ulib::sys::shutdown();
 }
 
 #[macro_use]

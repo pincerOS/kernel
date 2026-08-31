@@ -24,8 +24,11 @@ extern "Rust" fn kernel_main(_device_tree: device_tree::DeviceTree) {
 
     unsafe { crate::arch::memory::init_physical_alloc() };
 
-    // Create user region (mapped at 0x20_0000 in virtual memory)
-    let (user_region, ttbr0) = unsafe { crate::arch::memory::create_user_region() };
+    let process = crate::process::Process::new();
+    // Assume fixed mapped range in user process (0x20_0000 in virtual memory)
+    // TODO: mmap instead
+    let user_region = 0x20_0000 as *mut u8;
+    let ttbr0 = process.get_ttbr0();
 
     // Mark current thread as using TTBR0, so that preemption saves
     // and restores the register.

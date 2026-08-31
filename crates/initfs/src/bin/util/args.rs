@@ -1,3 +1,5 @@
+use alloc::string::String;
+
 #[derive(Debug, Clone)]
 pub enum ArgError {
     InvalidBool(String),

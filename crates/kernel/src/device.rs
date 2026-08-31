@@ -7,17 +7,21 @@ pub mod gpio;
 pub mod mailbox;
 pub mod rng;
 pub mod system_timer;
+pub mod usb;
 pub mod watchdog;
 
+use crate::memory;
+use crate::memory::{map_device, map_device_block};
+use crate::sync::UnsafeInit;
+use crate::SpinLock;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use device_tree::format::StructEntry;
 use device_tree::util::MappingIterator;
 use device_tree::DeviceTree;
+use usb::usbd::endpoint::endpoint_descriptor;
 
-use crate::memory::{map_device, map_device_block};
-use crate::sync::UnsafeInit;
-use crate::SpinLock;
+const ENABLE_USB: bool = true;
 
 // TODO: a non-O(n²) approach to device discovery and registration
 pub fn discover_compatible<'a, 'b>(
@@ -94,6 +98,8 @@ type InitTask = Box<dyn Fn() + Send + Sync>;
 pub static PER_CORE_INIT: UnsafeInit<Vec<InitTask>> = unsafe { UnsafeInit::uninit() };
 
 pub static GPIO: UnsafeInit<SpinLock<gpio::bcm2711_gpio_driver>> = unsafe { UnsafeInit::uninit() };
+pub static MAILBOX: UnsafeInit<SpinLock<mailbox::VideoCoreMailbox>> =
+    unsafe { UnsafeInit::uninit() };
 
 pub fn init_devices(tree: &DeviceTree<'_>) {
     let mut init_fns: Vec<InitTask> = Vec::new();
@@ -134,6 +140,18 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         println!("| last reset: {:#010x}", WATCHDOG.get().lock().last_reset());
     }
 
+    {
+        let mailbox = discover_compatible(&tree, b"brcm,bcm2835-mbox")
+            .unwrap()
+            .next()
+            .unwrap();
+        let (mailbox_addr, _) = find_device_addr(mailbox).unwrap().unwrap();
+        let mailbox_base = unsafe { memory::map_device(mailbox_addr) }.as_ptr();
+        unsafe {
+            MAILBOX.init(SpinLock::new(mailbox::VideoCoreMailbox::init(mailbox_base)));
+        }
+    }
+
     if let Some(gic) = discover_compatible(tree, b"arm,gic-400").unwrap().next() {
         println!("| initializing GIC-400 interrupt controller");
         let (gic_addr, _) = find_device_addr(gic).unwrap().unwrap();
@@ -163,7 +181,9 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         unsafe { bcm2836_intc::LOCAL_INTC.init(intc) };
 
         unsafe {
-            crate::event::exceptions::override_irq_handler(bcm2836_intc::exception_handler_irq)
+            crate::event::exceptions::override_irq_handler(
+                bcm2836_intc::exception_handler_bcm2836_intc_irq,
+            )
         }
     }
 
@@ -188,18 +208,34 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
             .unwrap();
         let (gpio_addr, _) = find_device_addr(gpio).unwrap().unwrap();
         let gpio_base = unsafe { map_device(gpio_addr) }.as_ptr();
-        println!("| GPIO controller addr: {:#010x}", gpio_addr as usize);
+        println!("| GPIO controller addr: {:#010x}", gpio_addr);
         println!("| GPIO controller base: {:#010x}", gpio_base as usize);
         let gpio = unsafe { gpio::bcm2711_gpio_driver::init_with_defaults(gpio_base, true) };
         unsafe { GPIO.init(SpinLock::new(gpio)) };
         println!("| initialized GPIO");
     }
 
+    if ENABLE_USB {
+        println!("| Initializing USB");
+        let usb = discover_compatible(tree, b"brcm,bcm2708-usb")
+            .unwrap()
+            .next()
+            .unwrap();
+
+        let (usb_addr, _) = find_device_addr(usb).unwrap().unwrap();
+        let usb_base = unsafe { map_device_block(usb_addr, 0x11000) }.as_ptr(); //size is from core gloabl to dev ep 15
+
+        let _bus = usb::usb_init(usb_base);
+    }
+
     // Set up the interrupt controllers to preempt on the arm generic
     // timer interrupt.
     if gic::GIC.is_initialized() {
         init_fns.push(Box::new(|| {
-            gic::GIC.get().register_isr(30, timer_handler);
+            // gic::GIC.get().register_isr(30, timer_handler);
+            gic::GIC
+                .get()
+                .register_isr(30, system_timer::timer_scheduler_handler);
         }));
     } else {
         let irq = bcm2836_intc::LOCAL_INTC.get();
@@ -216,17 +252,27 @@ pub fn init_devices(tree: &DeviceTree<'_>) {
         // Run the generic timer at a 1ms interval for preemption
         system_timer::ARM_GENERIC_TIMERS.with_current(|timer| {
             timer.intialize_timer();
-            timer.set_timer_milliseconds(1);
+        });
+
+        system_timer::TIMER_SCHEDULER.with_current(|timer_scheduler| {
+            timer_scheduler.intialize_timer();
+            timer_scheduler.add_timer_event(
+                1,
+                preemption_callback,
+                endpoint_descriptor::new(),
+                true,
+            );
         });
     }));
 
     unsafe { PER_CORE_INIT.init(init_fns) };
 }
 
-fn timer_handler(ctx: &mut crate::event::context::Context) {
-    crate::device::system_timer::ARM_GENERIC_TIMERS.with_current(|timer| {
-        timer.reset_timer();
-    });
+fn preemption_callback(_endpoint: endpoint_descriptor) {
+    //Do nothing
+}
+
+pub fn timer_handler(ctx: &mut crate::event::context::Context) {
     // TODO: will this break batched interrupts?
     // This will generally not return, and instead switch into the event loop
     unsafe { crate::event::timer_handler(ctx) };

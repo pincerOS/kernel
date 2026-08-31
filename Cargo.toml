@@ -4,6 +4,7 @@ members = [
     "crates/device-tree",
     "crates/elf",
     "crates/endian",
+    "crates/filesystem",
     "crates/init",
     "crates/initfs",
     "crates/kernel",

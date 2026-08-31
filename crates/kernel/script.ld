@@ -44,13 +44,22 @@ SECTIONS {
         *(.text*)
     } :segment_code
 
-    .rodata : ALIGN(8) { *(.rodata*) } :segment_code
-
     . = ALIGN(PAGE_SIZE);
     __code_end = .;
 
     __data_start = .;
-    .data : { *(.data) *(.data.*) } :segment_data
+    .rodata : ALIGN(8) { *(.rodata*) } :segment_data
+    .dataaa : ALIGN(8) {
+        *(.data)
+        *(.data.*)
+    } :segment_data
+
+    .test_array : ALIGN(8) {
+        __test_array_start = .;
+        // KEEP is a workaround for #[used(linker)] being unstable
+        KEEP(*(.test_array))
+        __test_array_end = .;
+    } :segment_data
 
     .bss (NOLOAD) : ALIGN(16) {
         __bss_start = .;
